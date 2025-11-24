@@ -138,11 +138,6 @@ open class BaseSynheartModule: SynheartModule {
 
     // MARK: - Protected methods for subclasses
 
-    /// Set the module status
-    protected func setStatus(_ newStatus: ModuleStatus) {
-        _status = newStatus
-    }
-
     /// Called during initialization - override in subclass
     open func onInitialize() async throws {
         // Override in subclass

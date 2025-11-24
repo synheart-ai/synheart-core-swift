@@ -2,9 +2,12 @@ import Foundation
 import Security
 
 /// Encrypted storage for consent snapshots using iOS Keychain
-class ConsentStorage {
+public class ConsentStorage {
     private static let storageKey = "synheart_consent_snapshot"
     private let service = "com.synheart.hsi"
+    
+    public init() {
+    }
 
     /// Save consent snapshot (encrypted via Keychain)
     func save(_ consent: ConsentSnapshot) throws {

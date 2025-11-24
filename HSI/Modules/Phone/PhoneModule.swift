@@ -54,8 +54,8 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider {
             // Core: Motion and screen only
             return PhoneWindowFeatures(
                 motionLevel: features.motionLevel,
-                screenOnRatio: features.screenOnRatio,
                 appSwitchRate: 0.0, // No app switching at core level
+                screenOnRatio: features.screenOnRatio,
                 notificationRate: 0.0 // No notifications at core level
             )
             
