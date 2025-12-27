@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "HSI",
+    name: "SynheartCore",
     platforms: [
         .iOS(.v15),
         .macOS(.v12),
@@ -13,8 +13,8 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "HSI",
-            targets: ["HSI"]),
+            name: "SynheartCore",
+            targets: ["SynheartCore"]),
     ],
     dependencies: [
         // Add dependencies here when needed
@@ -22,13 +22,13 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "HSI",
+            name: "SynheartCore",
             dependencies: [],
-            path: "HSI"),
+            path: "SynheartCore"),
         .testTarget(
-            name: "HSITests",
-            dependencies: ["HSI"],
-            path: "Tests/HSITests"),
+            name: "SynheartCoreTests",
+            dependencies: ["SynheartCore"],
+            path: "Tests/SynheartCoreTests"),
     ]
 )
 

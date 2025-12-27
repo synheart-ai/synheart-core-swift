@@ -1,6 +1,23 @@
 # Synheart Core SDK - iOS
 
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+
 **Synheart Core SDK** is the single, unified integration point for developers who want to collect HSI-compatible data, process human state on-device, generate focus/emotion signals, and integrate with Syni.
+
+> **📦 SDK Implementations**: This is the iOS/Swift implementation. For documentation and other platforms, see the repositories below.
+
+## 📦 Repository Structure
+
+The Synheart Core SDK is organized across multiple repositories:
+
+| Repository | Purpose |
+|------------|---------|
+| **[synheart-core](https://github.com/synheart-ai/synheart-core)** | Main repository (source of truth for documentation) |
+| **[synheart-core-dart](https://github.com/synheart-ai/synheart-core-dart)** | Flutter/Dart implementation |
+| **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin implementation |
+| **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift implementation (this repository) |
 
 ## Overview
 
@@ -20,21 +37,44 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 
 ## Architecture
 
-The Core SDK consists of **7 core modules** working together:
+### Core Principle
+
+> **HSI represents human state.**
+>
+> **Interpretation is downstream and optional.**
+
+The Core SDK strictly separates:
+- **Representation (HSI)** - State axes, indices, embeddings
+- **Interpretation (Focus, Emotion)** - Optional, explicit modules
+- **Application logic** - Your app
+
+### Core Modules
 
 1. **Capabilities Module** - Feature gating (core/extended/research)
 2. **Consent Module** - User permission management
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state computation (produces Human State Vector)
+6. **HSI Runtime** - Signal fusion and state representation
 7. **Cloud Connector** - Secure HSI snapshot uploads (planned)
 
-The **HSI Runtime** module:
-- Ingests signals from Wear, Phone, and Behavior modules
-- Fuses them into a unified **Human State Vector (HSV)**
-- Feeds higher-level models (Emotion Engine, Focus Engine)
-- Powers Syni's LLM layer for human-aware AI
+### Optional Interpretation Modules
+
+- **Synheart Focus** - Focus/engagement estimation (optional, explicit enable)
+- **Synheart Emotion** - Affect modeling (optional, explicit enable)
+
+### Data Flow
+
+```
+Wear, Phone, Behavior Modules
+    ↓
+HSI Runtime
+    ↓
+HSI (State Representation)
+    ↓
+Optional: Focus Module → Focus Estimates
+Optional: Emotion Module → Emotion Estimates
+```
 
 ## Installation
 
@@ -52,29 +92,52 @@ dependencies: [
 
 ### Basic Setup
 
+The Core SDK provides HSI (Human State Interface) as the core state representation, with optional interpretation modules for Focus and Emotion:
+
 ```swift
-import HSI
+import SynheartCore
 import Combine
 
-// Configure Core SDK with your app key
-HSI.shared.configure(appKey: "your-app-key")
+// Initialize the Core SDK
+try await Synheart.initialize(
+    userId: "anon_user_123",
+    config: SynheartConfig(
+        enableWear: true,
+        enablePhone: true,
+        enableBehavior: true
+    )
+)
 
-// Subscribe to state updates
+// Subscribe to HSI updates (core state representation)
 var cancellables = Set<AnyCancellable>()
 
-HSI.shared.statePublisher
-    .sink { hsv in
-        print("Heart Rate: \(hsv.heartRate ?? 0)")
-        print("Emotion - Stress: \(hsv.emotion?.stress ?? 0)")
-        print("Focus Score: \(hsv.focus?.score ?? 0)")
+Synheart.onHSIUpdate
+    .sink { hsi in
+        print("Arousal Index: \(hsi.affect?.arousalIndex ?? 0)")
+        print("Engagement Stability: \(hsi.engagement?.engagementStability ?? 0)")
     }
     .store(in: &cancellables)
 
-// Start the SDK
-HSI.shared.start()
+// Optional: Enable interpretation modules
+try await Synheart.enableFocus()
+Synheart.onFocusUpdate
+    .sink { focus in
+        print("Focus Score: \(focus.score)")
+    }
+    .store(in: &cancellables)
+
+try await Synheart.enableEmotion()
+Synheart.onEmotionUpdate
+    .sink { emotion in
+        print("Stress Index: \(emotion.stress)")
+    }
+    .store(in: &cancellables)
+
+// Optional: Enable cloud sync (requires consent)
+// try await Synheart.enableCloud()
 
 // Later, stop when done
-HSI.shared.stop()
+try await Synheart.stop()
 ```
 
 ### Module-Based Architecture
@@ -82,7 +145,7 @@ HSI.shared.stop()
 The SDK also provides a modular architecture for windowed feature collection:
 
 ```swift
-import HSI
+import SynheartCore
 
 // Initialize modules
 let capabilities = CapabilityModule()
@@ -181,7 +244,7 @@ let hsi = HSI(stateEngine: nil, emotionHead: emotionHead, focusHead: focusHead)
 
 Synheart Core SDK provides two complementary architectures:
 
-### Core Architecture (`HSI/Core/`)
+### Core Architecture (`SynheartCore/Core/`)
 
 The primary architecture used by `HSI.shared`:
 
@@ -192,7 +255,7 @@ The primary architecture used by `HSI.shared`:
 - **EmotionHead**: Populates emotion state using emotion models
 - **FocusHead**: Populates focus state using focus models
 
-### Modular Architecture (`HSI/Modules/`)
+### Modular Architecture (`SynheartCore/Modules/`)
 
 A module-based system for windowed feature collection:
 
@@ -210,7 +273,7 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentat
 
 ### HumanStateVector (HSV)
 
-The main data structure (`HSI/Models/Hsv.swift`) containing:
+The main data structure (`SynheartCore/Models/Hsv.swift`) containing:
 
 - **Biometric signals**: Heart rate, HRV, RMSSD, SDNN
 - **Behavior**: Typing rate, scrolling rate, app switch rate (via `BehaviorState`)
@@ -219,7 +282,7 @@ The main data structure (`HSI/Models/Hsv.swift`) containing:
 - **Focus**: Score, cognitive load, clarity, distraction (via `FocusState`)
 - **Metadata**: Device info, session ID, timestamp, embeddings (via `MetaState`)
 
-### Window Features (`HSI/Modules/Interfaces/FeatureProviders.swift`)
+### Window Features (`SynheartCore/Modules/Interfaces/FeatureProviders.swift`)
 
 For the modular architecture, features are collected in time windows:
 
@@ -230,7 +293,7 @@ For the modular architecture, features are collected in time windows:
 ## Project Structure
 
 ```
-HSI/
+SynheartCore/
 ├── Core/                    # Core architecture components
 │   ├── StateEngine.swift   # Main orchestration engine
 │   ├── IngestionService.swift
@@ -256,7 +319,8 @@ HSI/
 │   ├── Capabilities/       # Feature flags and capabilities
 │   ├── Consent/            # Consent management
 │   └── Interfaces/         # Feature provider protocols
-└── HSI.swift               # Main public API (singleton)
+├── HSI.swift               # Human State Interface (HSI)
+└── Synheart.swift          # Public SDK facade
 ```
 
 ## Platform Integration
@@ -317,9 +381,11 @@ All three implementations share the same modular architecture. See the Flutter r
 - **[RFC](docs/rfc.md)** - Request for Comments specification
 - **[HSV Tech Spec](docs/hsv-tech-spec.md)** - Human State Vector technical specification
 
-## License
+## 📄 License
 
-[Add your license here]
+Apache 2.0 License - see [LICENSE](LICENSE) for details.
+
+Copyright 2025 Synheart AI Inc.
 
 ## Author
 
