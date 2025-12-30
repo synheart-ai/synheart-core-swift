@@ -46,8 +46,13 @@ public class SignalProcessor {
             
             // Calculate derived metrics
             let values = hrvSignals.map { $0.value }
-            processed.rmssd = calculateRMSSD(values)
-            processed.sdnn = calculateSDNN(values)
+            if values.count >= 2 {
+                processed.rmssd = calculateRMSSD(values)
+                processed.sdnn = calculateSDNN(values)
+            } else {
+                processed.rmssd = nil
+                processed.sdnn = nil
+            }
         }
         
         // Process behavioral signals
@@ -100,11 +105,11 @@ public class SignalProcessor {
         return sqrt(variance)
     }
     
-    private func calculateRate(_ signals: [SignalData]) -> Float {
-        guard signals.count >= 2 else { return 0.0 }
+    private func calculateRate(_ signals: [SignalData]) -> Float? {
+        guard signals.count >= 2 else { return nil }
         
         let timeSpan = signals.last!.timestamp.timeIntervalSince(signals.first!.timestamp)
-        guard timeSpan > 0 else { return 0.0 }
+        guard timeSpan > 0 else { return nil }
         
         return Float(signals.count) / Float(timeSpan)
     }

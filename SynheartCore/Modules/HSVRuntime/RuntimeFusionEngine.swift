@@ -1,9 +1,9 @@
 import Foundation
 
-/// Fusion Engine V2
+/// Runtime Fusion Engine
 ///
-/// Combines features from all modules into a base HSV
-public class FusionEngineV2 {
+/// Combines windowed features from all modules into a base HSV.
+public class RuntimeFusionEngine {
     /// Fuse collected features into base HSV
     public func fuse(
         _ features: CollectedFeatures,
@@ -142,4 +142,5 @@ public class FusionEngineV2 {
         }
     }
 }
+
 

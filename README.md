@@ -1,4 +1,4 @@
-# Synheart Core SDK - iOS
+# Synheart Core SDK - SWIFT
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
@@ -26,7 +26,7 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 - **Wear Module** → Biosignals (HR, HRV, sleep, motion)
 - **Phone Module** → Motion + context signals
 - **Behavior Module** → Digital interaction patterns
-- **HSI Runtime** → Signal fusion + state computation
+- **HSV Runtime** → Signal fusion + state computation
 - **Consent Module** → User permission management
 - **Capabilities Module** → Feature gating (core/extended/research)
 - **Cloud Connector** → Secure HSI snapshot uploads (planned)
@@ -55,7 +55,7 @@ The Core SDK strictly separates:
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state representation
+6. **HSV Runtime** - Signal fusion and state representation
 7. **Cloud Connector** - Secure HSI snapshot uploads (planned)
 
 ### Optional Interpretation Modules
@@ -68,7 +68,7 @@ The Core SDK strictly separates:
 ```
 Wear, Phone, Behavior Modules
     ↓
-HSI Runtime
+HSV Runtime
     ↓
 HSI (State Representation)
     ↓
@@ -92,7 +92,7 @@ dependencies: [
 
 ### Basic Setup
 
-The Core SDK provides HSI (Human State Interface) as the core state representation, with optional interpretation modules for Focus and Emotion:
+The Core SDK publishes the Human State Vector (`HSV`) as the core state representation, with optional interpretation streams for Focus and Emotion:
 
 ```swift
 import SynheartCore
@@ -172,8 +172,8 @@ let collector = ChannelCollector(
     behavior: behaviorModule
 )
 
-// Create HSI Runtime
-let runtime = HSIRuntimeModule(collector: collector)
+// Create HSV Runtime
+let runtime = HSVRuntimeModule(collector: collector)
 
 // Initialize and start runtime
 try await runtime.initialize()
@@ -196,7 +196,8 @@ runtime.finalHsvStream
 ### Accessing Current State
 
 ```swift
-if let currentState = HSI.shared.currentState {
+// Preferred: Synheart is the canonical entry point.
+if let currentState = Synheart.currentState {
     // Use current state
     print("Current heart rate: \(currentState.heartRate ?? 0)")
 }
@@ -234,10 +235,17 @@ class MyFocusModel: FocusModelProtocol {
     }
 }
 
-// Initialize HSI with custom models
-let emotionHead = EmotionHead(emotionModel: MyEmotionModel())
-let focusHead = FocusHead(focusModel: MyFocusModel())
-let hsi = HSI(stateEngine: nil, emotionHead: emotionHead, focusHead: focusHead)
+// Preferred: inject models via SynheartConfig (used by HSVRuntimeModule)
+try await Synheart.initialize(
+    userId: "anon_user_123",
+    config: SynheartConfig(
+        enableWear: true,
+        enablePhone: true,
+        enableBehavior: true,
+        emotionModel: MyEmotionModel(),
+        focusModel: MyFocusModel()
+    )
+)
 ```
 
 ## Architecture Details
@@ -246,7 +254,7 @@ Synheart Core SDK provides two complementary architectures:
 
 ### Core Architecture (`SynheartCore/Core/`)
 
-The primary architecture used by `HSI.shared`:
+A direct, non-modular pipeline for ingestion/processing/fusion:
 
 - **StateEngine**: Orchestrates ingestion, processing, and fusion
 - **IngestionService**: Collects raw signals from HealthKit, CoreMotion, and behavior adapters
@@ -259,7 +267,7 @@ The primary architecture used by `HSI.shared`:
 
 A module-based system for windowed feature collection:
 
-- **HSIRuntimeModule**: Orchestrates window-based processing (30s, 5m, 1h, 24h windows)
+- **HSVRuntimeModule**: Orchestrates window-based processing (30s, 5m, 1h, 24h windows)
 - **WearModule**: Collects biosignal features from wearables
 - **PhoneModule**: Collects phone context features (motion, app switches, screen time)
 - **BehaviorModule**: Extracts behavioral patterns (typing, scrolling, interactions)
@@ -312,22 +320,21 @@ SynheartCore/
 │   └── MetaState.swift
 ├── Modules/                 # Modular architecture
 │   ├── Base/               # Module base classes and manager
-│   ├── HSIRuntime/         # Runtime orchestration
+│   ├── HSVRuntime/         # Runtime orchestration
 │   ├── Wear/               # Wearable data collection
 │   ├── Phone/              # Phone context collection
 │   ├── Behavior/            # Behavior pattern extraction
 │   ├── Capabilities/       # Feature flags and capabilities
 │   ├── Consent/            # Consent management
 │   └── Interfaces/         # Feature provider protocols
-├── HSI.swift               # Human State Interface (HSI)
-└── Synheart.swift          # Public SDK facade
+└── Synheart.swift          # Public SDK facade / main entry point
 ```
 
 ## Platform Integration
 
-### HealthKit Integration (Planned)
+### HealthKit Integration (Planned, via Synheart Wear)
 
-The Wear Module will integrate with iOS HealthKit for biosignal collection:
+The Wear Module will integrate with iOS HealthKit for biosignal collection (this repo currently uses a mock wear source):
 
 - Heart rate monitoring
 - Heart rate variability (HRV)
@@ -335,21 +342,21 @@ The Wear Module will integrate with iOS HealthKit for biosignal collection:
 - Sleep stage detection
 - Motion/activity data
 
-### CoreMotion Integration (Planned)
+### CoreMotion Integration (Planned, via Synheart Behavior)
 
-The Phone Module will integrate with CoreMotion for device motion:
+The Phone Module will integrate with CoreMotion for device motion (this repo currently uses mock collectors):
 
 - Accelerometer data
 - Gyroscope data
 - Device motion (attitude, rotation rate)
 
-### UITouch Integration (Planned)
+### UITouch Integration (Planned, via Synheart Behavior)
 
-The Behavior Module will integrate with UITouch for interaction tracking:
+The Behavior Module will integrate with app-level event instrumentation for interaction tracking:
 
 - Tap events
 - Scroll gestures
-- App switching detection
+- Typing/keystroke events
 
 ## Privacy & Security
 

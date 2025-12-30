@@ -4,7 +4,7 @@ import Combine
 /// Behavior Module
 ///
 /// Captures user-device interaction patterns.
-/// Provides window-based behavioral features to HSI Runtime.
+/// Provides window-based behavioral features to HSV Runtime.
 public class BehaviorModule: BaseSynheartModule, BehaviorFeatureProvider {
     private let eventStream = BehaviorEventStream()
     private let aggregator = WindowAggregator()

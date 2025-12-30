@@ -4,7 +4,7 @@ import Combine
 /// Phone Module
 ///
 /// Captures device-level motion and context signals.
-/// Provides window-based features to HSI Runtime.
+/// Provides window-based features to HSV Runtime.
 public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider {
     private let motionCollector = MotionCollector()
     private let screenTracker = ScreenStateTracker()

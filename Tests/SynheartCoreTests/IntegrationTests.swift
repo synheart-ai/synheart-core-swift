@@ -1,8 +1,8 @@
 import XCTest
 import Combine
-@testable import HSI
+@testable import SynheartCore
 
-final class HSIIntegrationTests: XCTestCase {
+final class HSVIntegrationTests: XCTestCase {
     var cancellables: Set<AnyCancellable>!
 
     override func setUp() {
@@ -20,10 +20,14 @@ final class HSIIntegrationTests: XCTestCase {
     func testFullPipelineWithMockData() {
         let expectation = XCTestExpectation(description: "Complete pipeline execution")
 
-        let hsi = HSI()
-        hsi.configure(appKey: "test-key")
+        let stateEngine = StateEngine()
+        let emotionHead = EmotionHead()
+        let focusHead = FocusHead()
 
-        hsi.statePublisher
+        emotionHead.subscribe(to: stateEngine.baseHsvPublisher)
+        focusHead.subscribe(to: emotionHead.hsvWithEmotionPublisher)
+
+        focusHead.finalHsvPublisher
             .sink { hsv in
                 // Verify base HSV fields
                 XCTAssertNotNil(hsv.meta)
@@ -43,24 +47,28 @@ final class HSIIntegrationTests: XCTestCase {
             }
             .store(in: &cancellables)
 
-        hsi.start()
+        stateEngine.start()
 
         wait(for: [expectation], timeout: 5.0)
 
-        hsi.stop()
+        stateEngine.stop()
     }
 
     func testPipelineStartStop() {
-        let hsi = HSI()
-        hsi.configure(appKey: "test-key")
+        let stateEngine = StateEngine()
+        let emotionHead = EmotionHead()
+        let focusHead = FocusHead()
+
+        emotionHead.subscribe(to: stateEngine.baseHsvPublisher)
+        focusHead.subscribe(to: emotionHead.hsvWithEmotionPublisher)
 
         // Start
-        hsi.start()
-        XCTAssertNil(hsi.currentState, "State should be nil initially")
+        stateEngine.start()
 
         // Wait for data
         let expectation = XCTestExpectation(description: "Wait for initial state")
-        hsi.statePublisher
+        focusHead.finalHsvPublisher
+            .first()
             .sink { _ in
                 expectation.fulfill()
             }
@@ -68,46 +76,47 @@ final class HSIIntegrationTests: XCTestCase {
 
         wait(for: [expectation], timeout: 5.0)
 
-        // Should have state now
-        XCTAssertNotNil(hsi.currentState, "State should be populated after start")
-
         // Stop
-        hsi.stop()
+        stateEngine.stop()
     }
 
     func testPipelineRestart() {
         let expectation1 = XCTestExpectation(description: "First start")
         let expectation2 = XCTestExpectation(description: "Restart")
 
-        let hsi = HSI()
-        hsi.configure(appKey: "test-key")
+        let stateEngine = StateEngine()
+        let emotionHead = EmotionHead()
+        let focusHead = FocusHead()
+
+        emotionHead.subscribe(to: stateEngine.baseHsvPublisher)
+        focusHead.subscribe(to: emotionHead.hsvWithEmotionPublisher)
 
         // First start
-        hsi.statePublisher
+        focusHead.finalHsvPublisher
             .first()
             .sink { _ in
                 expectation1.fulfill()
             }
             .store(in: &cancellables)
 
-        hsi.start()
+        stateEngine.start()
         wait(for: [expectation1], timeout: 5.0)
 
         // Stop
-        hsi.stop()
+        stateEngine.stop()
 
         // Restart
-        hsi.statePublisher
+        focusHead.finalHsvPublisher
             .first()
             .sink { _ in
                 expectation2.fulfill()
             }
             .store(in: &cancellables)
 
-        hsi.start()
+        stateEngine.start()
         wait(for: [expectation2], timeout: 5.0)
 
-        hsi.stop()
+        stateEngine.stop()
     }
 
     // MARK: - Custom Model Integration Tests
@@ -128,10 +137,13 @@ final class HSIIntegrationTests: XCTestCase {
         }
 
         let emotionHead = EmotionHead(emotionModel: TestEmotionModel())
-        let hsi = HSI(emotionHead: emotionHead)
-        hsi.configure(appKey: "test-key")
+        let stateEngine = StateEngine()
+        let focusHead = FocusHead()
 
-        hsi.statePublisher
+        emotionHead.subscribe(to: stateEngine.baseHsvPublisher)
+        focusHead.subscribe(to: emotionHead.hsvWithEmotionPublisher)
+
+        focusHead.finalHsvPublisher
             .sink { hsv in
                 if let emotion = hsv.emotion {
                     XCTAssertEqual(emotion.stress, 0.8, accuracy: 0.01)
@@ -141,9 +153,9 @@ final class HSIIntegrationTests: XCTestCase {
             }
             .store(in: &cancellables)
 
-        hsi.start()
+        stateEngine.start()
         wait(for: [expectation], timeout: 5.0)
-        hsi.stop()
+        stateEngine.stop()
     }
 
     func testCustomFocusModel() {
@@ -160,11 +172,14 @@ final class HSIIntegrationTests: XCTestCase {
             }
         }
 
+        let stateEngine = StateEngine()
+        let emotionHead = EmotionHead()
         let focusHead = FocusHead(focusModel: TestFocusModel())
-        let hsi = HSI(focusHead: focusHead)
-        hsi.configure(appKey: "test-key")
 
-        hsi.statePublisher
+        emotionHead.subscribe(to: stateEngine.baseHsvPublisher)
+        focusHead.subscribe(to: emotionHead.hsvWithEmotionPublisher)
+
+        focusHead.finalHsvPublisher
             .sink { hsv in
                 if let focus = hsv.focus {
                     XCTAssertEqual(focus.score, 0.9, accuracy: 0.01)
@@ -174,9 +189,9 @@ final class HSIIntegrationTests: XCTestCase {
             }
             .store(in: &cancellables)
 
-        hsi.start()
+        stateEngine.start()
         wait(for: [expectation], timeout: 5.0)
-        hsi.stop()
+        stateEngine.stop()
     }
 
     // MARK: - State Engine Tests
@@ -294,22 +309,26 @@ final class HSIIntegrationTests: XCTestCase {
     // MARK: - Performance Tests
 
     func testPipelinePerformance() {
-        let hsi = HSI()
-        hsi.configure(appKey: "test-key")
+        let stateEngine = StateEngine()
+        let emotionHead = EmotionHead()
+        let focusHead = FocusHead()
+
+        emotionHead.subscribe(to: stateEngine.baseHsvPublisher)
+        focusHead.subscribe(to: emotionHead.hsvWithEmotionPublisher)
 
         measure {
             let expectation = XCTestExpectation(description: "Pipeline performance")
 
-            hsi.statePublisher
+            focusHead.finalHsvPublisher
                 .first()
                 .sink { _ in
                     expectation.fulfill()
                 }
                 .store(in: &cancellables)
 
-            hsi.start()
+            stateEngine.start()
             wait(for: [expectation], timeout: 10.0)
-            hsi.stop()
+            stateEngine.stop()
         }
     }
 
@@ -325,19 +344,22 @@ final class HSIIntegrationTests: XCTestCase {
         }
 
         let emotionHead = EmotionHead(emotionModel: ErrorEmotionModel())
-        let hsi = HSI(emotionHead: emotionHead)
-        hsi.configure(appKey: "test-key")
+        let stateEngine = StateEngine()
+        let focusHead = FocusHead()
 
-        hsi.statePublisher
+        emotionHead.subscribe(to: stateEngine.baseHsvPublisher)
+        focusHead.subscribe(to: emotionHead.hsvWithEmotionPublisher)
+
+        focusHead.finalHsvPublisher
             .sink { hsv in
                 // Should not crash, emotion might be nil
                 expectation.fulfill()
             }
             .store(in: &cancellables)
 
-        hsi.start()
+        stateEngine.start()
         wait(for: [expectation], timeout: 5.0)
-        hsi.stop()
+        stateEngine.stop()
     }
 
     func testErrorHandlingInFocusHead() {
@@ -349,19 +371,22 @@ final class HSIIntegrationTests: XCTestCase {
             }
         }
 
+        let stateEngine = StateEngine()
+        let emotionHead = EmotionHead()
         let focusHead = FocusHead(focusModel: ErrorFocusModel())
-        let hsi = HSI(focusHead: focusHead)
-        hsi.configure(appKey: "test-key")
 
-        hsi.statePublisher
+        emotionHead.subscribe(to: stateEngine.baseHsvPublisher)
+        focusHead.subscribe(to: emotionHead.hsvWithEmotionPublisher)
+
+        focusHead.finalHsvPublisher
             .sink { hsv in
                 // Should not crash, focus might be nil
                 expectation.fulfill()
             }
             .store(in: &cancellables)
 
-        hsi.start()
+        stateEngine.start()
         wait(for: [expectation], timeout: 5.0)
-        hsi.stop()
+        stateEngine.stop()
     }
 }

@@ -72,8 +72,8 @@ public class Synheart {
     private var wearModule: WearModule?
     private var phoneModule: PhoneModule?
     private var behaviorModule: BehaviorModule?
-    private var hsiRuntimeModule: HSIRuntimeModule?
-    // TODO: CloudConnectorModule
+    private var hsvRuntimeModule: HSVRuntimeModule?
+    private var cloudConnector: CloudConnectorModule?
     // TODO: SyniHooksModule
 
     // Optional interpretation modules
@@ -94,6 +94,16 @@ public class Synheart {
 
     private init() {}
 
+    /// Whether the SDK has been initialized.
+    public static var isInitialized: Bool {
+        shared.isConfigured
+    }
+
+    /// Whether the SDK is currently running.
+    public static var isRunning: Bool {
+        shared.isRunning
+    }
+
     /**
      * Stream of HSI updates (core state representation)
      *
@@ -102,12 +112,25 @@ public class Synheart {
      * - State indices (arousalIndex, engagementStability, etc.)
      * - 64D state embedding
      *
-     * HSI does NOT contain interpretation (emotion, focus).
+     * HSI MAY include interpretation fields (emotion, focus) if available.
      */
     public static var onHSIUpdate: AnyPublisher<HSV, Never> {
         shared.hsiSubject
             .compactMap { $0 }
             .eraseToAnyPublisher()
+    }
+
+    /**
+     * Stream of base HSV updates (before emotion/focus heads)
+     *
+     * This is useful if you want strictly "core" state without interpretation.
+     * Emits only after initialize() and while the HSI runtime module is running.
+     */
+    public static var onBaseHSIUpdate: AnyPublisher<HSV, Never> {
+        guard let runtime = shared.hsvRuntimeModule else {
+            return Empty().eraseToAnyPublisher()
+        }
+        return runtime.baseHsvStream
     }
 
     /**
@@ -184,8 +207,8 @@ public class Synheart {
         consentModule = ConsentModule()
 
         // 3. Register modules
-        moduleManager.registerModule(capabilityModule!)
-        moduleManager.registerModule(consentModule!)
+        try moduleManager.registerModule(capabilityModule!)
+        try moduleManager.registerModule(consentModule!)
 
         // 4. Initialize data collection modules
         print("[Synheart] Initializing data modules...")
@@ -202,35 +225,54 @@ public class Synheart {
             consent: consentModule!
         )
 
-        moduleManager.registerModule(wearModule!, dependsOn: ["capabilities", "consent"])
-        moduleManager.registerModule(phoneModule!, dependsOn: ["capabilities", "consent"])
-        moduleManager.registerModule(behaviorModule!, dependsOn: ["capabilities", "consent"])
+        try moduleManager.registerModule(wearModule!, dependsOn: ["capabilities", "consent"])
+        try moduleManager.registerModule(phoneModule!, dependsOn: ["capabilities", "consent"])
+        try moduleManager.registerModule(behaviorModule!, dependsOn: ["capabilities", "consent"])
 
-        // 5. Initialize HSI Runtime (NO emotion/focus here - they're optional)
-        print("[Synheart] Initializing HSI Runtime...")
+        // 5. Initialize HSV Runtime (core + interpretation heads)
+        print("[Synheart] Initializing HSV Runtime...")
         let collector = ChannelCollector(
             wear: wearModule!,
             phone: phoneModule!,
             behavior: behaviorModule!
         )
-        hsiRuntimeModule = HSIRuntimeModule(collector: collector)
-        moduleManager.registerModule(
-            hsiRuntimeModule!,
+        hsvRuntimeModule = HSVRuntimeModule(
+            collector: collector,
+            emotionModel: config?.emotionModel,
+            focusModel: config?.focusModel
+        )
+        try moduleManager.registerModule(
+            hsvRuntimeModule!,
             dependsOn: ["wear", "phone", "behavior"]
         )
 
-        // 6. Initialize all modules
+        // 6. Initialize Cloud Connector (optional, depends on config)
+        if let cloudConfig = config?.cloudConfig {
+            print("[Synheart] Initializing Cloud Connector...")
+            cloudConnector = CloudConnectorModule(
+                capabilities: capabilityModule!,
+                consent: consentModule!,
+                hsvRuntime: hsvRuntimeModule!,
+                config: cloudConfig
+            )
+            try moduleManager.registerModule(
+                cloudConnector!,
+                dependsOn: ["capabilities", "consent", "hsv_runtime"]
+            )
+        }
+
+        // 7. Initialize all modules
         print("[Synheart] Initializing all modules...")
         try await moduleManager.initializeAll()
 
-        // 7. Subscribe to HSI stream (core state only)
-        hsiRuntimeModule?.hsiStream
+        // 8. Subscribe to HSI stream (core state only)
+        hsvRuntimeModule?.finalHsvStream
             .sink { [weak self] hsi in
                 self?.hsiSubject.send(hsi)
             }
             .store(in: &cancellables)
 
-        // 8. Start modules
+        // 9. Start modules
         print("[Synheart] Starting all modules...")
         try await moduleManager.startAll()
 
@@ -270,17 +312,13 @@ public class Synheart {
         }
 
         print("[Synheart] Enabling focus module...")
-
-        focusHead = FocusHead()
-
-        // Focus head subscribes to HSI stream
+        // Enabling focus means: start publishing focus updates if/when the runtime provides them.
+        // Focus computation happens inside HSVRuntimeModule's focus head.
+        focusHead = FocusHead() // kept as an "enabled flag" for now (backwards compatible)
         Self.onHSIUpdate
-            .sink { [weak self] hsi in
-                guard let self = self, let focusHead = self.focusHead else { return }
-                let hsvWithFocus = focusHead.processOne(hsi)
-                if let focus = hsvWithFocus.focus {
-                    self.focusSubject.send(focus)
-                }
+            .compactMap { $0.focus }
+            .sink { [weak self] focus in
+                self?.focusSubject.send(focus)
             }
             .store(in: &cancellables)
 
@@ -318,17 +356,13 @@ public class Synheart {
         }
 
         print("[Synheart] Enabling emotion module...")
-
-        emotionHead = EmotionHead()
-
-        // Emotion head subscribes to HSI stream
+        // Enabling emotion means: start publishing emotion updates if/when the runtime provides them.
+        // Emotion computation happens inside HSVRuntimeModule's emotion head.
+        emotionHead = EmotionHead() // kept as an "enabled flag" for now (backwards compatible)
         Self.onHSIUpdate
-            .sink { [weak self] hsi in
-                guard let self = self, let emotionHead = self.emotionHead else { return }
-                let hsvWithEmotion = emotionHead.processOne(hsi)
-                if let emotion = hsvWithEmotion.emotion {
-                    self.emotionSubject.send(emotion)
-                }
+            .compactMap { $0.emotion }
+            .sink { [weak self] emotion in
+                self?.emotionSubject.send(emotion)
             }
             .store(in: &cancellables)
 
@@ -344,8 +378,87 @@ public class Synheart {
      * ```
      */
     public static func enableCloud() async throws {
-        // TODO: Implement cloud sync
-        throw SynheartError.notImplemented("Cloud sync not yet implemented")
+        try await shared._enableCloud()
+    }
+
+    private func _enableCloud() async throws {
+        guard isConfigured else {
+            throw SynheartError.notInitialized
+        }
+
+        guard let consentModule = consentModule else {
+            throw SynheartError.notInitialized
+        }
+
+        let currentConsent = consentModule.current()
+        guard currentConsent.cloudUpload else {
+            throw CloudConnectorError.consentRequired("cloudUpload consent required")
+        }
+
+        guard let cloudConnector = cloudConnector else {
+            throw SynheartError.notImplemented(
+                "Cloud connector not configured. Provide cloudConfig during initialization"
+            )
+        }
+
+        try await cloudConnector.start()
+    }
+
+    /**
+     * Force upload of queued snapshots now
+     *
+     * - Throws: CloudConnectorError if cloudUpload consent not granted
+     */
+    public static func uploadNow() async throws {
+        try await shared._uploadNow()
+    }
+
+    private func _uploadNow() async throws {
+        guard isConfigured else {
+            throw SynheartError.notInitialized
+        }
+
+        guard let cloudConnector = cloudConnector else {
+            throw SynheartError.notImplemented("Cloud connector not enabled")
+        }
+
+        try await cloudConnector.uploadNow()
+    }
+
+    /**
+     * Flush entire upload queue
+     *
+     * Attempts to upload all queued snapshots while online.
+     */
+    public static func flushUploadQueue() async throws {
+        try await shared._flushUploadQueue()
+    }
+
+    private func _flushUploadQueue() async throws {
+        guard isConfigured else {
+            throw SynheartError.notInitialized
+        }
+
+        guard let cloudConnector = cloudConnector else {
+            throw SynheartError.notImplemented("Cloud connector not enabled")
+        }
+
+        await cloudConnector.flushQueue()
+    }
+
+    /**
+     * Disable cloud uploads
+     */
+    public static func disableCloud() async throws {
+        try await shared._disableCloud()
+    }
+
+    private func _disableCloud() async throws {
+        guard isConfigured else {
+            throw SynheartError.notInitialized
+        }
+
+        try await cloudConnector?.stop()
     }
 
     /**
@@ -365,7 +478,7 @@ public class Synheart {
             return false
         }
 
-        let consent = await consentModule.current()
+        let consent = consentModule.current()
         switch consentType {
         case "biosignals":
             return consent.biosignals
@@ -397,23 +510,25 @@ public class Synheart {
             throw SynheartError.notInitialized
         }
 
-        var current = await consentModule.current()
+        let current = consentModule.current()
+        let updated: ConsentSnapshot
+
         switch consentType {
         case "biosignals":
-            current.biosignals = true
+            updated = current.copyWith(biosignals: true)
         case "behavior":
-            current.behavior = true
+            updated = current.copyWith(behavior: true)
         case "motion", "phoneContext":
-            current.motion = true
+            updated = current.copyWith(motion: true)
         case "cloudUpload":
-            current.cloudUpload = true
+            updated = current.copyWith(cloudUpload: true)
         case "syni":
-            current.syni = true
+            updated = current.copyWith(syni: true)
         default:
-            break
+            updated = current
         }
 
-        try await consentModule.updateConsent(current)
+        try await consentModule.updateConsent(updated)
     }
 
     /**
@@ -433,23 +548,25 @@ public class Synheart {
             throw SynheartError.notInitialized
         }
 
-        var current = await consentModule.current()
+        let current = consentModule.current()
+        let updated: ConsentSnapshot
+
         switch consentType {
         case "biosignals":
-            current.biosignals = false
+            updated = current.copyWith(biosignals: false)
         case "behavior":
-            current.behavior = false
+            updated = current.copyWith(behavior: false)
         case "motion", "phoneContext":
-            current.motion = false
+            updated = current.copyWith(motion: false)
         case "cloudUpload":
-            current.cloudUpload = false
+            updated = current.copyWith(cloudUpload: false)
         case "syni":
-            current.syni = false
+            updated = current.copyWith(syni: false)
         default:
-            break
+            updated = current
         }
 
-        try await consentModule.updateConsent(current)
+        try await consentModule.updateConsent(updated)
     }
 
     /**
@@ -463,9 +580,7 @@ public class Synheart {
      * Get current consent snapshot
      */
     public static var currentConsent: ConsentSnapshot? {
-        get async {
-            await shared.consentModule?.current()
-        }
+        shared.consentModule?.current()
     }
 
     /**
@@ -514,7 +629,8 @@ public class Synheart {
         wearModule = nil
         phoneModule = nil
         behaviorModule = nil
-        hsiRuntimeModule = nil
+        hsvRuntimeModule = nil
+        cloudConnector = nil
         emotionHead = nil
         focusHead = nil
         isConfigured = false

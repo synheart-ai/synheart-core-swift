@@ -1,19 +1,19 @@
 import Foundation
 import Combine
 
-/// HSI Runtime Module
+/// HSV Runtime Module
 ///
-/// Orchestrates the HSI pipeline:
+/// Orchestrates the HSV runtime pipeline:
 /// 1. Schedules windows (30s, 5m, 1h, 24h)
 /// 2. Collects features from Wear, Phone, Behavior
 /// 3. Fuses features into base HSV
 /// 4. Runs Emotion and Focus heads
 /// 5. Publishes final HSV
-public class HSIRuntimeModule: BaseSynheartModule {
+public class HSVRuntimeModule: BaseSynheartModule {
     private let collector: ChannelCollector
-    private let fusion = FusionEngineV2()
-    private let emotionHead = EmotionHead()
-    private let focusHead = FocusHead()
+    private let fusion = RuntimeFusionEngine()
+    private let emotionHead: EmotionHead
+    private let focusHead: FocusHead
     
     private var scheduler: WindowScheduler?
     
@@ -23,9 +23,15 @@ public class HSIRuntimeModule: BaseSynheartModule {
     private var emotionSubscription: AnyCancellable?
     private var focusSubscription: AnyCancellable?
     
-    public init(collector: ChannelCollector) {
+    public init(
+        collector: ChannelCollector,
+        emotionModel: EmotionModelProtocol? = nil,
+        focusModel: FocusModelProtocol? = nil
+    ) {
         self.collector = collector
-        super.init(moduleId: "hsi_runtime")
+        self.emotionHead = EmotionHead(emotionModel: emotionModel)
+        self.focusHead = FocusHead(focusModel: focusModel)
+        super.init(moduleId: "hsv_runtime")
     }
     
     /// Stream of base HSV (before emotion/focus)
@@ -50,7 +56,7 @@ public class HSIRuntimeModule: BaseSynheartModule {
     // MARK: - SynheartModule
     
     public override func initialize() async throws {
-        print("[HSIRuntime] Initializing HSI Runtime...")
+        print("[HSVRuntime] Initializing HSV Runtime...")
         
         // Initialize emotion and focus heads
         emotionHead.subscribe(to: baseHsvStream)
@@ -61,7 +67,7 @@ public class HSIRuntimeModule: BaseSynheartModule {
             .sink(
                 receiveCompletion: { completion in
                     if case .failure(let error) = completion {
-                        print("[HSIRuntime] Focus stream error: \(error)")
+                        print("[HSVRuntime] Focus stream error: \(error)")
                     }
                 },
                 receiveValue: { [weak self] finalHsv in
@@ -71,7 +77,7 @@ public class HSIRuntimeModule: BaseSynheartModule {
     }
     
     public override func start() async throws {
-        print("[HSIRuntime] Starting HSI Runtime...")
+        print("[HSVRuntime] Starting HSV Runtime...")
         
         // Start window scheduler
         scheduler = WindowScheduler { [weak self] window in
@@ -84,18 +90,18 @@ public class HSIRuntimeModule: BaseSynheartModule {
         }
         
         scheduler?.start()
-        print("[HSIRuntime] HSI Runtime started")
+        print("[HSVRuntime] HSV Runtime started")
     }
     
     public override func stop() async throws {
-        print("[HSIRuntime] Stopping HSI Runtime...")
+        print("[HSVRuntime] Stopping HSV Runtime...")
         
         scheduler?.stop()
         scheduler = nil
     }
     
     public override func dispose() async throws {
-        print("[HSIRuntime] Disposing HSI Runtime...")
+        print("[HSVRuntime] Disposing HSV Runtime...")
         
         emotionSubscription?.cancel()
         focusSubscription?.cancel()
@@ -106,26 +112,23 @@ public class HSIRuntimeModule: BaseSynheartModule {
     
     /// Compute state for a window
     private func computeState(_ window: WindowType) async {
-        do {
-            // Collect features from all modules
-            let features = collector.collect(window)
-            
-            guard features.hasAnyFeatures else {
-                print("[HSIRuntime] No features available for \(window)")
-                return
-            }
-            
-            // Fuse into base HSV
-            let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
-            let baseHsv = await fusion.fuse(features, window: window, timestamp: timestamp)
-            
-            // Emit base HSV (will flow through emotion -> focus heads)
-            baseHsvSubject.send(baseHsv)
-            
-            print("[HSIRuntime] Computed state for \(window)")
-        } catch {
-            print("[HSIRuntime] Error computing state: \(error)")
+        // Collect features from all modules
+        let features = collector.collect(window)
+        
+        guard features.hasAnyFeatures else {
+            print("[HSVRuntime] No features available for \(window)")
+            return
         }
+        
+        // Fuse into base HSV
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        let baseHsv = await fusion.fuse(features, window: window, timestamp: timestamp)
+        
+        // Emit base HSV (will flow through emotion -> focus heads)
+        baseHsvSubject.send(baseHsv)
+        
+        print("[HSVRuntime] Computed state for \(window)")
     }
 }
+
 

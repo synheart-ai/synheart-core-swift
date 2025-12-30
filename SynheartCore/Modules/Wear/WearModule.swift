@@ -4,7 +4,7 @@ import Combine
 /// Wear Module
 ///
 /// Collects and normalizes biosignals from wearables.
-/// Provides window-based features to HSI Runtime.
+/// Provides window-based features to HSV Runtime.
 public class WearModule: BaseSynheartModule, WearFeatureProvider {
     private let sources: [WearSourceHandler]
     private let cache = WearCache()

@@ -15,7 +15,7 @@ public enum ModuleStatus {
 
 /// Base protocol for all Synheart modules
 ///
-/// Each module (Wear, Phone, Behavior, HSI Runtime, etc.) conforms to this protocol
+/// Each module (Wear, Phone, Behavior, HSV Runtime, etc.) conforms to this protocol
 /// to ensure consistent lifecycle management.
 public protocol SynheartModule: AnyObject {
     /// Module identifier

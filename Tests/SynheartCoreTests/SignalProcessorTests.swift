@@ -1,6 +1,6 @@
 import XCTest
 import Combine
-@testable import HSI
+@testable import SynheartCore
 
 final class SignalProcessorTests: XCTestCase {
     var processor: SignalProcessor!
