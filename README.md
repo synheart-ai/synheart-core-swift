@@ -376,9 +376,9 @@ The Behavior Module will integrate with app-level event instrumentation for inte
 
 This iOS implementation is part of a multi-platform SDK:
 
-- **Flutter:** `synheart-core-flutter` (reference implementation)
-- **iOS:** `synheart-core-ios` (this repository)
-- **Android:** `synheart-core-android` (Kotlin implementation)
+- **Flutter:** `synheart-core-dart` (Dart/Flutter implementation)
+- **iOS:** `synheart-core-swift` (this repository)
+- **Android:** `synheart-core-kotlin` (Kotlin implementation)
 
 All three implementations share the same modular architecture. See the Flutter repository for comprehensive documentation.
 
