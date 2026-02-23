@@ -99,9 +99,11 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
         let updated = current.copyWith(
             biosignals: type == .biosignals ? granted : current.biosignals,
             behavior: type == .behavior ? granted : current.behavior,
-            motion: type == .motion ? granted : current.motion,
+            phoneContext: type == .phoneContext ? granted : current.phoneContext,
             cloudUpload: type == .cloudUpload ? granted : current.cloudUpload,
             syni: type == .syni ? granted : current.syni,
+            focusEstimation: type == .focusEstimation ? granted : current.focusEstimation,
+            emotionEstimation: type == .emotionEstimation ? granted : current.emotionEstimation,
             timestamp: Date()
         )
 
@@ -125,8 +127,14 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
         if old.behavior != new.behavior {
             print("Consent changed: behavior \(new.behavior ? "granted" : "revoked")")
         }
-        if old.motion != new.motion {
-            print("Consent changed: motion \(new.motion ? "granted" : "revoked")")
+        if old.phoneContext != new.phoneContext {
+            print("Consent changed: phoneContext \(new.phoneContext ? "granted" : "revoked")")
+        }
+        if old.focusEstimation != new.focusEstimation {
+            print("Consent changed: focusEstimation \(new.focusEstimation ? "granted" : "revoked")")
+        }
+        if old.emotionEstimation != new.emotionEstimation {
+            print("Consent changed: emotionEstimation \(new.emotionEstimation ? "granted" : "revoked")")
         }
         if old.cloudUpload != new.cloudUpload {
             print("Consent changed: cloudUpload \(new.cloudUpload ? "granted" : "revoked")")

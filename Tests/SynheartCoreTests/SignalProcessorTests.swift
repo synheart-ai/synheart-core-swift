@@ -162,8 +162,8 @@ final class SignalProcessorTests: XCTestCase {
 
         processor.processedPublisher
             .sink { processed in
-                if let typingRate = processed.typingRate {
-                    XCTAssertGreaterThan(typingRate, 0, "Typing rate should be positive")
+                if let typingSpeed = processed.typingSpeed {
+                    XCTAssertGreaterThan(typingSpeed, 0, "Typing rate should be positive")
                     expectation.fulfill()
                 }
             }
@@ -188,8 +188,8 @@ final class SignalProcessorTests: XCTestCase {
 
         processor.processedPublisher
             .sink { processed in
-                if let scrollingRate = processed.scrollingRate {
-                    XCTAssertGreaterThanOrEqual(scrollingRate, 0)
+                if let scrollVelocity = processed.scrollVelocity {
+                    XCTAssertGreaterThanOrEqual(scrollVelocity, 0)
                     expectation.fulfill()
                 }
             }

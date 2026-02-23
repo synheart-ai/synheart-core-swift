@@ -72,7 +72,8 @@ public class Synheart {
     private var wearModule: WearModule?
     private var phoneModule: PhoneModule?
     private var behaviorModule: BehaviorModule?
-    private var hsvRuntimeModule: HSVRuntimeModule?
+    private var runtimeModule: RuntimeModule?
+    private var srmModule: SRMModule?
     private var cloudConnector: CloudConnectorModule?
     // TODO: SyniHooksModule
 
@@ -80,13 +81,17 @@ public class Synheart {
     private var emotionHead: EmotionHead?
     private var focusHead: FocusHead?
 
+    // Activation manager (RFC-0005 four-authority model)
+    private var _activationManager: ActivationManager?
+
     // State
     private var isConfigured = false
     private var isRunning = false
     private var userId: String?
+    private var previousConsent: ConsentSnapshot?
 
     // Streams
-    private let hsiSubject = CurrentValueSubject<HSV?, Never>(nil)
+    private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
     private let emotionSubject = CurrentValueSubject<EmotionState?, Never>(nil)
     private let focusSubject = CurrentValueSubject<FocusState?, Never>(nil)
 
@@ -105,32 +110,17 @@ public class Synheart {
     }
 
     /**
-     * Stream of HSI updates (core state representation)
+     * Stream of HSI updates (public state representation)
      *
-     * HSI contains:
-     * - State axes (affect, engagement, activity, context)
-     * - State indices (arousalIndex, engagementStability, etc.)
-     * - 64D state embedding
+     * HSI (Human State Interface) JSON frames produced by the synheart-runtime
+     * engine. Each emission is a serialized HSI snapshot string.
      *
-     * HSI MAY include interpretation fields (emotion, focus) if available.
+     * This is the ONLY public stream for human state.
      */
-    public static var onHSIUpdate: AnyPublisher<HSV, Never> {
+    public static var onHSIUpdate: AnyPublisher<String, Never> {
         shared.hsiSubject
             .compactMap { $0 }
             .eraseToAnyPublisher()
-    }
-
-    /**
-     * Stream of base HSV updates (before emotion/focus heads)
-     *
-     * This is useful if you want strictly "core" state without interpretation.
-     * Emits only after initialize() and while the HSI runtime module is running.
-     */
-    public static var onBaseHSIUpdate: AnyPublisher<HSV, Never> {
-        guard let runtime = shared.hsvRuntimeModule else {
-            return Empty().eraseToAnyPublisher()
-        }
-        return runtime.baseHsvStream
     }
 
     /**
@@ -153,6 +143,31 @@ public class Synheart {
         shared.focusSubject
             .compactMap { $0 }
             .eraseToAnyPublisher()
+    }
+
+    // MARK: - Activation API (RFC-0005)
+
+    /// Activate a feature. If all four authorities are satisfied
+    /// (activation, consent, capability, session), the feature's module starts.
+    public static func activate(_ feature: SynheartFeature) {
+        shared._activationManager?.activate(feature)
+        shared._reevaluateFeature(feature)
+    }
+
+    /// Deactivate a feature. Stops the feature's module if running.
+    public static func deactivate(_ feature: SynheartFeature) {
+        shared._activationManager?.deactivate(feature)
+        shared._reevaluateFeature(feature)
+    }
+
+    /// Check whether a feature is currently activated by the developer.
+    public static func isActivated(_ feature: SynheartFeature) -> Bool {
+        shared._activationManager?.isActivated(feature) ?? false
+    }
+
+    /// Return the set of all currently activated features.
+    public static func activatedFeatures() -> Set<SynheartFeature> {
+        shared._activationManager?.activatedFeatures() ?? []
     }
 
     /**
@@ -197,20 +212,25 @@ public class Synheart {
 
         print("[Synheart] Initializing...")
 
-        // 1. Initialize capability module
         print("[Synheart] Initializing capability module...")
         capabilityModule = CapabilityModule()
-        try await capabilityModule?.loadDefaults() // TODO: Load from token in production
+        let resolvedConfig = config ?? SynheartConfig()
+        if let token = resolvedConfig.capabilityToken,
+           let secret = resolvedConfig.capabilitySecret {
+            try capabilityModule!.loadFromToken(token, secret: secret)
+        } else if resolvedConfig.allowUnsignedCapabilities {
+            print("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
+            capabilityModule!.loadDefaults()
+        } else {
+            throw SynheartError.capabilityTokenRequired
+        }
 
-        // 2. Initialize consent module
         print("[Synheart] Initializing consent module...")
         consentModule = ConsentModule()
 
-        // 3. Register modules
         try moduleManager.registerModule(capabilityModule!)
         try moduleManager.registerModule(consentModule!)
 
-        // 4. Initialize data collection modules
         print("[Synheart] Initializing data modules...")
         wearModule = WearModule(
             capabilities: capabilityModule!,
@@ -229,179 +249,158 @@ public class Synheart {
         try moduleManager.registerModule(phoneModule!, dependsOn: ["capabilities", "consent"])
         try moduleManager.registerModule(behaviorModule!, dependsOn: ["capabilities", "consent"])
 
-        // 5. Initialize HSV Runtime (core + interpretation heads)
-        print("[Synheart] Initializing HSV Runtime...")
-        let collector = ChannelCollector(
-            wear: wearModule!,
-            phone: phoneModule!,
-            behavior: behaviorModule!
-        )
-        hsvRuntimeModule = HSVRuntimeModule(
-            collector: collector,
-            emotionModel: config?.emotionModel,
-            focusModel: config?.focusModel
-        )
+        print("[Synheart] Initializing SRM...")
+        srmModule = SRMModule()
         try moduleManager.registerModule(
-            hsvRuntimeModule!,
-            dependsOn: ["wear", "phone", "behavior"]
+            srmModule!,
+            dependsOn: ["capabilities", "consent"]
         )
 
-        // 6. Initialize Cloud Connector (optional, depends on config)
+        print("[Synheart] Initializing Runtime...")
+        let runtimeSessionId = UUID().uuidString
+        let bridge = RuntimeBridge.createIfAvailable(config: .init(
+            subjectId: userId,
+            sessionId: runtimeSessionId
+        ))
+        let behaviorPub: AnyPublisher<BehaviorEvent, Never>? = behaviorModule?.eventStreamInstance.events
+            .catch { _ in Empty<BehaviorEvent, Never>() }
+            .eraseToAnyPublisher()
+        // TODO: WearModule does not yet expose a combined samplePublisher.
+        // Wire wearSamplePublisher once WearModule gains a public publisher.
+        runtimeModule = RuntimeModule(
+            bridge: bridge,
+            wearSamplePublisher: nil,
+            behaviorEventPublisher: behaviorPub
+        )
+        try moduleManager.registerModule(
+            runtimeModule!,
+            dependsOn: ["wear", "phone", "behavior", "srm"]
+        )
+
         if let cloudConfig = config?.cloudConfig {
             print("[Synheart] Initializing Cloud Connector...")
             cloudConnector = CloudConnectorModule(
                 capabilities: capabilityModule!,
                 consent: consentModule!,
-                hsvRuntime: hsvRuntimeModule!,
+                runtimeModule: runtimeModule!,
                 config: cloudConfig
             )
             try moduleManager.registerModule(
                 cloudConnector!,
-                dependsOn: ["capabilities", "consent", "hsv_runtime"]
+                dependsOn: ["capabilities", "consent", "runtime"]
             )
         }
 
-        // 7. Initialize all modules
         print("[Synheart] Initializing all modules...")
         try await moduleManager.initializeAll()
 
-        // 8. Subscribe to HSI stream (core state only)
-        hsvRuntimeModule?.finalHsvStream
-            .sink { [weak self] hsi in
-                self?.hsiSubject.send(hsi)
+        previousConsent = consentModule!.current()
+        consentModule!.addListener { [weak self] newConsent in
+            self?.handleConsentChange(newConsent)
+        }
+
+        runtimeModule?.hsiStream
+            .sink { [weak self] hsiJson in
+                self?.hsiSubject.send(hsiJson)
             }
             .store(in: &cancellables)
 
-        // 9. Start modules
-        print("[Synheart] Starting all modules...")
-        try await moduleManager.startAll()
+        _activationManager = ActivationManager()
+        _activationManager!.activateFromConfig(resolvedConfig)
 
         isConfigured = true
-        isRunning = true
-        print("[Synheart] Initialization complete")
+        print("[Synheart] Initialization complete. Call startSession() to begin.")
     }
 
+    // MARK: - Session Lifecycle
+
     /**
-     * Enable focus interpretation module
+     * Start a session — activates permitted modules and begins signal collection.
      *
-     * This is an optional interpretation module that consumes HSI
-     * and produces focus estimates.
+     * Per RFC §5.2: Core must activate permitted modules, route normalized
+     * signals to Flux, enable HSV updates, and enable optional HSI export.
+     *
+     * Must be called after initialize(). No data collection occurs until
+     * this method is called (RFC §3.3).
      *
      * Example:
      * ```swift
-     * try await Synheart.enableFocus()
-     * Synheart.onFocusUpdate
-     *     .sink { focus in
-     *         print("Focus Score: \(focus.score)")
-     *     }
-     *     .store(in: &cancellables)
+     * try await Synheart.initialize(userId: "user_123")
+     * try await Synheart.startSession()
      * ```
      */
-    public static func enableFocus() async throws {
-        try await shared._enableFocus()
+    public static func startSession() async throws {
+        try await shared._startSession()
     }
 
-    private func _enableFocus() async throws {
-        if !isConfigured {
-            throw SynheartError.notInitialized
-        }
-
-        if focusHead != nil {
-            print("[Synheart] Focus module already enabled")
-            return
-        }
-
-        print("[Synheart] Enabling focus module...")
-        // Enabling focus means: start publishing focus updates if/when the runtime provides them.
-        // Focus computation happens inside HSVRuntimeModule's focus head.
-        focusHead = FocusHead() // kept as an "enabled flag" for now (backwards compatible)
-        Self.onHSIUpdate
-            .compactMap { $0.focus }
-            .sink { [weak self] focus in
-                self?.focusSubject.send(focus)
-            }
-            .store(in: &cancellables)
-
-        print("[Synheart] Focus module enabled")
-    }
-
-    /**
-     * Enable emotion interpretation module
-     *
-     * This is an optional interpretation module that consumes HSI
-     * and produces emotion estimates.
-     *
-     * Example:
-     * ```swift
-     * try await Synheart.enableEmotion()
-     * Synheart.onEmotionUpdate
-     *     .sink { emotion in
-     *         print("Stress Index: \(emotion.stress)")
-     *     }
-     *     .store(in: &cancellables)
-     * ```
-     */
-    public static func enableEmotion() async throws {
-        try await shared._enableEmotion()
-    }
-
-    private func _enableEmotion() async throws {
-        if !isConfigured {
-            throw SynheartError.notInitialized
-        }
-
-        if emotionHead != nil {
-            print("[Synheart] Emotion module already enabled")
-            return
-        }
-
-        print("[Synheart] Enabling emotion module...")
-        // Enabling emotion means: start publishing emotion updates if/when the runtime provides them.
-        // Emotion computation happens inside HSVRuntimeModule's emotion head.
-        emotionHead = EmotionHead() // kept as an "enabled flag" for now (backwards compatible)
-        Self.onHSIUpdate
-            .compactMap { $0.emotion }
-            .sink { [weak self] emotion in
-                self?.emotionSubject.send(emotion)
-            }
-            .store(in: &cancellables)
-
-        print("[Synheart] Emotion module enabled")
-    }
-
-    /**
-     * Enable cloud uploads (requires cloudUpload consent)
-     *
-     * Example:
-     * ```swift
-     * try await Synheart.enableCloud()
-     * ```
-     */
-    public static func enableCloud() async throws {
-        try await shared._enableCloud()
-    }
-
-    private func _enableCloud() async throws {
+    private func _startSession() async throws {
         guard isConfigured else {
             throw SynheartError.notInitialized
         }
-
-        guard let consentModule = consentModule else {
-            throw SynheartError.notInitialized
+        guard !isRunning else {
+            return // Already running
         }
 
-        let currentConsent = consentModule.current()
-        guard currentConsent.cloudUpload else {
-            throw CloudConnectorError.consentRequired("cloudUpload consent required")
+        print("[Synheart] Starting session...")
+        try await moduleManager.startAll()
+        isRunning = true
+        _reevaluateAllFeatures()
+        print("[Synheart] Session started")
+    }
+
+    /**
+     * Stop the current session — halts module streaming and clears ephemeral buffers.
+     *
+     * Per RFC §5.2: Core must halt module streaming, stop Flux updates,
+     * clear ephemeral buffers, and prevent further HSI export.
+     *
+     * Modules remain initialized and can be restarted with startSession().
+     *
+     * Example:
+     * ```swift
+     * try await Synheart.stopSession()
+     * ```
+     */
+    public static func stopSession() async throws {
+        try await shared._stopSession()
+    }
+
+    private func _stopSession() async throws {
+        guard isRunning else {
+            return
         }
 
-        guard let cloudConnector = cloudConnector else {
-            throw SynheartError.notImplemented(
-                "Cloud connector not configured. Provide cloudConfig during initialization"
-            )
-        }
+        print("[Synheart] Stopping session...")
+        isRunning = false
+        _reevaluateAllFeatures()
+        try await moduleManager.stopAll()
+        print("[Synheart] Session stopped")
+    }
 
-        try await cloudConnector.start()
+    // MARK: - Interpretation Modules
+
+    /// Enable focus interpretation module
+    ///
+    /// - Note: Deprecated — use `activate(.focus)` instead.
+    @available(*, deprecated, message: "Use activate(.focus) instead")
+    public static func enableFocus() async throws {
+        activate(.focus)
+    }
+
+    /// Enable emotion interpretation module
+    ///
+    /// - Note: Deprecated — use `activate(.emotion)` instead.
+    @available(*, deprecated, message: "Use activate(.emotion) instead")
+    public static func enableEmotion() async throws {
+        activate(.emotion)
+    }
+
+    /// Enable cloud uploads (requires cloudUpload consent)
+    ///
+    /// - Note: Deprecated — use `activate(.cloud)` instead.
+    @available(*, deprecated, message: "Use activate(.cloud) instead")
+    public static func enableCloud() async throws {
+        activate(.cloud)
     }
 
     /**
@@ -446,19 +445,12 @@ public class Synheart {
         await cloudConnector.flushQueue()
     }
 
-    /**
-     * Disable cloud uploads
-     */
+    /// Disable cloud uploads
+    ///
+    /// - Note: Deprecated — use `deactivate(.cloud)` instead.
+    @available(*, deprecated, message: "Use deactivate(.cloud) instead")
     public static func disableCloud() async throws {
-        try await shared._disableCloud()
-    }
-
-    private func _disableCloud() async throws {
-        guard isConfigured else {
-            throw SynheartError.notInitialized
-        }
-
-        try await cloudConnector?.stop()
+        deactivate(.cloud)
     }
 
     /**
@@ -484,8 +476,8 @@ public class Synheart {
             return consent.biosignals
         case "behavior":
             return consent.behavior
-        case "phoneContext", "motion":
-            return consent.motion
+        case "phoneContext":
+            return consent.phoneContext
         case "cloudUpload":
             return consent.cloudUpload
         default:
@@ -518,8 +510,8 @@ public class Synheart {
             updated = current.copyWith(biosignals: true)
         case "behavior":
             updated = current.copyWith(behavior: true)
-        case "motion", "phoneContext":
-            updated = current.copyWith(motion: true)
+        case "phoneContext":
+            updated = current.copyWith(phoneContext: true)
         case "cloudUpload":
             updated = current.copyWith(cloudUpload: true)
         case "syni":
@@ -556,8 +548,8 @@ public class Synheart {
             updated = current.copyWith(biosignals: false)
         case "behavior":
             updated = current.copyWith(behavior: false)
-        case "motion", "phoneContext":
-            updated = current.copyWith(motion: false)
+        case "phoneContext":
+            updated = current.copyWith(phoneContext: false)
         case "cloudUpload":
             updated = current.copyWith(cloudUpload: false)
         case "syni":
@@ -570,9 +562,9 @@ public class Synheart {
     }
 
     /**
-     * Get current HSI state (latest)
+     * Get current HSI state (latest JSON frame)
      */
-    public static var currentState: HSV? {
+    public static var currentState: String? {
         shared.hsiSubject.value
     }
 
@@ -593,22 +585,123 @@ public class Synheart {
         try await consentModule.updateConsent(consent)
     }
 
-    /**
-     * Stop Synheart Core SDK
-     */
-    public static func stop() async throws {
-        try await shared._stop()
+    // MARK: - Consent Change Handling
+
+    private func handleConsentChange(_ newConsent: ConsentSnapshot) {
+        previousConsent = newConsent
+        _reevaluateAllFeatures()
     }
 
-    private func _stop() async throws {
-        if !isRunning {
-            return
-        }
+    // MARK: - Feature Reevaluation (RFC-0005 Four-Authority Model)
 
-        print("[Synheart] Stopping...")
-        try await moduleManager.stopAll()
-        isRunning = false
-        print("[Synheart] Stopped")
+    /// Reevaluate whether a single feature should be operational.
+    ///
+    /// ```
+    /// isOperational = activated AND hasConsent AND capabilityAllowed AND isRunning
+    /// ```
+    private func _reevaluateFeature(_ feature: SynheartFeature) {
+        let activated = _activationManager?.isActivated(feature) ?? false
+        let hasConsent = _hasConsentForFeature(feature)
+        let capabilityAllowed = _isCapabilityAllowed(feature)
+        let isOperational = activated && hasConsent && capabilityAllowed && isRunning
+
+        switch feature {
+        case .wear:
+            if isOperational && wearModule?.status != .running {
+                Task { try? await wearModule?.start() }
+            } else if !isOperational && wearModule?.status == .running {
+                Task { try? await wearModule?.stop() }
+            }
+        case .behavior:
+            if isOperational && behaviorModule?.status != .running {
+                Task { try? await behaviorModule?.start() }
+            } else if !isOperational && behaviorModule?.status == .running {
+                Task { try? await behaviorModule?.stop() }
+            }
+        case .phoneContext:
+            if isOperational && phoneModule?.status != .running {
+                Task { try? await phoneModule?.start() }
+            } else if !isOperational && phoneModule?.status == .running {
+                Task { try? await phoneModule?.stop() }
+            }
+        case .focus:
+            if isOperational && focusHead == nil {
+                focusHead = FocusHead()
+                runtimeModule?.hsiStream
+                    .sink { [weak self] hsiJson in
+                        // TODO: parse focus from HSI JSON when focus head is updated
+                        _ = hsiJson
+                        _ = self
+                    }
+                    .store(in: &cancellables)
+            } else if !isOperational && focusHead != nil {
+                focusHead = nil
+                focusSubject.send(nil)
+            }
+        case .emotion:
+            if isOperational && emotionHead == nil {
+                emotionHead = EmotionHead()
+                runtimeModule?.hsiStream
+                    .sink { [weak self] hsiJson in
+                        // TODO: parse emotion from HSI JSON when emotion head is updated
+                        _ = hsiJson
+                        _ = self
+                    }
+                    .store(in: &cancellables)
+            } else if !isOperational && emotionHead != nil {
+                emotionHead = nil
+                emotionSubject.send(nil)
+            }
+        case .cloud:
+            if isOperational && cloudConnector != nil {
+                Task { try? await cloudConnector?.start() }
+            } else if !isOperational && cloudConnector != nil {
+                Task { try? await cloudConnector?.stop() }
+            }
+        case .syni:
+            break // placeholder — no SyniHooksModule yet
+        }
+    }
+
+    /// Reevaluate all features (e.g. after consent change or session start/stop).
+    private func _reevaluateAllFeatures() {
+        for feature in SynheartFeature.allCases {
+            _reevaluateFeature(feature)
+        }
+    }
+
+    /// Check consent for a feature's required consent type.
+    private func _hasConsentForFeature(_ feature: SynheartFeature) -> Bool {
+        guard let consent = consentModule?.current() else { return false }
+        switch feature.requiredConsent {
+        case "biosignals":  return consent.biosignals
+        case "behavior":    return consent.behavior
+        case "phoneContext": return consent.phoneContext
+        case "cloudUpload": return consent.cloudUpload
+        case "syni":        return consent.syni
+        default:            return false
+        }
+    }
+
+    /// Check whether the CapabilityModule allows a given feature.
+    private func _isCapabilityAllowed(_ feature: SynheartFeature) -> Bool {
+        guard let cap = capabilityModule else { return false }
+        switch feature {
+        case .wear:         return cap.capability(.wear) != .none
+        case .behavior:     return cap.capability(.behavior) != .none
+        case .phoneContext:  return cap.capability(.phone) != .none
+        case .focus:        return cap.isEnabled(.hsiEmotionFocus)
+        case .emotion:      return cap.isEnabled(.hsiEmotionFocus)
+        case .cloud:        return cap.capability(.cloud) != .none
+        case .syni:         return true // no capability gate for syni yet
+        }
+    }
+
+    /**
+     * Stop Synheart Core SDK (stops session)
+     */
+    public static func stop() async throws {
+        try await shared._stopSession()
     }
 
     /**
@@ -619,7 +712,7 @@ public class Synheart {
     }
 
     private func _dispose() async throws {
-        try await _stop()
+        try await _stopSession()
         try await moduleManager.disposeAll()
 
         cancellables.removeAll()
@@ -629,10 +722,13 @@ public class Synheart {
         wearModule = nil
         phoneModule = nil
         behaviorModule = nil
-        hsvRuntimeModule = nil
+        runtimeModule = nil
+        srmModule = nil
         cloudConnector = nil
         emotionHead = nil
         focusHead = nil
+        _activationManager = nil
+        previousConsent = nil
         isConfigured = false
         isRunning = false
 
@@ -646,4 +742,5 @@ public enum SynheartError: Error {
     case notInitialized
     case alreadyConfigured
     case notImplemented(String)
+    case capabilityTokenRequired
 }

@@ -11,13 +11,25 @@ public struct SynheartConfig {
     public let emotionModel: EmotionModelProtocol?
     public let focusModel: FocusModelProtocol?
 
+    /// Server-signed capability token for feature gating
+    public let capabilityToken: CapabilityToken?
+
+    /// HMAC secret for verifying the capability token signature
+    public let capabilitySecret: String?
+
+    /// When true, allows SDK to run with default capabilities and no signed token (debug only)
+    public let allowUnsignedCapabilities: Bool
+
     public init(
         enableWear: Bool = true,
         enablePhone: Bool = true,
         enableBehavior: Bool = true,
         cloudConfig: CloudConfig? = nil,
         emotionModel: EmotionModelProtocol? = nil,
-        focusModel: FocusModelProtocol? = nil
+        focusModel: FocusModelProtocol? = nil,
+        capabilityToken: CapabilityToken? = nil,
+        capabilitySecret: String? = nil,
+        allowUnsignedCapabilities: Bool = false
     ) {
         self.enableWear = enableWear
         self.enablePhone = enablePhone
@@ -25,6 +37,9 @@ public struct SynheartConfig {
         self.cloudConfig = cloudConfig
         self.emotionModel = emotionModel
         self.focusModel = focusModel
+        self.capabilityToken = capabilityToken
+        self.capabilitySecret = capabilitySecret
+        self.allowUnsignedCapabilities = allowUnsignedCapabilities
     }
 }
 

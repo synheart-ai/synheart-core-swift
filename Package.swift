@@ -1,5 +1,11 @@
 // swift-tools-version: 5.9
 // The swift-tools-version declares the minimum version of Swift required to build this package.
+//
+// Package: SynheartCore
+// Version: 1.0.0
+// License: Apache-2.0
+// Description: Synheart Core SDK for iOS — Unified HSI-compatible data collection,
+//              on-device state computation, and module orchestration.
 
 import PackageDescription
 
@@ -7,7 +13,7 @@ let package = Package(
     name: "SynheartCore",
     platforms: [
         .iOS(.v15),
-        .macOS(.v12),
+        .macOS(.v13),
         .watchOS(.v8),
         .tvOS(.v15)
     ],
@@ -17,13 +23,23 @@ let package = Package(
             targets: ["SynheartCore"]),
     ],
     dependencies: [
-        // Add dependencies here when needed
-        // Example: .package(url: "https://github.com/synheart/synheart-emotion", from: "1.0.0"),
+        .package(path: "../synheart-wear-swift"),
+        .package(path: "../synheart-emotion-swift"),
+        .package(path: "../synheart-focus-swift"),
+        .package(path: "../synheart-behavior-swift"),
+        .package(path: "../synheart-session-swift"),
     ],
     targets: [
         .target(
             name: "SynheartCore",
-            dependencies: [],
+            dependencies: [
+                .product(name: "SynheartWear", package: "synheart-wear-swift"),
+                .product(name: "SynheartEmotion", package: "synheart-emotion-swift"),
+                .product(name: "SynheartFocus", package: "synheart-focus-swift"),
+                .product(name: "SynheartBehavior", package: "synheart-behavior-swift",
+                         condition: .when(platforms: [.iOS, .macOS])),
+                .product(name: "SynheartSession", package: "synheart-session-swift"),
+            ],
             path: "SynheartCore"),
         .testTarget(
             name: "SynheartCoreTests",

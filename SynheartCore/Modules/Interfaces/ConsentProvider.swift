@@ -9,14 +9,20 @@ public enum ConsentType {
     /// Consent for behavioral data collection
     case behavior
 
-    /// Consent for motion/context data collection
-    case motion
+    /// Consent for phone context data collection
+    case phoneContext
 
     /// Consent for cloud uploads
     case cloudUpload
 
     /// Consent for Syni personalization
     case syni
+
+    /// Consent for focus estimation
+    case focusEstimation
+
+    /// Consent for emotion estimation
+    case emotionEstimation
 }
 
 /// Snapshot of user consent at a point in time
@@ -27,14 +33,20 @@ public struct ConsentSnapshot: Codable {
     /// Consent for behavioral data collection
     public let behavior: Bool
 
-    /// Consent for motion/context data collection
-    public let motion: Bool
+    /// Consent for phone context data collection
+    public let phoneContext: Bool
 
     /// Consent for cloud uploads
     public let cloudUpload: Bool
 
     /// Consent for Syni personalization
     public let syni: Bool
+
+    /// Consent for focus estimation
+    public let focusEstimation: Bool
+
+    /// Consent for emotion estimation
+    public let emotionEstimation: Bool
 
     /// Timestamp when this consent was given
     public let timestamp: Date
@@ -45,17 +57,21 @@ public struct ConsentSnapshot: Codable {
     public init(
         biosignals: Bool,
         behavior: Bool,
-        motion: Bool,
+        phoneContext: Bool,
         cloudUpload: Bool,
         syni: Bool,
+        focusEstimation: Bool = false,
+        emotionEstimation: Bool = false,
         timestamp: Date = Date(),
         version: String = "1.0.0"
     ) {
         self.biosignals = biosignals
         self.behavior = behavior
-        self.motion = motion
+        self.phoneContext = phoneContext
         self.cloudUpload = cloudUpload
         self.syni = syni
+        self.focusEstimation = focusEstimation
+        self.emotionEstimation = emotionEstimation
         self.timestamp = timestamp
         self.version = version
     }
@@ -67,12 +83,16 @@ public struct ConsentSnapshot: Codable {
             return biosignals
         case .behavior:
             return behavior
-        case .motion:
-            return motion
+        case .phoneContext:
+            return phoneContext
         case .cloudUpload:
             return cloudUpload
         case .syni:
             return syni
+        case .focusEstimation:
+            return focusEstimation
+        case .emotionEstimation:
+            return emotionEstimation
         }
     }
 
@@ -80,18 +100,22 @@ public struct ConsentSnapshot: Codable {
     public func copyWith(
         biosignals: Bool? = nil,
         behavior: Bool? = nil,
-        motion: Bool? = nil,
+        phoneContext: Bool? = nil,
         cloudUpload: Bool? = nil,
         syni: Bool? = nil,
+        focusEstimation: Bool? = nil,
+        emotionEstimation: Bool? = nil,
         timestamp: Date? = nil,
         version: String? = nil
     ) -> ConsentSnapshot {
         return ConsentSnapshot(
             biosignals: biosignals ?? self.biosignals,
             behavior: behavior ?? self.behavior,
-            motion: motion ?? self.motion,
+            phoneContext: phoneContext ?? self.phoneContext,
             cloudUpload: cloudUpload ?? self.cloudUpload,
             syni: syni ?? self.syni,
+            focusEstimation: focusEstimation ?? self.focusEstimation,
+            emotionEstimation: emotionEstimation ?? self.emotionEstimation,
             timestamp: timestamp ?? self.timestamp,
             version: version ?? self.version
         )
@@ -102,9 +126,11 @@ public struct ConsentSnapshot: Codable {
         return ConsentSnapshot(
             biosignals: false,
             behavior: false,
-            motion: false,
+            phoneContext: false,
             cloudUpload: false,
-            syni: false
+            syni: false,
+            focusEstimation: false,
+            emotionEstimation: false
         )
     }
 
@@ -113,9 +139,11 @@ public struct ConsentSnapshot: Codable {
         return ConsentSnapshot(
             biosignals: true,
             behavior: true,
-            motion: true,
+            phoneContext: true,
             cloudUpload: true,
-            syni: true
+            syni: true,
+            focusEstimation: true,
+            emotionEstimation: true
         )
     }
 }

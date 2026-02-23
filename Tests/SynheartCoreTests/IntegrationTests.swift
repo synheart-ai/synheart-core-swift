@@ -228,7 +228,7 @@ final class HSVIntegrationTests: XCTestCase {
                 XCTAssertNotNil(hsv.context, "Context should be populated")
                 if let context = hsv.context {
                     XCTAssertNotNil(context.device)
-                    XCTAssertNotNil(context.patterns)
+                    XCTAssertNotNil(context.userPatterns)
                     expectation.fulfill()
                 }
             }

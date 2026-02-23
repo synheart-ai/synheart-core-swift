@@ -1,6 +1,6 @@
 import Foundation
 
-/// Persistent offline queue for HSV snapshots
+/// Persistent offline queue for String snapshots
 ///
 /// Features:
 /// - FIFO eviction when max size exceeded
@@ -8,7 +8,7 @@ import Foundation
 /// - Atomic batch operations
 /// - Thread-safe queue operations
 public actor UploadQueue {
-    private var queue: [HSV] = []
+    private var queue: [String] = []
     private let maxSize: Int
     private let storage: UserDefaults
     private let storageKey = "synheart_upload_queue"
@@ -32,7 +32,7 @@ public actor UploadQueue {
             guard let data = storage.data(forKey: storageKey) else { return }
 
             let decoder = JSONDecoder()
-            let items = try decoder.decode([HSV].self, from: data)
+            let items = try decoder.decode([String].self, from: data)
             queue = items
 
             print("[UploadQueue] Loaded \(queue.count) items from storage")
@@ -52,11 +52,11 @@ public actor UploadQueue {
         }
     }
 
-    /// Enqueue a new HSV snapshot
+    /// Enqueue a new String snapshot
     ///
     /// Enforces max size with FIFO eviction.
-    public func enqueue(_ hsv: HSV) {
-        queue.append(hsv)
+    public func enqueue(_ hsiJson: String) {
+        queue.append(hsiJson)
 
         // FIFO eviction if exceeding max size
         if queue.count > maxSize {
@@ -72,8 +72,8 @@ public actor UploadQueue {
     /// Items remain in queue until confirmBatch() is called.
     ///
     /// - Parameter batchSize: Maximum number of items to dequeue
-    /// - Returns: Array of HSV snapshots (may be less than batchSize)
-    public func dequeueBatch(_ batchSize: Int) -> [HSV] {
+    /// - Returns: Array of String snapshots (may be less than batchSize)
+    public func dequeueBatch(_ batchSize: Int) -> [String] {
         guard !queue.isEmpty else { return [] }
 
         let count = min(queue.count, batchSize)
@@ -83,7 +83,7 @@ public actor UploadQueue {
     /// Confirm batch was successfully uploaded (remove from queue)
     ///
     /// - Parameter batch: The batch that was successfully uploaded
-    public func confirmBatch(_ batch: [HSV]) {
+    public func confirmBatch(_ batch: [String]) {
         // Remove the batch from the front of the queue
         let removeCount = min(batch.count, queue.count)
         queue.removeFirst(removeCount)
@@ -95,7 +95,7 @@ public actor UploadQueue {
     /// Batch is still at the front of queue - just persist to ensure it's saved.
     ///
     /// - Parameter batch: The batch that failed to upload
-    public func requeueBatch(_ batch: [HSV]) {
+    public func requeueBatch(_ batch: [String]) {
         // Batch is still at the front of queue - no action needed
         // Just persist to ensure it's saved
         persistToStorage()

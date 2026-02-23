@@ -1,6 +1,6 @@
 # Synheart Core SDK - SWIFT
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
@@ -66,11 +66,15 @@ The Core SDK strictly separates:
 ### Data Flow
 
 ```
-Wear, Phone, Behavior Modules
+Wear, Phone, Behavior Modules (raw samples)
     ↓
-HSV Runtime
+RuntimeModule → RuntimeBridge → synheart-runtime (Rust via dlsym)
+    ↓                              ↓
+    ↓                   session → state → flux → HSI JSON
+    ↓                              ↓
+    ←──── HumanStateVector ←───────┘
     ↓
-HSI (State Representation)
+FluxBridge → HSI 1.x (canonical export)
     ↓
 Optional: Focus Module → Focus Estimates
 Optional: Emotion Module → Emotion Estimates
@@ -102,6 +106,7 @@ import Combine
 try await Synheart.initialize(
     userId: "anon_user_123",
     config: SynheartConfig(
+        allowUnsignedCapabilities: true,  // Use capabilityToken + capabilitySecret in production
         enableWear: true,
         enablePhone: true,
         enableBehavior: true
@@ -149,7 +154,9 @@ import SynheartCore
 
 // Initialize modules
 let capabilities = CapabilityModule()
-capabilities.loadDefaults() // Or use loadFromToken() for production
+// In production, use loadFromToken(token, secret: secret)
+// For development only:
+capabilities.loadDefaults()
 
 let consent = ConsentModule()
 
@@ -165,15 +172,15 @@ try await wearModule.initialize()
 try await phoneModule.initialize()
 try await behaviorModule.initialize()
 
-// Create channel collector
-let collector = ChannelCollector(
-    wear: wearModule,
-    phone: phoneModule,
-    behavior: behaviorModule
-)
+// Create RuntimeBridge (wraps synheart-runtime Rust engine)
+let bridge = RuntimeBridge.createIfAvailable()
 
-// Create HSV Runtime
-let runtime = HSVRuntimeModule(collector: collector)
+// Create Runtime Module
+let runtime = RuntimeModule(
+    bridge: bridge,
+    wearSamplePublisher: wearModule.rawSamplePublisher,
+    behaviorEventPublisher: behaviorModule.eventPublisher
+)
 
 // Initialize and start runtime
 try await runtime.initialize()
@@ -186,9 +193,9 @@ try await behaviorModule.start()
 
 // Subscribe to final HSV
 var cancellables = Set<AnyCancellable>()
-runtime.finalHsvStream
-    .sink { hsv in
-        // Handle state updates
+runtime.hsiStream
+    .sink { hsiJson in
+        // Handle HSI JSON frames from synheart-runtime
     }
     .store(in: &cancellables)
 ```
@@ -235,10 +242,11 @@ class MyFocusModel: FocusModelProtocol {
     }
 }
 
-// Preferred: inject models via SynheartConfig (used by HSVRuntimeModule)
+// Preferred: inject models via SynheartConfig (used by RuntimeModule)
 try await Synheart.initialize(
     userId: "anon_user_123",
     config: SynheartConfig(
+        allowUnsignedCapabilities: true,  // Use capabilityToken + capabilitySecret in production
         enableWear: true,
         enablePhone: true,
         enableBehavior: true,
@@ -247,6 +255,38 @@ try await Synheart.initialize(
     )
 )
 ```
+
+## Error Handling
+
+The SDK uses Swift's native error handling with typed errors:
+
+```swift
+do {
+    try await Synheart.initialize(
+        userId: "user_123",
+        config: SynheartConfig(allowUnsignedCapabilities: true)
+    )
+    try await Synheart.startSession()
+} catch SynheartError.alreadyConfigured {
+    print("SDK already initialized")
+} catch SynheartError.capabilityTokenRequired {
+    print("Provide a valid capability token or set allowUnsignedCapabilities: true")
+} catch SynheartError.notInitialized {
+    print("Call initialize() first")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+### Error Types
+
+| Error | When |
+|-------|------|
+| `SynheartError.notInitialized` | Method called before `initialize()` |
+| `SynheartError.alreadyConfigured` | `initialize()` called twice |
+| `SynheartError.capabilityTokenRequired` | No token provided and `allowUnsignedCapabilities` is false |
+| `SynheartError.notImplemented(String)` | Feature not yet available |
+| `CloudConnectorError.consentRequired(String)` | Cloud operation without consent |
 
 ## Architecture Details
 
@@ -267,7 +307,7 @@ A direct, non-modular pipeline for ingestion/processing/fusion:
 
 A module-based system for windowed feature collection:
 
-- **HSVRuntimeModule**: Orchestrates window-based processing (30s, 5m, 1h, 24h windows)
+- **RuntimeModule**: Orchestrates window-based processing (30s, 5m, 1h, 24h windows)
 - **WearModule**: Collects biosignal features from wearables
 - **PhoneModule**: Collects phone context features (motion, app switches, screen time)
 - **BehaviorModule**: Extracts behavioral patterns (typing, scrolling, interactions)
@@ -298,6 +338,38 @@ For the modular architecture, features are collected in time windows:
 - **PhoneWindowFeatures**: Motion level, app switch rate, screen on ratio, notification rate
 - **BehaviorWindowFeatures**: Typing cadence, scroll velocity, burstiness, distraction score, focus hints
 
+## API Reference
+
+### Synheart (Main Entry Point)
+
+| Method | Description |
+|--------|-------------|
+| `initialize(userId:config:appKey:)` | Initialize the SDK (must be called first) |
+| `startSession()` | Start data collection |
+| `stopSession()` | Stop data collection |
+| `enableFocus()` | Enable focus interpretation module |
+| `enableEmotion()` | Enable emotion interpretation module |
+| `enableCloud()` | Enable cloud uploads (requires consent) |
+| `disableCloud()` | Disable cloud uploads |
+| `uploadNow()` | Force upload queued snapshots |
+| `grantConsent(_:)` | Grant consent for a data type |
+| `revokeConsent(_:)` | Revoke consent for a data type |
+| `hasConsent(_:)` | Check if consent is granted |
+| `stop()` | Stop the session |
+| `dispose()` | Release all resources |
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `onHSIUpdate` | `AnyPublisher<HSISnapshot, Never>` | Stream of HSI state updates |
+| `onEmotionUpdate` | `AnyPublisher<EmotionState, Never>` | Stream of emotion updates |
+| `onFocusUpdate` | `AnyPublisher<FocusState, Never>` | Stream of focus updates |
+| `currentState` | `HSISnapshot?` | Latest HSI snapshot |
+| `currentConsent` | `ConsentSnapshot?` | Current consent state |
+| `isInitialized` | `Bool` | Whether SDK is initialized |
+| `isRunning` | `Bool` | Whether a session is active |
+
 ## Project Structure
 
 ```
@@ -320,7 +392,7 @@ SynheartCore/
 │   └── MetaState.swift
 ├── Modules/                 # Modular architecture
 │   ├── Base/               # Module base classes and manager
-│   ├── HSVRuntime/         # Runtime orchestration
+│   ├── Runtime/            # Runtime orchestration
 │   ├── Wear/               # Wearable data collection
 │   ├── Phone/              # Phone context collection
 │   ├── Behavior/            # Behavior pattern extraction
@@ -371,6 +443,39 @@ The Behavior Module will integrate with app-level event instrumentation for inte
 
 - iOS 15.0+ / macOS 12.0+ / watchOS 8.0+ / tvOS 15.0+
 - Swift 5.9+
+
+## Testing
+
+### Running Tests
+
+```bash
+swift test
+```
+
+### Testing with Mock Providers
+
+The SDK ships with mock data sources for development and testing. When no real wearable or sensor is connected, modules use mock collectors that emit synthetic data.
+
+To test your integration without hardware:
+
+```swift
+// Initialize with default capabilities (no real token needed)
+try await Synheart.initialize(
+    userId: "test_user",
+    config: SynheartConfig(allowUnsignedCapabilities: true)
+)
+
+// Start session — mock data will flow through all streams
+try await Synheart.startSession()
+
+// Subscribe and verify
+Synheart.onHSIUpdate
+    .sink { hsi in
+        // Verify HSI data structure
+        assert(hsi.affect != nil || hsi.engagement != nil)
+    }
+    .store(in: &cancellables)
+```
 
 ## Related Repositories
 

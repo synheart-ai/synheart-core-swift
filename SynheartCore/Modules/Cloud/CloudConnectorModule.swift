@@ -15,7 +15,7 @@ import Combine
 ///
 /// Architecture:
 /// ```
-/// HSVRuntime → CloudConnector → [Queue] → UploadClient → Platform
+/// RuntimeModule → CloudConnector → [Queue] → UploadClient → Platform
 ///                    ↓
 ///              RateLimiter
 ///              NetworkMonitor
@@ -23,7 +23,7 @@ import Combine
 public class CloudConnectorModule: BaseSynheartModule {
     private let capabilities: CapabilityProvider
     private let consent: ConsentModule
-    private let hsvRuntime: HSVRuntimeModule
+    private let runtimeModule: RuntimeModule
     private let config: CloudConfig
 
     // Components
@@ -39,12 +39,12 @@ public class CloudConnectorModule: BaseSynheartModule {
     public init(
         capabilities: CapabilityProvider,
         consent: ConsentModule,
-        hsvRuntime: HSVRuntimeModule,
+        runtimeModule: RuntimeModule,
         config: CloudConfig
     ) {
         self.capabilities = capabilities
         self.consent = consent
-        self.hsvRuntime = hsvRuntime
+        self.runtimeModule = runtimeModule
         self.config = config
         super.init(moduleId: "cloud")
     }
@@ -52,14 +52,12 @@ public class CloudConnectorModule: BaseSynheartModule {
     public override func onInitialize() async throws {
         print("[CloudConnector] Initializing...")
 
-        // 1. Initialize components
         hmacSigner = HMACSigner(hmacSecret: config.hmacSecret)
         uploadClient = UploadClient(baseUrl: config.baseUrl)
         uploadQueue = UploadQueue(maxSize: config.maxQueueSize)
         rateLimiter = RateLimiter(capabilityProvider: capabilities)
         networkMonitor = NetworkMonitor()
 
-        // 2. Load persisted queue
         await uploadQueue.loadFromStorage()
 
         print("[CloudConnector] Initialized")
@@ -68,17 +66,15 @@ public class CloudConnectorModule: BaseSynheartModule {
     public override func onStart() async throws {
         print("[CloudConnector] Starting...")
 
-        // 1. Subscribe to HSV stream (final stream includes emotion/focus if enabled)
-        hsvRuntime.finalHsvStream
-            .sink { [weak self] hsv in
+        runtimeModule.hsiStream
+            .sink { [weak self] hsiJson in
                 guard let self = self else { return }
                 Task {
-                    await self.handleHSVUpdate(hsv)
+                    await self.handleHSIUpdate(hsiJson)
                 }
             }
             .store(in: &cancellables)
 
-        // 2. Subscribe to network changes
         networkMonitor.connectivityPublisher
             .sink { [weak self] isOnline in
                 guard let self = self else { return }
@@ -88,7 +84,6 @@ public class CloudConnectorModule: BaseSynheartModule {
             }
             .store(in: &cancellables)
 
-        // 3. Attempt to flush queue if online
         if networkMonitor.isOnline {
             Task {
                 await flushQueue()
@@ -118,8 +113,8 @@ public class CloudConnectorModule: BaseSynheartModule {
         print("[CloudConnector] Disposed")
     }
 
-    /// Handle HSV update from runtime
-    private func handleHSVUpdate(_ hsv: HSV) async {
+    /// Handle HSI JSON update from runtime
+    private func handleHSIUpdate(_ hsiJson: String) async {
         // Check consent
         let currentConsent = await consent.current()
         guard currentConsent.cloudUpload else {
@@ -127,13 +122,13 @@ public class CloudConnectorModule: BaseSynheartModule {
         }
 
         // Check rate limit (based on window type, defaulting to "micro")
-        let windowType = "micro" // TODO: Extract from HSV when available
+        let windowType = "micro"
         guard await rateLimiter.canUpload(windowType) else {
             return // Silent return - rate limited
         }
 
         // Enqueue for upload
-        await uploadQueue.enqueue(hsv)
+        await uploadQueue.enqueue(hsiJson)
 
         // Try immediate upload if online
         if networkMonitor.isOnline {
@@ -157,18 +152,13 @@ public class CloudConnectorModule: BaseSynheartModule {
         guard !batch.isEmpty else { return }
 
         do {
-            // Convert HSV → HSI 1.0
-            let hsi10Snapshots = batch.map { hsv in
-                hsv.toHSI10(
-                    producerName: "Synheart Core SDK",
-                    producerVersion: "1.0.0",
-                    instanceId: config.instanceId
-                )
-            }
-
-            // Create upload payload
-            let snapshots = hsi10Snapshots.map { dict in
-                dict.mapValues { AnyCodable($0) }
+            // HSI JSON comes directly from synheart-runtime — no FluxBridge needed
+            let snapshots = batch.compactMap { json -> [String: AnyCodable]? in
+                guard let data = json.data(using: .utf8),
+                      let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return nil
+                }
+                return dict.mapValues { AnyCodable($0) }
             }
 
             let payload = UploadRequest(
@@ -190,7 +180,7 @@ public class CloudConnectorModule: BaseSynheartModule {
             await uploadQueue.confirmBatch(batch)
 
             // Update rate limiter
-            let windowType = "micro" // TODO: Extract from batch
+            let windowType = "micro"
             await rateLimiter.recordUpload(windowType, batchSize: batch.count)
 
             print("[CloudConnector] Uploaded \(batch.count) snapshots (\(response.status))")

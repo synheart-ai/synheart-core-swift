@@ -4,19 +4,19 @@ import Combine
 /// Phone Module
 ///
 /// Captures device-level motion and context signals.
-/// Provides window-based features to HSV Runtime.
-public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider {
+/// RFC-CORE-0007 compliant: no feature computation in Core.
+public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneDataProvider {
     private let motionCollector = MotionCollector()
     private let screenTracker = ScreenStateTracker()
     private let appTracker = AppFocusTracker()
     private let notificationTracker = NotificationTracker()
     private let cache = PhoneCache()
-    
+
     private let capabilities: CapabilityProvider
     private let consent: ConsentProvider
-    
+
     private var cancellables = Set<AnyCancellable>()
-    
+
     public init(
         capabilities: CapabilityProvider,
         consent: ConsentProvider
@@ -25,57 +25,31 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider {
         self.consent = consent
         super.init(moduleId: "phone")
     }
-    
+
     // MARK: - PhoneFeatureProvider
-    
+
     public func features(_ window: WindowType) -> PhoneWindowFeatures? {
-        // Check consent
-        guard consent.current().motion else {
-            return nil // Return nil if consent denied
-        }
-        
-        guard let features = cache.getFeatures(window) else {
-            return nil
-        }
-        
-        // Filter based on capability level
-        return filterByCapability(features)
+        // Feature computation removed per RFC-CORE-0007.
+        // Features will be computed by Flux when wired.
+        return nil
     }
-    
-    /// Filter features based on capability level
-    private func filterByCapability(_ features: PhoneWindowFeatures) -> PhoneWindowFeatures? {
-        let level = capabilities.capability(.phone)
-        
-        switch level {
-        case .none:
-            return nil
-            
-        case .core:
-            // Core: Motion and screen only
-            return PhoneWindowFeatures(
-                motionLevel: features.motionLevel,
-                appSwitchRate: 0.0, // No app switching at core level
-                screenOnRatio: features.screenOnRatio,
-                notificationRate: 0.0 // No notifications at core level
-            )
-            
-        case .extended, .research:
-            // Extended/Research: Full access
-            return features
-        }
+
+    // MARK: - RawPhoneDataProvider
+
+    public func rawDataPoints(_ window: WindowType) -> [PhoneDataPoint] {
+        guard consent.current().phoneContext else { return [] }
+        return cache.getDataPoints(window)
     }
-    
+
     // MARK: - SynheartModule
-    
+
     public override func initialize() async throws {
         print("[PhoneModule] Initializing phone collectors...")
-        // Nothing to initialize for mock collectors
     }
-    
+
     public override func start() async throws {
         print("[PhoneModule] Starting phone data collection...")
-        
-        // Start motion collection
+
         try await motionCollector.start()
         motionCollector.motionStream
             .sink(
@@ -89,8 +63,7 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider {
                 }
             )
             .store(in: &cancellables)
-        
-        // Start screen state tracking
+
         try await screenTracker.start()
         screenTracker.screenStream
             .sink(
@@ -104,8 +77,7 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider {
                 }
             )
             .store(in: &cancellables)
-        
-        // Start app tracking (if capability allows)
+
         if capabilities.capability(.phone) != .none {
             try await appTracker.start()
             appTracker.appSwitchStream
@@ -121,8 +93,7 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider {
                 )
                 .store(in: &cancellables)
         }
-        
-        // Start notification tracking (if capability allows)
+
         if capabilities.capability(.phone) != .none {
             try await notificationTracker.start()
             notificationTracker.notificationStream
@@ -138,29 +109,27 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider {
                 )
                 .store(in: &cancellables)
         }
-        
+
         print("[PhoneModule] Started \(cancellables.count) collectors")
     }
-    
+
     public override func stop() async throws {
         print("[PhoneModule] Stopping phone data collection...")
-        
+
         cancellables.removeAll()
-        
-        // Stop all collectors
+
         try await motionCollector.stop()
         try await screenTracker.stop()
         try await appTracker.stop()
         try await notificationTracker.stop()
     }
-    
+
     public override func dispose() async throws {
         print("[PhoneModule] Disposing phone module...")
-        
+
         try await motionCollector.dispose()
         try await screenTracker.dispose()
         try await appTracker.dispose()
         try await notificationTracker.dispose()
     }
 }
-
