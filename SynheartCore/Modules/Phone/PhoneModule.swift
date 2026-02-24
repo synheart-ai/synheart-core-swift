@@ -30,7 +30,7 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneData
 
     public func features(_ window: WindowType) -> PhoneWindowFeatures? {
         // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by Flux when wired.
+        // Features will be computed by synheart-runtime when wired.
         return nil
     }
 

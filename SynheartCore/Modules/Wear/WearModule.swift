@@ -28,7 +28,7 @@ public class WearModule: BaseSynheartModule, WearFeatureProvider, RawWearDataPro
 
     public func features(_ window: WindowType) -> WearWindowFeatures? {
         // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by Flux when wired.
+        // Features will be computed by synheart-runtime when wired.
         return nil
     }
 

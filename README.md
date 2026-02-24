@@ -1,6 +1,6 @@
 # Synheart Core SDK - SWIFT
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
@@ -26,11 +26,10 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 - **Wear Module** → Biosignals (HR, HRV, sleep, motion)
 - **Phone Module** → Motion + context signals
 - **Behavior Module** → Digital interaction patterns
-- **HSV Runtime** → Signal fusion + state computation
+- **HSI Runtime** → Signal fusion + state computation (via synheart-runtime Rust engine)
 - **Consent Module** → User permission management
 - **Capabilities Module** → Feature gating (core/extended/research)
-- **Cloud Connector** → Secure HSI snapshot uploads (planned)
-- **Syni Hooks** → LLM conditioning (planned)
+- **Cloud Connector** → Secure HSI snapshot uploads
 
 **Key principle:**
 > One SDK, many modules, unified human-state model
@@ -55,8 +54,8 @@ The Core SDK strictly separates:
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSV Runtime** - Signal fusion and state representation
-7. **Cloud Connector** - Secure HSI snapshot uploads (planned)
+6. **HSI Runtime** - Signal fusion and state computation (via synheart-runtime)
+7. **Cloud Connector** - Secure HSI snapshot uploads
 
 ### Optional Interpretation Modules
 
@@ -70,11 +69,9 @@ Wear, Phone, Behavior Modules (raw samples)
     ↓
 RuntimeModule → RuntimeBridge → synheart-runtime (Rust via dlsym)
     ↓                              ↓
-    ↓                   session → state → flux → HSI JSON
+    ↓                   session → state → HSI JSON
     ↓                              ↓
     ←──── HumanStateVector ←───────┘
-    ↓
-FluxBridge → HSI 1.x (canonical export)
     ↓
 Optional: Focus Module → Focus Estimates
 Optional: Emotion Module → Emotion Estimates
@@ -117,21 +114,20 @@ try await Synheart.initialize(
 var cancellables = Set<AnyCancellable>()
 
 Synheart.onHSIUpdate
-    .sink { hsi in
-        print("Arousal Index: \(hsi.affect?.arousalIndex ?? 0)")
-        print("Engagement Stability: \(hsi.engagement?.engagementStability ?? 0)")
+    .sink { hsiJson in
+        print("HSI JSON: \(hsiJson)")
     }
     .store(in: &cancellables)
 
-// Optional: Enable interpretation modules
-try await Synheart.enableFocus()
+// Optional: Enable interpretation modules (activate API preferred)
+Synheart.activate(.focus)
 Synheart.onFocusUpdate
     .sink { focus in
         print("Focus Score: \(focus.score)")
     }
     .store(in: &cancellables)
 
-try await Synheart.enableEmotion()
+Synheart.activate(.emotion)
 Synheart.onEmotionUpdate
     .sink { emotion in
         print("Stress Index: \(emotion.stress)")
@@ -139,7 +135,7 @@ Synheart.onEmotionUpdate
     .store(in: &cancellables)
 
 // Optional: Enable cloud sync (requires consent)
-// try await Synheart.enableCloud()
+// Synheart.activate(.cloud)
 
 // Later, stop when done
 try await Synheart.stop()
@@ -347,10 +343,8 @@ For the modular architecture, features are collected in time windows:
 | `initialize(userId:config:appKey:)` | Initialize the SDK (must be called first) |
 | `startSession()` | Start data collection |
 | `stopSession()` | Stop data collection |
-| `enableFocus()` | Enable focus interpretation module |
-| `enableEmotion()` | Enable emotion interpretation module |
-| `enableCloud()` | Enable cloud uploads (requires consent) |
-| `disableCloud()` | Disable cloud uploads |
+| `activate(_:)` | Enable a feature (focus, emotion, cloud, etc.) |
+| `deactivate(_:)` | Disable a feature |
 | `uploadNow()` | Force upload queued snapshots |
 | `grantConsent(_:)` | Grant consent for a data type |
 | `revokeConsent(_:)` | Revoke consent for a data type |
@@ -362,10 +356,10 @@ For the modular architecture, features are collected in time windows:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `onHSIUpdate` | `AnyPublisher<HSISnapshot, Never>` | Stream of HSI state updates |
+| `onHSIUpdate` | `AnyPublisher<String, Never>` | HSI JSON frames from synheart-runtime |
 | `onEmotionUpdate` | `AnyPublisher<EmotionState, Never>` | Stream of emotion updates |
 | `onFocusUpdate` | `AnyPublisher<FocusState, Never>` | Stream of focus updates |
-| `currentState` | `HSISnapshot?` | Latest HSI snapshot |
+| `currentState` | `String?` | Latest HSI JSON frame |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |
 | `isInitialized` | `Bool` | Whether SDK is initialized |
 | `isRunning` | `Bool` | Whether a session is active |
@@ -395,18 +389,19 @@ SynheartCore/
 │   ├── Runtime/            # Runtime orchestration
 │   ├── Wear/               # Wearable data collection
 │   ├── Phone/              # Phone context collection
-│   ├── Behavior/            # Behavior pattern extraction
+│   ├── Behavior/            # Behavior event collection
 │   ├── Capabilities/       # Feature flags and capabilities
 │   ├── Consent/            # Consent management
+│   ├── SRM/                # Self-Reference Model (baseline persistence)
 │   └── Interfaces/         # Feature provider protocols
 └── Synheart.swift          # Public SDK facade / main entry point
 ```
 
 ## Platform Integration
 
-### HealthKit Integration (Planned, via Synheart Wear)
+### HealthKit (via synheart-wear-swift)
 
-The Wear Module will integrate with iOS HealthKit for biosignal collection (this repo currently uses a mock wear source):
+The Wear Module collects biosignals from HealthKit via synheart-wear-swift:
 
 - Heart rate monitoring
 - Heart rate variability (HRV)
@@ -414,17 +409,17 @@ The Wear Module will integrate with iOS HealthKit for biosignal collection (this
 - Sleep stage detection
 - Motion/activity data
 
-### CoreMotion Integration (Planned, via Synheart Behavior)
+### CoreMotion (via synheart-behavior-swift)
 
-The Phone Module will integrate with CoreMotion for device motion (this repo currently uses mock collectors):
+The Phone Module collects device motion via CoreMotion:
 
 - Accelerometer data
 - Gyroscope data
 - Device motion (attitude, rotation rate)
 
-### UITouch Integration (Planned, via Synheart Behavior)
+### Behavior Tracking (via synheart-behavior-swift)
 
-The Behavior Module will integrate with app-level event instrumentation for interaction tracking:
+The Behavior Module captures user-device interaction patterns:
 
 - Tap events
 - Scroll gestures
@@ -434,7 +429,9 @@ The Behavior Module will integrate with app-level event instrumentation for inte
 
 - All processing is **on-device by default**
 - **No raw biosignals** stored or transmitted
-- Cloud sync only for aggregated HSV (with consent)
+- **HSI stream is consent-gated** — `onHSIUpdate` only emits frames when `biosignals` consent is granted
+- Cloud sync only for aggregated HSI (with consent)
+- **SRM baseline persistence** — Learned baselines are encrypted and persisted to Keychain, restored automatically on next launch
 - Consent management via `ConsentModule`
 - Capability-based feature access control
 - Non-medical use only
@@ -470,9 +467,9 @@ try await Synheart.startSession()
 
 // Subscribe and verify
 Synheart.onHSIUpdate
-    .sink { hsi in
-        // Verify HSI data structure
-        assert(hsi.affect != nil || hsi.engagement != nil)
+    .sink { hsiJson in
+        // Verify HSI JSON from synheart-runtime
+        print("HSI: \(hsiJson)")
     }
     .store(in: &cancellables)
 ```
@@ -497,11 +494,11 @@ All three implementations share the same modular architecture. See the Flutter r
 
 Apache 2.0 License - see [LICENSE](LICENSE) for details.
 
-Copyright 2025 Synheart AI Inc.
+Copyright 2025-2026 Synheart AI Inc.
 
 ## Author
 
-Israel Goytom
+Synheart AI Team
 
 ## Patent Pending Notice
 

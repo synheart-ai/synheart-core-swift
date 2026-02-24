@@ -8,13 +8,11 @@ public protocol FocusModelProtocol {
     func predict(features: [String: Float]) async throws -> [String: Float]
 }
 
-/// Default placeholder implementation for testing
+/// Stub — returns random values until synheart-focus provides a real model.
 public class PlaceholderFocusModel: FocusModelProtocol {
     public init() {}
-    
+
     public func predict(features: [String: Float]) async throws -> [String: Float] {
-        // Placeholder implementation - returns random values
-        // Replace with actual synheart_focus module integration
         return [
             "score": Float.random(in: 0...1),
             "cognitive_load": Float.random(in: 0...1),

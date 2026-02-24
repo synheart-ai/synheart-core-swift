@@ -2,7 +2,7 @@ import Foundation
 
 /// Human State Vector - the main data structure representing human state.
 ///
-/// Aligned with synheart-flux. The HSV is the canonical internal
+/// Aligned with synheart-runtime. The HSV is the canonical internal
 /// representation fusing physiology, behavior, and context modalities.
 /// External consumers receive HSI JSON (via synheart-runtime), never HSV directly.
 ///
@@ -10,7 +10,7 @@ import Foundation
 /// - Core produces the base HSV with physiology + behavior + context
 /// - Emotion Head (via synheart-emotion SDK) populates `emotion`
 /// - Focus Head (via synheart-focus SDK) populates `focus`
-/// - synheart-runtime exports HSV → HSI 1.0 with `ExportPolicy` filtering
+/// - synheart-runtime exports HSV → HSI internally
 public struct HumanStateVector: Codable {
     // Physiology domain — wearable-derived readings with per-axis confidence
     public var physiology: PhysiologyState

@@ -1,8 +1,8 @@
 import Foundation
 
-/// Data provenance tracking aligned with synheart-flux HSV.
+/// Data provenance tracking aligned with synheart-runtime HSV.
 ///
-/// Mirrors Rust `ProvenanceInfo` — records the origin and lineage of data
+/// Mirrors Rust `ProvenanceInfo` from synheart-runtime — records the origin and lineage of data
 /// that contributed to the Human State Vector.
 public struct ProvenanceInfo: Codable {
     /// Unique identifiers of data sources that contributed.

@@ -3,7 +3,7 @@ import Combine
 
 /// Cloud Connector Module
 ///
-/// Securely uploads HSV snapshots (as HSI 1.0 format) to Synheart Platform.
+/// Securely uploads HSV snapshots (as HSI 1.1 format) to Synheart Platform.
 ///
 /// Features:
 /// - HMAC-SHA256 authentication
@@ -152,7 +152,7 @@ public class CloudConnectorModule: BaseSynheartModule {
         guard !batch.isEmpty else { return }
 
         do {
-            // HSI JSON comes directly from synheart-runtime — no FluxBridge needed
+            // HSI JSON comes directly from synheart-runtime
             let snapshots = batch.compactMap { json -> [String: AnyCodable]? in
                 guard let data = json.data(using: .utf8),
                       let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

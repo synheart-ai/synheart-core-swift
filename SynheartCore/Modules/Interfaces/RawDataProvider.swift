@@ -3,7 +3,7 @@ import Foundation
 /// Protocols for modules to expose raw buffered data to the runtime pipeline.
 ///
 /// RFC-CORE-0007: Core caches buffer raw data only. Feature computation,
-/// fusion, embedding, and HSV construction are delegated to Flux.
+/// fusion, embedding, and HSV construction are delegated to synheart-runtime.
 
 /// Provides raw wear samples for a given window.
 public protocol RawWearDataProvider: AnyObject {

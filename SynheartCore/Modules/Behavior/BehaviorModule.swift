@@ -33,7 +33,7 @@ public class BehaviorModule: BaseSynheartModule, BehaviorFeatureProvider, RawBeh
 
     public func features(_ window: WindowType) -> BehaviorWindowFeatures? {
         // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by Flux when wired.
+        // Features will be computed by synheart-runtime when wired.
         return nil
     }
 

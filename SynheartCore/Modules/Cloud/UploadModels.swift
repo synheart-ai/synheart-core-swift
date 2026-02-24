@@ -18,7 +18,7 @@ public struct Subject: Codable {
 
 /// Upload request payload
 ///
-/// Contains subject info and HSI 1.0 snapshots.
+/// Contains subject info and HSI 1.1 snapshots.
 public struct UploadRequest: Codable {
     public let subject: Subject
     public let snapshots: [[String: AnyCodable]]

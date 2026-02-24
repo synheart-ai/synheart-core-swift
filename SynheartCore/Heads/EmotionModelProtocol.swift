@@ -8,13 +8,11 @@ public protocol EmotionModelProtocol {
     func predict(features: [String: Float]) async throws -> [String: Float]
 }
 
-/// Default placeholder implementation for testing
+/// Stub — returns random values until synheart-emotion provides a real model.
 public class PlaceholderEmotionModel: EmotionModelProtocol {
     public init() {}
-    
+
     public func predict(features: [String: Float]) async throws -> [String: Float] {
-        // Placeholder implementation - returns random values
-        // Replace with actual synheart_emotion module integration
         return [
             "stress": Float.random(in: 0...1),
             "calm": Float.random(in: 0...1),

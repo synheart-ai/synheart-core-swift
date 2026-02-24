@@ -9,12 +9,14 @@ import Foundation
 /// Implements RFC-CORE-0006 §3.3 and SRM.pdf.
 public class SRMModule: BaseSynheartModule {
     private let config: SRMConfig
+    private let storage: SRMSnapshotStorage?
 
     /// Per-stratum buffers.
     private var buffers: [SRMStratum: SRMBuffer] = [:]
 
-    public init(config: SRMConfig = .defaults) {
+    public init(config: SRMConfig = .defaults, storage: SRMSnapshotStorage? = nil) {
         self.config = config
+        self.storage = storage
         super.init(moduleId: "srm")
     }
 
@@ -25,6 +27,19 @@ public class SRMModule: BaseSynheartModule {
         for stratum in SRMStratum.allCases {
             buffers[stratum] = SRMBuffer(stratum: stratum, config: config)
         }
+
+        // Restore persisted snapshot if available
+        if let storage = storage {
+            do {
+                if let saved = try storage.load() {
+                    restoreSnapshot(saved)
+                    print("[SRM] Restored persisted snapshot")
+                }
+            } catch {
+                print("[SRM] Warning: failed to load persisted snapshot: \(error)")
+            }
+        }
+
         print("[SRM] SRM module initialized (\(buffers.count) strata)")
     }
 
@@ -33,11 +48,25 @@ public class SRMModule: BaseSynheartModule {
     }
 
     public override func onStop() async throws {
+        if let storage = storage {
+            do {
+                try storage.save(snapshot())
+            } catch {
+                print("[SRM] Warning: failed to persist snapshot on stop: \(error)")
+            }
+        }
         print("[SRM] SRM module stopped")
     }
 
     public override func onDispose() async throws {
         print("[SRM] Disposing SRM module...")
+        if let storage = storage {
+            do {
+                try storage.save(snapshot())
+            } catch {
+                print("[SRM] Warning: failed to persist snapshot on dispose: \(error)")
+            }
+        }
         buffers.removeAll()
     }
 

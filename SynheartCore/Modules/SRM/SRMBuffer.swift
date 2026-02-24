@@ -1,10 +1,16 @@
 import Foundation
 
 /// An accepted entry stored in the per-stratum buffer.
-public struct BufferEntry {
+public struct BufferEntry: Codable {
     public let windowId: String
     public let metrics: [String: Double]
     public let observedAtUtc: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case windowId = "window_id"
+        case metrics
+        case observedAtUtc = "observed_at_utc"
+    }
 
     /// Calendar day key (UTC) for distinct-day counting.
     public var dayKey: String {

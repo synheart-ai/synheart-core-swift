@@ -1,6 +1,6 @@
 import Foundation
 
-/// A candidate window submitted by Flux for SRM consideration.
+/// A candidate window submitted by synheart-runtime for SRM consideration.
 ///
 /// Contains the metrics and metadata needed for quality gating,
 /// outlier rejection, and buffer update (SRM.pdf §4).
@@ -44,7 +44,7 @@ public struct CandidateWindow {
 }
 
 /// Per-metric robust reference (median and MAD).
-public struct MetricReference {
+public struct MetricReference: Codable {
     public let median: Double
     public let mad: Double
 

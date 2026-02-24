@@ -100,7 +100,7 @@ public class EmotionHead {
             features["sdnn"] = sdnn
         }
 
-        // Physiology features (from PhysiologyState — synheart-flux)
+        // Physiology features (from PhysiologyState — synheart-runtime)
         if let score = hsv.physiology.recoveryScore.score {
             features["recovery_score"] = score
         }

@@ -22,10 +22,6 @@ public struct MetaState: Codable {
     /// Total accepted windows across SRM strata.
     public let baselineSessions: Int?
 
-    /// Raw Flux HSV JSON returned by `flux_processor_process_window`.
-    /// Stored for downstream access (e.g., debugging, advanced consumers).
-    public let rawFluxHsv: String?
-
     public init(device: DeviceInfo,
                 sessionId: String = UUID().uuidString,
                 timestamp: Date = Date(),
@@ -34,8 +30,7 @@ public struct MetaState: Codable {
                 srmSnapshotId: String? = nil,
                 srmVersion: String? = nil,
                 baselineDays: Int? = nil,
-                baselineSessions: Int? = nil,
-                rawFluxHsv: String? = nil) {
+                baselineSessions: Int? = nil) {
         self.device = device
         self.sessionId = sessionId
         self.timestamp = timestamp
@@ -45,7 +40,6 @@ public struct MetaState: Codable {
         self.srmVersion = srmVersion
         self.baselineDays = baselineDays
         self.baselineSessions = baselineSessions
-        self.rawFluxHsv = rawFluxHsv
     }
 }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// HTTP client for uploading HSI 1.0 snapshots to Synheart Platform
+/// HTTP client for uploading HSI 1.1 snapshots to Synheart Platform
 ///
 /// Features:
 /// - HMAC-SHA256 authentication
@@ -16,7 +16,7 @@ public class UploadClient {
         self.session = session
     }
 
-    /// Upload HSI 1.0 snapshots to the platform
+    /// Upload HSI 1.1 snapshots to the platform
     ///
     /// - Parameters:
     ///   - payload: Upload request containing subject and snapshots

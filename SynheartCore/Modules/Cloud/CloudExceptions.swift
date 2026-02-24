@@ -21,7 +21,7 @@ public enum CloudConnectorError: Error, LocalizedError {
         case .invalidTenant:
             return "Tenant ID not found or invalid"
         case .schemaValidation:
-            return "HSI 1.0 schema validation failed"
+            return "HSI 1.1 schema validation failed"
         case .networkError(let message):
             return "Network error: \(message)"
         case .generic(let message):

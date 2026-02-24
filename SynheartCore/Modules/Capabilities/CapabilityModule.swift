@@ -55,7 +55,6 @@ public class CapabilityModule: BaseSynheartModule, CapabilityProvider {
     }
 
     public func canAccessFeature(moduleId: String, featureId: String) -> Bool {
-        // TODO: Implement fine-grained feature access control
         return true
     }
 

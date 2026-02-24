@@ -13,17 +13,20 @@ public final class RuntimeBridge {
         public let stepMs: Int64
         public let subjectId: String
         public let sessionId: String
+        public let behaviorEnabled: Bool
 
         public init(
             windowMs: Int64 = 60_000,
             stepMs: Int64 = 5_000,
             subjectId: String,
-            sessionId: String
+            sessionId: String,
+            behaviorEnabled: Bool = true
         ) {
             self.windowMs = windowMs
             self.stepMs = stepMs
             self.subjectId = subjectId
             self.sessionId = sessionId
+            self.behaviorEnabled = behaviorEnabled
         }
     }
 
@@ -45,7 +48,8 @@ public final class RuntimeBridge {
             "window_ms": config.windowMs,
             "step_ms": config.stepMs,
             "subject_id": config.subjectId,
-            "session_id": config.sessionId
+            "session_id": config.sessionId,
+            "behavior_enabled": config.behaviorEnabled
         ]
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: configJson),
@@ -85,7 +89,7 @@ public final class RuntimeBridge {
     /// Push a behavior event.
     ///
     /// Event types (int32):
-    ///   0 = Unknown, 1 = Key, 2 = Touch, 3 = AppSwitch, 4 = Notification
+    ///   0 = ScreenOn, 1 = ScreenOff, 2 = Touch, 3 = AppSwitch, 4 = Notification
     public func pushBehavior(tsMs: Int64, eventType: Int32, value: Double) {
         guard let h = handle else { return }
         RuntimeFFI.pushBehavior(h, tsMs, eventType, value)
@@ -154,8 +158,15 @@ private enum RuntimeFFI {
     private typealias FreeStringFn        = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
     private typealias VersionFn           = @convention(c) () -> UnsafeMutablePointer<CChar>?
 
-    // RTLD_DEFAULT searches all loaded images
-    private static let handle: UnsafeMutableRawPointer? = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
+    // Try dlopen first (searches @rpath, /usr/local/lib, etc.), then RTLD_DEFAULT for already-linked images.
+    private static let handle: UnsafeMutableRawPointer? = {
+        #if os(macOS)
+        if let h = dlopen("libsynheart_runtime.dylib", RTLD_LAZY) { return h }
+        #elseif os(Linux)
+        if let h = dlopen("libsynheart_runtime.so", RTLD_LAZY) { return h }
+        #endif
+        return UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
+    }()
 
     // MARK: Lazy symbol resolution
 

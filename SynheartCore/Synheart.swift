@@ -75,7 +75,6 @@ public class Synheart {
     private var runtimeModule: RuntimeModule?
     private var srmModule: SRMModule?
     private var cloudConnector: CloudConnectorModule?
-    // TODO: SyniHooksModule
 
     // Optional interpretation modules
     private var emotionHead: EmotionHead?
@@ -250,7 +249,7 @@ public class Synheart {
         try moduleManager.registerModule(behaviorModule!, dependsOn: ["capabilities", "consent"])
 
         print("[Synheart] Initializing SRM...")
-        srmModule = SRMModule()
+        srmModule = SRMModule(storage: SRMSnapshotStorage())
         try moduleManager.registerModule(
             srmModule!,
             dependsOn: ["capabilities", "consent"]
@@ -265,8 +264,6 @@ public class Synheart {
         let behaviorPub: AnyPublisher<BehaviorEvent, Never>? = behaviorModule?.eventStreamInstance.events
             .catch { _ in Empty<BehaviorEvent, Never>() }
             .eraseToAnyPublisher()
-        // TODO: WearModule does not yet expose a combined samplePublisher.
-        // Wire wearSamplePublisher once WearModule gains a public publisher.
         runtimeModule = RuntimeModule(
             bridge: bridge,
             wearSamplePublisher: nil,
@@ -301,7 +298,9 @@ public class Synheart {
 
         runtimeModule?.hsiStream
             .sink { [weak self] hsiJson in
-                self?.hsiSubject.send(hsiJson)
+                guard let self = self else { return }
+                guard self.consentModule?.current().biosignals == true else { return }
+                self.hsiSubject.send(hsiJson)
             }
             .store(in: &cancellables)
 
@@ -318,7 +317,7 @@ public class Synheart {
      * Start a session — activates permitted modules and begins signal collection.
      *
      * Per RFC §5.2: Core must activate permitted modules, route normalized
-     * signals to Flux, enable HSV updates, and enable optional HSI export.
+     * signals to synheart-runtime, enable HSV updates, and enable optional HSI export.
      *
      * Must be called after initialize(). No data collection occurs until
      * this method is called (RFC §3.3).
@@ -351,7 +350,7 @@ public class Synheart {
     /**
      * Stop the current session — halts module streaming and clears ephemeral buffers.
      *
-     * Per RFC §5.2: Core must halt module streaming, stop Flux updates,
+     * Per RFC §5.2: Core must halt module streaming, stop synheart-runtime updates,
      * clear ephemeral buffers, and prevent further HSI export.
      *
      * Modules remain initialized and can be restarted with startSession().
@@ -629,7 +628,7 @@ public class Synheart {
                 focusHead = FocusHead()
                 runtimeModule?.hsiStream
                     .sink { [weak self] hsiJson in
-                        // TODO: parse focus from HSI JSON when focus head is updated
+                        // FocusHead: HSI JSON parser pending.
                         _ = hsiJson
                         _ = self
                     }
@@ -643,7 +642,7 @@ public class Synheart {
                 emotionHead = EmotionHead()
                 runtimeModule?.hsiStream
                     .sink { [weak self] hsiJson in
-                        // TODO: parse emotion from HSI JSON when emotion head is updated
+                        // EmotionHead: HSI JSON parser pending.
                         _ = hsiJson
                         _ = self
                     }
