@@ -6,6 +6,12 @@ public struct BufferEntry: Codable {
     public let metrics: [String: Double]
     public let observedAtUtc: Date
 
+    public init(windowId: String, metrics: [String: Double], observedAtUtc: Date) {
+        self.windowId = windowId
+        self.metrics = metrics
+        self.observedAtUtc = observedAtUtc
+    }
+
     private enum CodingKeys: String, CodingKey {
         case windowId = "window_id"
         case metrics

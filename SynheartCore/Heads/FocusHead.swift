@@ -64,7 +64,7 @@ public class FocusHead {
                         self.finalHsvSubject.send(finalHsv)
                     }
                 } catch {
-                    print("Error predicting focus: \(error)")
+                    SynheartLogger.log("Error predicting focus: \(error)")
                     await MainActor.run {
                         self.finalHsvSubject.send(hsv)
                     }

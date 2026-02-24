@@ -209,28 +209,28 @@ public class Synheart {
 
         self.userId = userId
 
-        print("[Synheart] Initializing...")
+        SynheartLogger.log("[Synheart] Initializing...")
 
-        print("[Synheart] Initializing capability module...")
+        SynheartLogger.log("[Synheart] Initializing capability module...")
         capabilityModule = CapabilityModule()
         let resolvedConfig = config ?? SynheartConfig()
         if let token = resolvedConfig.capabilityToken,
            let secret = resolvedConfig.capabilitySecret {
             try capabilityModule!.loadFromToken(token, secret: secret)
         } else if resolvedConfig.allowUnsignedCapabilities {
-            print("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
+            SynheartLogger.log("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
             capabilityModule!.loadDefaults()
         } else {
             throw SynheartError.capabilityTokenRequired
         }
 
-        print("[Synheart] Initializing consent module...")
+        SynheartLogger.log("[Synheart] Initializing consent module...")
         consentModule = ConsentModule()
 
         try moduleManager.registerModule(capabilityModule!)
         try moduleManager.registerModule(consentModule!)
 
-        print("[Synheart] Initializing data modules...")
+        SynheartLogger.log("[Synheart] Initializing data modules...")
         wearModule = WearModule(
             capabilities: capabilityModule!,
             consent: consentModule!
@@ -248,14 +248,14 @@ public class Synheart {
         try moduleManager.registerModule(phoneModule!, dependsOn: ["capabilities", "consent"])
         try moduleManager.registerModule(behaviorModule!, dependsOn: ["capabilities", "consent"])
 
-        print("[Synheart] Initializing SRM...")
+        SynheartLogger.log("[Synheart] Initializing SRM...")
         srmModule = SRMModule(storage: SRMSnapshotStorage())
         try moduleManager.registerModule(
             srmModule!,
             dependsOn: ["capabilities", "consent"]
         )
 
-        print("[Synheart] Initializing Runtime...")
+        SynheartLogger.log("[Synheart] Initializing Runtime...")
         let runtimeSessionId = UUID().uuidString
         let bridge = RuntimeBridge.createIfAvailable(config: .init(
             subjectId: userId,
@@ -275,7 +275,7 @@ public class Synheart {
         )
 
         if let cloudConfig = config?.cloudConfig {
-            print("[Synheart] Initializing Cloud Connector...")
+            SynheartLogger.log("[Synheart] Initializing Cloud Connector...")
             cloudConnector = CloudConnectorModule(
                 capabilities: capabilityModule!,
                 consent: consentModule!,
@@ -288,7 +288,7 @@ public class Synheart {
             )
         }
 
-        print("[Synheart] Initializing all modules...")
+        SynheartLogger.log("[Synheart] Initializing all modules...")
         try await moduleManager.initializeAll()
 
         previousConsent = consentModule!.current()
@@ -308,7 +308,7 @@ public class Synheart {
         _activationManager!.activateFromConfig(resolvedConfig)
 
         isConfigured = true
-        print("[Synheart] Initialization complete. Call startSession() to begin.")
+        SynheartLogger.log("[Synheart] Initialization complete. Call startSession() to begin.")
     }
 
     // MARK: - Session Lifecycle
@@ -340,11 +340,11 @@ public class Synheart {
             return // Already running
         }
 
-        print("[Synheart] Starting session...")
+        SynheartLogger.log("[Synheart] Starting session...")
         try await moduleManager.startAll()
         isRunning = true
         _reevaluateAllFeatures()
-        print("[Synheart] Session started")
+        SynheartLogger.log("[Synheart] Session started")
     }
 
     /**
@@ -369,38 +369,15 @@ public class Synheart {
             return
         }
 
-        print("[Synheart] Stopping session...")
+        SynheartLogger.log("[Synheart] Stopping session...")
         isRunning = false
         _reevaluateAllFeatures()
         try await moduleManager.stopAll()
-        print("[Synheart] Session stopped")
+        SynheartLogger.log("[Synheart] Session stopped")
     }
 
     // MARK: - Interpretation Modules
 
-    /// Enable focus interpretation module
-    ///
-    /// - Note: Deprecated — use `activate(.focus)` instead.
-    @available(*, deprecated, message: "Use activate(.focus) instead")
-    public static func enableFocus() async throws {
-        activate(.focus)
-    }
-
-    /// Enable emotion interpretation module
-    ///
-    /// - Note: Deprecated — use `activate(.emotion)` instead.
-    @available(*, deprecated, message: "Use activate(.emotion) instead")
-    public static func enableEmotion() async throws {
-        activate(.emotion)
-    }
-
-    /// Enable cloud uploads (requires cloudUpload consent)
-    ///
-    /// - Note: Deprecated — use `activate(.cloud)` instead.
-    @available(*, deprecated, message: "Use activate(.cloud) instead")
-    public static func enableCloud() async throws {
-        activate(.cloud)
-    }
 
     /**
      * Force upload of queued snapshots now
@@ -444,13 +421,6 @@ public class Synheart {
         await cloudConnector.flushQueue()
     }
 
-    /// Disable cloud uploads
-    ///
-    /// - Note: Deprecated — use `deactivate(.cloud)` instead.
-    @available(*, deprecated, message: "Use deactivate(.cloud) instead")
-    public static func disableCloud() async throws {
-        deactivate(.cloud)
-    }
 
     /**
      * Check if user has granted a specific consent
@@ -584,6 +554,37 @@ public class Synheart {
         try await consentModule.updateConsent(consent)
     }
 
+    // MARK: - synheart-runtime SRM API (baselines live in the native Rust engine)
+
+    /// Get baseline summary from the native synheart-runtime (if available).
+    ///
+    /// Returns a JSON string like `{"total":14,"ready":0,"warming":5,"empty":9}`
+    /// or `nil` if the native runtime is not linked.
+    public static var runtimeBaselineSummary: String? {
+        shared.runtimeModule?.bridge?.baselineSummary()
+    }
+
+    /// Get all native runtime baselines as JSON, or `nil`.
+    public static var runtimeBaselinesJson: String? {
+        shared.runtimeModule?.bridge?.baselinesJson()
+    }
+
+    /// Export the native runtime SRM snapshot as JSON for cross-session persistence.
+    public static func exportRuntimeSRMSnapshot() -> String? {
+        shared.runtimeModule?.bridge?.exportSrmSnapshot()
+    }
+
+    /// Load a native runtime SRM snapshot from JSON.
+    /// Returns 0 on success, non-zero error code on failure, or `nil` if runtime unavailable.
+    public static func loadRuntimeSRMSnapshot(_ json: String) -> Int32? {
+        shared.runtimeModule?.bridge?.loadSrmSnapshot(json: json)
+    }
+
+    /// Get the native synheart-runtime version, or `nil` if unavailable.
+    public static var runtimeVersion: String? {
+        RuntimeBridge.version()
+    }
+
     // MARK: - Consent Change Handling
 
     private func handleConsentChange(_ newConsent: ConsentSnapshot) {
@@ -607,32 +608,25 @@ public class Synheart {
         switch feature {
         case .wear:
             if isOperational && wearModule?.status != .running {
-                Task { try? await wearModule?.start() }
+                Task { do { try await wearModule?.start() } catch { SynheartLogger.log("[Synheart] Failed to start wear module: \(error)") } }
             } else if !isOperational && wearModule?.status == .running {
-                Task { try? await wearModule?.stop() }
+                Task { do { try await wearModule?.stop() } catch { SynheartLogger.log("[Synheart] Failed to stop wear module: \(error)") } }
             }
         case .behavior:
             if isOperational && behaviorModule?.status != .running {
-                Task { try? await behaviorModule?.start() }
+                Task { do { try await behaviorModule?.start() } catch { SynheartLogger.log("[Synheart] Failed to start behavior module: \(error)") } }
             } else if !isOperational && behaviorModule?.status == .running {
-                Task { try? await behaviorModule?.stop() }
+                Task { do { try await behaviorModule?.stop() } catch { SynheartLogger.log("[Synheart] Failed to stop behavior module: \(error)") } }
             }
         case .phoneContext:
             if isOperational && phoneModule?.status != .running {
-                Task { try? await phoneModule?.start() }
+                Task { do { try await phoneModule?.start() } catch { SynheartLogger.log("[Synheart] Failed to start phone module: \(error)") } }
             } else if !isOperational && phoneModule?.status == .running {
-                Task { try? await phoneModule?.stop() }
+                Task { do { try await phoneModule?.stop() } catch { SynheartLogger.log("[Synheart] Failed to stop phone module: \(error)") } }
             }
         case .focus:
             if isOperational && focusHead == nil {
                 focusHead = FocusHead()
-                runtimeModule?.hsiStream
-                    .sink { [weak self] hsiJson in
-                        // FocusHead: HSI JSON parser pending.
-                        _ = hsiJson
-                        _ = self
-                    }
-                    .store(in: &cancellables)
             } else if !isOperational && focusHead != nil {
                 focusHead = nil
                 focusSubject.send(nil)
@@ -640,25 +634,18 @@ public class Synheart {
         case .emotion:
             if isOperational && emotionHead == nil {
                 emotionHead = EmotionHead()
-                runtimeModule?.hsiStream
-                    .sink { [weak self] hsiJson in
-                        // EmotionHead: HSI JSON parser pending.
-                        _ = hsiJson
-                        _ = self
-                    }
-                    .store(in: &cancellables)
             } else if !isOperational && emotionHead != nil {
                 emotionHead = nil
                 emotionSubject.send(nil)
             }
         case .cloud:
             if isOperational && cloudConnector != nil {
-                Task { try? await cloudConnector?.start() }
+                Task { do { try await cloudConnector?.start() } catch { SynheartLogger.log("[Synheart] Failed to start cloud connector: \(error)") } }
             } else if !isOperational && cloudConnector != nil {
-                Task { try? await cloudConnector?.stop() }
+                Task { do { try await cloudConnector?.stop() } catch { SynheartLogger.log("[Synheart] Failed to stop cloud connector: \(error)") } }
             }
         case .syni:
-            break // placeholder — no SyniHooksModule yet
+            break
         }
     }
 
@@ -731,7 +718,7 @@ public class Synheart {
         isConfigured = false
         isRunning = false
 
-        print("[Synheart] Disposed")
+        SynheartLogger.log("[Synheart] Disposed")
     }
 }
 

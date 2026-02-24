@@ -23,7 +23,7 @@ public class SRMModule: BaseSynheartModule {
     // MARK: - Module lifecycle
 
     public override func onInitialize() async throws {
-        print("[SRM] Initializing SRM module...")
+        SynheartLogger.log("[SRM] Initializing SRM module...")
         for stratum in SRMStratum.allCases {
             buffers[stratum] = SRMBuffer(stratum: stratum, config: config)
         }
@@ -33,18 +33,18 @@ public class SRMModule: BaseSynheartModule {
             do {
                 if let saved = try storage.load() {
                     restoreSnapshot(saved)
-                    print("[SRM] Restored persisted snapshot")
+                    SynheartLogger.log("[SRM] Restored persisted snapshot")
                 }
             } catch {
-                print("[SRM] Warning: failed to load persisted snapshot: \(error)")
+                SynheartLogger.log("[SRM] Warning: failed to load persisted snapshot: \(error)")
             }
         }
 
-        print("[SRM] SRM module initialized (\(buffers.count) strata)")
+        SynheartLogger.log("[SRM] SRM module initialized (\(buffers.count) strata)")
     }
 
     public override func onStart() async throws {
-        print("[SRM] SRM module started")
+        SynheartLogger.log("[SRM] SRM module started")
     }
 
     public override func onStop() async throws {
@@ -52,19 +52,19 @@ public class SRMModule: BaseSynheartModule {
             do {
                 try storage.save(snapshot())
             } catch {
-                print("[SRM] Warning: failed to persist snapshot on stop: \(error)")
+                SynheartLogger.log("[SRM] Warning: failed to persist snapshot on stop: \(error)")
             }
         }
-        print("[SRM] SRM module stopped")
+        SynheartLogger.log("[SRM] SRM module stopped")
     }
 
     public override func onDispose() async throws {
-        print("[SRM] Disposing SRM module...")
+        SynheartLogger.log("[SRM] Disposing SRM module...")
         if let storage = storage {
             do {
                 try storage.save(snapshot())
             } catch {
-                print("[SRM] Warning: failed to persist snapshot on dispose: \(error)")
+                SynheartLogger.log("[SRM] Warning: failed to persist snapshot on dispose: \(error)")
             }
         }
         buffers.removeAll()
@@ -155,12 +155,12 @@ public class SRMModule: BaseSynheartModule {
     /// Restore SRM state from a snapshot.
     public func restoreSnapshot(_ snapshot: SRMSnapshot) {
         if snapshot.srmVersion != config.srmVersion {
-            print("[SRM] Warning: snapshot version \(snapshot.srmVersion) differs from config version \(config.srmVersion)")
+            SynheartLogger.log("[SRM] Warning: snapshot version \(snapshot.srmVersion) differs from config version \(config.srmVersion)")
         }
         for (stratum, stratumSnapshot) in snapshot.strata {
             buffers[stratum]?.restore(stratumSnapshot.entries)
         }
-        print("[SRM] Restored snapshot (\(snapshot.strata.count) strata)")
+        SynheartLogger.log("[SRM] Restored snapshot (\(snapshot.strata.count) strata)")
     }
 
     /// Reset all buffers.
@@ -168,7 +168,7 @@ public class SRMModule: BaseSynheartModule {
         for buffer in buffers.values {
             buffer.reset()
         }
-        print("[SRM] All buffers reset")
+        SynheartLogger.log("[SRM] All buffers reset")
     }
 
     /// Access to config (for integration modules that need thresholds).

@@ -42,22 +42,22 @@ public class WearModule: BaseSynheartModule, WearFeatureProvider, RawWearDataPro
     // MARK: - SynheartModule
 
     public override func initialize() async throws {
-        print("[WearModule] Initializing wear sources...")
+        SynheartLogger.log("[WearModule] Initializing wear sources...")
 
         for source in sources {
             guard source.isAvailable else { continue }
 
             do {
                 try await source.initialize()
-                print("[WearModule] Initialized \(source.sourceType) source")
+                SynheartLogger.log("[WearModule] Initialized \(source.sourceType) source")
             } catch {
-                print("[WearModule] Failed to initialize \(source.sourceType): \(error)")
+                SynheartLogger.log("[WearModule] Failed to initialize \(source.sourceType): \(error)")
             }
         }
     }
 
     public override func start() async throws {
-        print("[WearModule] Starting wear data collection...")
+        SynheartLogger.log("[WearModule] Starting wear data collection...")
 
         for source in sources {
             guard source.isAvailable else { continue }
@@ -66,7 +66,7 @@ public class WearModule: BaseSynheartModule, WearFeatureProvider, RawWearDataPro
                 .sink(
                     receiveCompletion: { completion in
                         if case .failure(let error) = completion {
-                            print("[WearModule] Error from \(source.sourceType): \(error)")
+                            SynheartLogger.log("[WearModule] Error from \(source.sourceType): \(error)")
                         }
                     },
                     receiveValue: { [weak self] sample in
@@ -80,21 +80,21 @@ public class WearModule: BaseSynheartModule, WearFeatureProvider, RawWearDataPro
             }
         }
 
-        print("[WearModule] Started \(cancellables.count) wear sources")
+        SynheartLogger.log("[WearModule] Started \(cancellables.count) wear sources")
     }
 
     public override func stop() async throws {
-        print("[WearModule] Stopping wear data collection...")
+        SynheartLogger.log("[WearModule] Stopping wear data collection...")
         cancellables.removeAll()
     }
 
     public override func dispose() async throws {
-        print("[WearModule] Disposing wear module...")
+        SynheartLogger.log("[WearModule] Disposing wear module...")
         for source in sources {
             do {
                 try await source.dispose()
             } catch {
-                print("[WearModule] Error disposing \(source.sourceType): \(error)")
+                SynheartLogger.log("[WearModule] Error disposing \(source.sourceType): \(error)")
             }
         }
     }

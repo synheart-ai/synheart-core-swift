@@ -25,11 +25,17 @@ struct SimpleExample {
         // Grant consent for biosignal collection
         try await Synheart.grantConsent("biosignals")
 
-        // Subscribe to HSI updates
+        // Subscribe to HSI updates (JSON string from synheart-runtime)
         Synheart.onHSIUpdate
-            .sink { hsi in
-                print("Arousal: \(hsi.affect?.arousalIndex ?? 0)")
-                print("Valence: \(hsi.affect?.valenceIndex ?? 0)")
+            .sink { hsiJson in
+                guard let data = hsiJson.data(using: .utf8),
+                      let hsi = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return
+                }
+                if let affect = hsi["affect"] as? [String: Any] {
+                    print("Arousal: \(affect["arousal_index"] ?? 0)")
+                    print("Valence: \(affect["valence_index"] ?? 0)")
+                }
             }
             .store(in: &cancellables)
 

@@ -50,7 +50,7 @@ public class CloudConnectorModule: BaseSynheartModule {
     }
 
     public override func onInitialize() async throws {
-        print("[CloudConnector] Initializing...")
+        SynheartLogger.log("[CloudConnector] Initializing...")
 
         hmacSigner = HMACSigner(hmacSecret: config.hmacSecret)
         uploadClient = UploadClient(baseUrl: config.baseUrl)
@@ -60,11 +60,11 @@ public class CloudConnectorModule: BaseSynheartModule {
 
         await uploadQueue.loadFromStorage()
 
-        print("[CloudConnector] Initialized")
+        SynheartLogger.log("[CloudConnector] Initialized")
     }
 
     public override func onStart() async throws {
-        print("[CloudConnector] Starting...")
+        SynheartLogger.log("[CloudConnector] Starting...")
 
         runtimeModule.hsiStream
             .sink { [weak self] hsiJson in
@@ -90,19 +90,19 @@ public class CloudConnectorModule: BaseSynheartModule {
             }
         }
 
-        print("[CloudConnector] Started")
+        SynheartLogger.log("[CloudConnector] Started")
     }
 
     public override func onStop() async throws {
-        print("[CloudConnector] Stopping...")
+        SynheartLogger.log("[CloudConnector] Stopping...")
 
         cancellables.removeAll()
 
-        print("[CloudConnector] Stopped")
+        SynheartLogger.log("[CloudConnector] Stopped")
     }
 
     public override func onDispose() async throws {
-        print("[CloudConnector] Disposing...")
+        SynheartLogger.log("[CloudConnector] Disposing...")
 
         // Persist queue before disposal
         await uploadQueue.persistToStorage()
@@ -110,7 +110,7 @@ public class CloudConnectorModule: BaseSynheartModule {
         // Cleanup resources
         networkMonitor.dispose()
 
-        print("[CloudConnector] Disposed")
+        SynheartLogger.log("[CloudConnector] Disposed")
     }
 
     /// Handle HSI JSON update from runtime
@@ -139,7 +139,7 @@ public class CloudConnectorModule: BaseSynheartModule {
     /// Handle network connectivity change
     private func handleNetworkChange(_ isOnline: Bool) async {
         if isOnline {
-            print("[CloudConnector] Network available, flushing queue...")
+            SynheartLogger.log("[CloudConnector] Network available, flushing queue...")
             await flushQueue()
         }
     }
@@ -183,14 +183,14 @@ public class CloudConnectorModule: BaseSynheartModule {
             let windowType = "micro"
             await rateLimiter.recordUpload(windowType, batchSize: batch.count)
 
-            print("[CloudConnector] Uploaded \(batch.count) snapshots (\(response.status))")
+            SynheartLogger.log("[CloudConnector] Uploaded \(batch.count) snapshots (\(response.status))")
 
         } catch {
             // Re-enqueue batch on failure
             await uploadQueue.requeueBatch(batch)
 
             // Log error (but don't throw - this is background operation)
-            print("[CloudConnector] Upload failed: \(error)")
+            SynheartLogger.log("[CloudConnector] Upload failed: \(error)")
         }
     }
 

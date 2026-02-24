@@ -11,9 +11,12 @@ import Combine
 /// stays gracefully inert (no HSI output is produced).
 public class RuntimeModule: BaseSynheartModule {
 
-    private let bridge: RuntimeBridge?
+    private let _bridge: RuntimeBridge?
     private let wearSamplePublisher: AnyPublisher<WearSample, Never>?
     private let behaviorEventPublisher: AnyPublisher<BehaviorEvent, Never>?
+
+    /// Access to the native runtime bridge (nil if native library is not linked).
+    public var bridge: RuntimeBridge? { _bridge }
 
     private var cancellables = Set<AnyCancellable>()
     private var tickTimer: Timer?
@@ -25,27 +28,46 @@ public class RuntimeModule: BaseSynheartModule {
         hsiSubject.eraseToAnyPublisher()
     }
 
+    /// Key used to persist the SRM baseline snapshot in UserDefaults.
+    /// Set to nil to disable auto-persistence. Defaults to "synheart.srm_snapshot".
+    /// For multi-subject apps, include the subject ID in the key.
+    private let srmSnapshotKey: String?
+
     public init(
         bridge: RuntimeBridge?,
         wearSamplePublisher: AnyPublisher<WearSample, Never>? = nil,
-        behaviorEventPublisher: AnyPublisher<BehaviorEvent, Never>? = nil
+        behaviorEventPublisher: AnyPublisher<BehaviorEvent, Never>? = nil,
+        srmSnapshotKey: String? = "synheart.srm_snapshot"
     ) {
-        self.bridge = bridge
+        self._bridge = bridge
         self.wearSamplePublisher = wearSamplePublisher
         self.behaviorEventPublisher = behaviorEventPublisher
+        self.srmSnapshotKey = srmSnapshotKey
         super.init(moduleId: "runtime")
     }
 
     // MARK: - SynheartModule Lifecycle
 
     override public func onStart() async throws {
-        print("[RuntimeModule] Starting...")
+        SynheartLogger.log("[RuntimeModule] Starting...")
+
+        // Restore SRM baselines from previous session
+        if let bridge = _bridge, let key = srmSnapshotKey {
+            if let saved = UserDefaults.standard.string(forKey: key) {
+                let rc = bridge.loadSrmSnapshot(json: saved)
+                if rc == 0 {
+                    SynheartLogger.log("[RuntimeModule] Restored SRM baselines from snapshot")
+                } else {
+                    SynheartLogger.log("[RuntimeModule] SRM snapshot load failed (code \(rc)), starting fresh")
+                }
+            }
+        }
 
         // Subscribe to wear samples
         if let wearPub = wearSamplePublisher {
             wearPub
                 .sink { [weak self] sample in
-                    guard let self = self, let bridge = self.bridge else { return }
+                    guard let self = self, let bridge = self._bridge else { return }
                     let tsMs = Int64(sample.timestamp.timeIntervalSince1970 * 1000)
 
                     // Push each RR interval
@@ -67,7 +89,7 @@ public class RuntimeModule: BaseSynheartModule {
         if let behaviorPub = behaviorEventPublisher {
             behaviorPub
                 .sink { [weak self] event in
-                    guard let self = self, let bridge = self.bridge else { return }
+                    guard let self = self, let bridge = self._bridge else { return }
                     let tsMs = Int64(event.timestamp.timeIntervalSince1970 * 1000)
 
                     switch event.type {
@@ -86,29 +108,37 @@ public class RuntimeModule: BaseSynheartModule {
         }
 
         // Start tick timer (every 5 seconds)
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            guard let self = self, let bridge = self.bridge else { return }
+        tickTimer = Timer.scheduledTimer(withTimeInterval: SynheartDefaults.runtimeTickIntervalSeconds, repeats: true) { [weak self] _ in
+            guard let self = self, let bridge = self._bridge else { return }
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
             if let hsiJson = bridge.tick(nowMs: nowMs) {
                 self.hsiSubject.send(hsiJson)
             }
         }
 
-        print("[RuntimeModule] Started")
+        SynheartLogger.log("[RuntimeModule] Started")
     }
 
     public override func onStop() async throws {
-        print("[RuntimeModule] Stopping...")
+        SynheartLogger.log("[RuntimeModule] Stopping...")
+
+        // Persist SRM baselines for next session
+        if let bridge = _bridge, let key = srmSnapshotKey {
+            if let snapshot = bridge.exportSrmSnapshot() {
+                UserDefaults.standard.set(snapshot, forKey: key)
+                SynheartLogger.log("[RuntimeModule] Saved SRM baselines snapshot")
+            }
+        }
 
         tickTimer?.invalidate()
         tickTimer = nil
         cancellables.removeAll()
 
-        print("[RuntimeModule] Stopped")
+        SynheartLogger.log("[RuntimeModule] Stopped")
     }
 
     public override func onDispose() async throws {
-        print("[RuntimeModule] Disposing...")
+        SynheartLogger.log("[RuntimeModule] Disposing...")
         hsiSubject.send(completion: .finished)
     }
 }

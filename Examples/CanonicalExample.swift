@@ -49,10 +49,16 @@ struct CanonicalExample {
         try await Synheart.grantConsent("phoneContext")
         print("[Synheart] Consent granted for biosignals, behavior, phoneContext")
 
-        // 3. Subscribe to HSI updates (core state representation)
+        // 3. Subscribe to HSI updates (core state representation — JSON string)
         Synheart.onHSIUpdate
-            .sink { hsi in
-                print("[HSI] v\(hsi.hsiVersion) at \(hsi.observedAtUtc ?? "unknown")")
+            .sink { hsiJson in
+                guard let data = hsiJson.data(using: .utf8),
+                      let hsi = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return
+                }
+                let version = hsi["hsi_version"] as? String ?? "unknown"
+                let observedAt = hsi["observed_at_utc"] as? String ?? "unknown"
+                print("[HSI] v\(version) at \(observedAt)")
             }
             .store(in: &cancellables)
 

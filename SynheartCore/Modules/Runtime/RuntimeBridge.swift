@@ -16,8 +16,8 @@ public final class RuntimeBridge {
         public let behaviorEnabled: Bool
 
         public init(
-            windowMs: Int64 = 60_000,
-            stepMs: Int64 = 5_000,
+            windowMs: Int64 = SynheartDefaults.runtimeWindowMs,
+            stepMs: Int64 = SynheartDefaults.runtimeStepMs,
             subjectId: String,
             sessionId: String,
             behaviorEnabled: Bool = true
@@ -136,6 +136,45 @@ public final class RuntimeBridge {
         RuntimeFFI.freeString(ptr)
         return result
     }
+
+    // MARK: - SRM Baselines
+
+    /// Return all SRM baselines as JSON, or nil.
+    public func baselinesJson() -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.baselinesJson(h) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
+    /// Return baseline summary as JSON: `{"total":14,"ready":0,"warming":5,"empty":9}`.
+    public func baselineSummary() -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.baselineSummary(h) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
+    /// Export the SRM snapshot as JSON for persistence, or nil.
+    /// Internal: used by RuntimeModule for auto-save/load lifecycle.
+    func exportSrmSnapshot() -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.exportSrmSnapshot(h) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
+    /// Load an SRM snapshot from JSON. Returns 0 on success, error code on failure.
+    /// Internal: used by RuntimeModule for auto-save/load lifecycle.
+    func loadSrmSnapshot(json: String) -> Int32 {
+        guard let h = handle else { return 3003 }
+        return json.withCString { cStr in
+            RuntimeFFI.loadSrmSnapshot(h, cStr)
+        }
+    }
 }
 
 // MARK: - Dynamic FFI Loading
@@ -157,6 +196,12 @@ private enum RuntimeFFI {
     private typealias ResetFn             = @convention(c) (OpaquePointer?) -> Void
     private typealias FreeStringFn        = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
     private typealias VersionFn           = @convention(c) () -> UnsafeMutablePointer<CChar>?
+
+    // SRM
+    private typealias BaselinesJsonFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias BaselineSummaryFn   = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias ExportSrmSnapshotFn = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias LoadSrmSnapshotFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
 
     // Try dlopen first (searches @rpath, /usr/local/lib, etc.), then RTLD_DEFAULT for already-linked images.
     private static let handle: UnsafeMutableRawPointer? = {
@@ -230,6 +275,27 @@ private enum RuntimeFFI {
         return unsafeBitCast(sym, to: VersionFn.self)
     }()
 
+    // SRM
+    private static let _baselinesJson: BaselinesJsonFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_baselines_json") else { return nil }
+        return unsafeBitCast(sym, to: BaselinesJsonFn.self)
+    }()
+
+    private static let _baselineSummary: BaselineSummaryFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_baseline_summary") else { return nil }
+        return unsafeBitCast(sym, to: BaselineSummaryFn.self)
+    }()
+
+    private static let _exportSrmSnapshot: ExportSrmSnapshotFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_export_srm_snapshot") else { return nil }
+        return unsafeBitCast(sym, to: ExportSrmSnapshotFn.self)
+    }()
+
+    private static let _loadSrmSnapshot: LoadSrmSnapshotFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_load_srm_snapshot") else { return nil }
+        return unsafeBitCast(sym, to: LoadSrmSnapshotFn.self)
+    }()
+
     // MARK: Availability
 
     static var isAvailable: Bool { _runtimeNew != nil }
@@ -282,5 +348,22 @@ private enum RuntimeFFI {
 
     static func version() -> UnsafeMutablePointer<CChar>? {
         _version?()
+    }
+
+    // SRM
+    static func baselinesJson(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+        _baselinesJson?(runtime)
+    }
+
+    static func baselineSummary(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+        _baselineSummary?(runtime)
+    }
+
+    static func exportSrmSnapshot(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+        _exportSrmSnapshot?(runtime)
+    }
+
+    static func loadSrmSnapshot(_ runtime: OpaquePointer?, _ snapshotJson: UnsafePointer<CChar>?) -> Int32 {
+        _loadSrmSnapshot?(runtime, snapshotJson) ?? 3003
     }
 }

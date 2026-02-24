@@ -183,4 +183,107 @@ final class RuntimeBridgeTests: XCTestCase {
             "Should produce at least one frame across 10 windows"
         )
     }
+
+    // MARK: - SRM Baselines
+
+    func testBaselineSummaryReturnsValidJSON() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+
+        let summary = b.baselineSummary()
+        XCTAssertNotNil(summary, "baselineSummary() should return JSON")
+
+        let data = try XCTUnwrap(summary?.data(using: .utf8))
+        let parsed = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        XCTAssertTrue(parsed.keys.contains("total"), "summary should have 'total' key")
+        XCTAssertTrue(parsed.keys.contains("ready"), "summary should have 'ready' key")
+        XCTAssertTrue(parsed.keys.contains("warming"), "summary should have 'warming' key")
+        XCTAssertTrue(parsed.keys.contains("empty"), "summary should have 'empty' key")
+    }
+
+    func testBaselinesJsonReturnsValidJSON() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+
+        let baselines = b.baselinesJson()
+        XCTAssertNotNil(baselines, "baselinesJson() should return JSON")
+
+        let data = try XCTUnwrap(baselines?.data(using: .utf8))
+        XCTAssertNoThrow(try JSONSerialization.jsonObject(with: data))
+    }
+
+    func testBaselineSummaryWarmingAfterData() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+
+        // Push data and tick to get SRM ingestion
+        for w in 0..<5 {
+            fillWindowAndTick(b, baseMs: now + Int64(w) * 15_000)
+        }
+
+        let summary = b.baselineSummary()
+        XCTAssertNotNil(summary)
+
+        let data = try XCTUnwrap(summary?.data(using: .utf8))
+        let parsed = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let total = parsed["total"] as? Int ?? 0
+        XCTAssertGreaterThan(total, 0, "Should have SRM metrics registered")
+    }
+
+    func testSrmSnapshotExportAndLoad() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        for w in 0..<5 {
+            fillWindowAndTick(b, baseMs: now + Int64(w) * 15_000)
+        }
+
+        // Export snapshot
+        let snapshot = b.exportSrmSnapshot()
+        XCTAssertNotNil(snapshot, "exportSrmSnapshot() should return JSON")
+
+        // Verify it's valid JSON
+        let data = try XCTUnwrap(snapshot?.data(using: .utf8))
+        XCTAssertNoThrow(try JSONSerialization.jsonObject(with: data))
+
+        // Create a new bridge and load the snapshot
+        let b2 = try XCTUnwrap(
+            RuntimeBridge.createIfAvailable(config: .init(
+                windowMs: 10_000,
+                stepMs: 5_000,
+                subjectId: "sub_test_002",
+                sessionId: "sess_test_002"
+            )),
+            "Native library not available"
+        )
+
+        let result = b2.loadSrmSnapshot(json: snapshot!)
+        XCTAssertEqual(result, 0, "loadSrmSnapshot should return 0 on success")
+
+        // Verify loaded bridge has same baseline summary
+        let originalSummary = b.baselineSummary()
+        let loadedSummary = b2.baselineSummary()
+        XCTAssertEqual(originalSummary, loadedSummary,
+            "Baseline summary should match after snapshot round-trip")
+    }
+
+    func testResetClearsSrmBaselines() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        for w in 0..<5 {
+            fillWindowAndTick(b, baseMs: now + Int64(w) * 15_000)
+        }
+
+        b.reset()
+
+        let summary = b.baselineSummary()
+        XCTAssertNotNil(summary)
+
+        let data = try XCTUnwrap(summary?.data(using: .utf8))
+        let parsed = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let warming = parsed["warming"] as? Int ?? -1
+        let ready = parsed["ready"] as? Int ?? -1
+        XCTAssertEqual(warming, 0, "warming should be 0 after reset")
+        XCTAssertEqual(ready, 0, "ready should be 0 after reset")
+    }
 }

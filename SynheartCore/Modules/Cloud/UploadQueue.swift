@@ -35,9 +35,9 @@ public actor UploadQueue {
             let items = try decoder.decode([String].self, from: data)
             queue = items
 
-            print("[UploadQueue] Loaded \(queue.count) items from storage")
+            SynheartLogger.log("[UploadQueue] Loaded \(queue.count) items from storage")
         } catch {
-            print("[UploadQueue] Failed to load from storage: \(error)")
+            SynheartLogger.log("[UploadQueue] Failed to load from storage: \(error)")
         }
     }
 
@@ -48,7 +48,7 @@ public actor UploadQueue {
             let data = try encoder.encode(queue)
             storage.set(data, forKey: storageKey)
         } catch {
-            print("[UploadQueue] Failed to persist to storage: \(error)")
+            SynheartLogger.log("[UploadQueue] Failed to persist to storage: \(error)")
         }
     }
 

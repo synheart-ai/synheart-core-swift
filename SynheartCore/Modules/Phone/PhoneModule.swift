@@ -44,18 +44,18 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneData
     // MARK: - SynheartModule
 
     public override func initialize() async throws {
-        print("[PhoneModule] Initializing phone collectors...")
+        SynheartLogger.log("[PhoneModule] Initializing phone collectors...")
     }
 
     public override func start() async throws {
-        print("[PhoneModule] Starting phone data collection...")
+        SynheartLogger.log("[PhoneModule] Starting phone data collection...")
 
         try await motionCollector.start()
         motionCollector.motionStream
             .sink(
                 receiveCompletion: { completion in
                     if case .failure(let error) = completion {
-                        print("[PhoneModule] Motion error: \(error)")
+                        SynheartLogger.log("[PhoneModule] Motion error: \(error)")
                     }
                 },
                 receiveValue: { [weak self] motion in
@@ -69,7 +69,7 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneData
             .sink(
                 receiveCompletion: { completion in
                     if case .failure(let error) = completion {
-                        print("[PhoneModule] Screen state error: \(error)")
+                        SynheartLogger.log("[PhoneModule] Screen state error: \(error)")
                     }
                 },
                 receiveValue: { [weak self] state in
@@ -84,7 +84,7 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneData
                 .sink(
                     receiveCompletion: { completion in
                         if case .failure(let error) = completion {
-                            print("[PhoneModule] App tracking error: \(error)")
+                            SynheartLogger.log("[PhoneModule] App tracking error: \(error)")
                         }
                     },
                     receiveValue: { [weak self] _ in
@@ -100,7 +100,7 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneData
                 .sink(
                     receiveCompletion: { completion in
                         if case .failure(let error) = completion {
-                            print("[PhoneModule] Notification error: \(error)")
+                            SynheartLogger.log("[PhoneModule] Notification error: \(error)")
                         }
                     },
                     receiveValue: { [weak self] event in
@@ -110,11 +110,11 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneData
                 .store(in: &cancellables)
         }
 
-        print("[PhoneModule] Started \(cancellables.count) collectors")
+        SynheartLogger.log("[PhoneModule] Started \(cancellables.count) collectors")
     }
 
     public override func stop() async throws {
-        print("[PhoneModule] Stopping phone data collection...")
+        SynheartLogger.log("[PhoneModule] Stopping phone data collection...")
 
         cancellables.removeAll()
 
@@ -125,7 +125,7 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneData
     }
 
     public override func dispose() async throws {
-        print("[PhoneModule] Disposing phone module...")
+        SynheartLogger.log("[PhoneModule] Disposing phone module...")
 
         try await motionCollector.dispose()
         try await screenTracker.dispose()

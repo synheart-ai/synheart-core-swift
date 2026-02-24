@@ -65,7 +65,7 @@ public class EmotionHead {
                         self.hsvWithEmotionSubject.send(hsvWithEmotion)
                     }
                 } catch {
-                    print("Error predicting emotion: \(error)")
+                    SynheartLogger.log("Error predicting emotion: \(error)")
                     await MainActor.run {
                         self.hsvWithEmotionSubject.send(hsv)
                     }

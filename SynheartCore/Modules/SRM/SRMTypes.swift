@@ -61,6 +61,20 @@ public struct SRMReference {
     public let metrics: [String: MetricReference]
     public let bufferCount: Int
     public let distinctDays: Int
+
+    public init(
+        stratum: SRMStratum,
+        status: SRMBaselineStatus,
+        metrics: [String: MetricReference],
+        bufferCount: Int,
+        distinctDays: Int
+    ) {
+        self.stratum = stratum
+        self.status = status
+        self.metrics = metrics
+        self.bufferCount = bufferCount
+        self.distinctDays = distinctDays
+    }
 }
 
 /// Result returned after submitting a candidate window.

@@ -121,26 +121,17 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
 
     /// Log consent changes for debugging
     private func logConsentChanges(old: ConsentSnapshot, new: ConsentSnapshot) {
-        if old.biosignals != new.biosignals {
-            print("Consent changed: biosignals \(new.biosignals ? "granted" : "revoked")")
-        }
-        if old.behavior != new.behavior {
-            print("Consent changed: behavior \(new.behavior ? "granted" : "revoked")")
-        }
-        if old.phoneContext != new.phoneContext {
-            print("Consent changed: phoneContext \(new.phoneContext ? "granted" : "revoked")")
-        }
-        if old.focusEstimation != new.focusEstimation {
-            print("Consent changed: focusEstimation \(new.focusEstimation ? "granted" : "revoked")")
-        }
-        if old.emotionEstimation != new.emotionEstimation {
-            print("Consent changed: emotionEstimation \(new.emotionEstimation ? "granted" : "revoked")")
-        }
-        if old.cloudUpload != new.cloudUpload {
-            print("Consent changed: cloudUpload \(new.cloudUpload ? "granted" : "revoked")")
-        }
-        if old.syni != new.syni {
-            print("Consent changed: syni \(new.syni ? "granted" : "revoked")")
+        let fields: [(String, Bool, Bool)] = [
+            ("biosignals", old.biosignals, new.biosignals),
+            ("behavior", old.behavior, new.behavior),
+            ("phoneContext", old.phoneContext, new.phoneContext),
+            ("focusEstimation", old.focusEstimation, new.focusEstimation),
+            ("emotionEstimation", old.emotionEstimation, new.emotionEstimation),
+            ("cloudUpload", old.cloudUpload, new.cloudUpload),
+            ("syni", old.syni, new.syni),
+        ]
+        for (name, oldVal, newVal) in fields where oldVal != newVal {
+            SynheartLogger.log("Consent changed: \(name) \(newVal ? "granted" : "revoked")")
         }
     }
 

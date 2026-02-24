@@ -78,7 +78,7 @@ public class ModuleManager {
                 do {
                     try await module.stop()
                 } catch {
-                    print("Error stopping module \(moduleId): \(error)")
+                    SynheartLogger.log("Error stopping module \(moduleId): \(error)")
                 }
             }
         }
@@ -95,7 +95,7 @@ public class ModuleManager {
                 do {
                     try await module.dispose()
                 } catch {
-                    print("Error disposing module \(moduleId): \(error)")
+                    SynheartLogger.log("Error disposing module \(moduleId): \(error)")
                 }
             }
         }

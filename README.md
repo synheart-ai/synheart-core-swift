@@ -85,7 +85,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart/synheart-core-ios", from: "1.0.0")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "1.0.0")
 ]
 ```
 
@@ -487,8 +487,6 @@ All three implementations share the same modular architecture. See the Flutter r
 ## Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** - Detailed architecture documentation
-- **[RFC](docs/rfc.md)** - Request for Comments specification
-- **[HSV Tech Spec](docs/hsv-tech-spec.md)** - Human State Vector technical specification
 
 ## 📄 License
 

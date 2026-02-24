@@ -30,9 +30,9 @@ public class NetworkMonitor {
             self?.connectivitySubject.send(isConnected)
 
             if isConnected {
-                print("[NetworkMonitor] Network available")
+                SynheartLogger.log("[NetworkMonitor] Network available")
             } else {
-                print("[NetworkMonitor] Network lost")
+                SynheartLogger.log("[NetworkMonitor] Network lost")
             }
         }
 

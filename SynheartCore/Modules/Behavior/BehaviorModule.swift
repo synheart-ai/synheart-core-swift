@@ -47,17 +47,17 @@ public class BehaviorModule: BaseSynheartModule, BehaviorFeatureProvider, RawBeh
     // MARK: - SynheartModule
 
     public override func initialize() async throws {
-        print("[BehaviorModule] Initializing behavior tracking...")
+        SynheartLogger.log("[BehaviorModule] Initializing behavior tracking...")
     }
 
     public override func start() async throws {
-        print("[BehaviorModule] Starting behavior tracking...")
+        SynheartLogger.log("[BehaviorModule] Starting behavior tracking...")
 
         eventSubscription = eventStream.events
             .sink(
                 receiveCompletion: { completion in
                     if case .failure(let error) = completion {
-                        print("[BehaviorModule] Event stream error: \(error)")
+                        SynheartLogger.log("[BehaviorModule] Event stream error: \(error)")
                     }
                 },
                 receiveValue: { [weak self] event in
@@ -71,11 +71,11 @@ public class BehaviorModule: BaseSynheartModule, BehaviorFeatureProvider, RawBeh
             self?.aggregator.cleanOldWindows()
         }
 
-        print("[BehaviorModule] Behavior tracking started")
+        SynheartLogger.log("[BehaviorModule] Behavior tracking started")
     }
 
     public override func stop() async throws {
-        print("[BehaviorModule] Stopping behavior tracking...")
+        SynheartLogger.log("[BehaviorModule] Stopping behavior tracking...")
 
         eventSubscription?.cancel()
         eventSubscription = nil
@@ -85,7 +85,7 @@ public class BehaviorModule: BaseSynheartModule, BehaviorFeatureProvider, RawBeh
     }
 
     public override func dispose() async throws {
-        print("[BehaviorModule] Disposing behavior module...")
+        SynheartLogger.log("[BehaviorModule] Disposing behavior module...")
         try await eventStream.dispose()
     }
 }

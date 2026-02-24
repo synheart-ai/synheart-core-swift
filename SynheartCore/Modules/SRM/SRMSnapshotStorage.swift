@@ -9,8 +9,10 @@ public class SRMSnapshotStorage {
     private let service = "com.synheart.hsi"
     private let account = "synheart_srm_snapshot"
 
+    public init() {}
+
     /// Save SRM snapshot (encrypted via Keychain)
-    func save(_ snapshot: SRMSnapshot) throws {
+    public func save(_ snapshot: SRMSnapshot) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(snapshot)
@@ -39,7 +41,7 @@ public class SRMSnapshotStorage {
     }
 
     /// Load SRM snapshot from Keychain
-    func load() throws -> SRMSnapshot? {
+    public func load() throws -> SRMSnapshot? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -69,7 +71,7 @@ public class SRMSnapshotStorage {
     }
 
     /// Clear SRM snapshot data
-    func clear() throws {
+    public func clear() throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -84,7 +86,7 @@ public class SRMSnapshotStorage {
 }
 
 /// Errors that can occur during SRM snapshot storage operations
-enum SRMSnapshotStorageError: Error {
+public enum SRMSnapshotStorageError: Error {
     case saveFailed(OSStatus)
     case loadFailed(OSStatus)
     case deleteFailed(OSStatus)
