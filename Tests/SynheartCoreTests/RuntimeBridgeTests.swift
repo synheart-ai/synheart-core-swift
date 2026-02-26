@@ -286,4 +286,47 @@ final class RuntimeBridgeTests: XCTestCase {
         XCTAssertEqual(warming, 0, "warming should be 0 after reset")
         XCTAssertEqual(ready, 0, "ready should be 0 after reset")
     }
+
+    // MARK: - Pre-processed Data
+
+    func testLastPreprocessedReturnsValidJSONWithExpectedStructure() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        for w in 0..<3 { fillWindowAndTick(b, baseMs: now + Int64(w) * 15_000) }
+        if let json = b.lastPreprocessed() {
+            let data = try XCTUnwrap(json.data(using: .utf8))
+            let parsed = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            XCTAssertTrue(parsed.keys.contains("schema_version"))
+            XCTAssertTrue(parsed.keys.contains("quality"))
+            XCTAssertTrue(parsed.keys.contains("derived_features"))
+            XCTAssertTrue(parsed.keys.contains("srm_context"))
+            XCTAssertTrue(parsed.keys.contains("embeddings"))
+            let window = try PreprocessedWindow.fromJson(json)
+            XCTAssertGreaterThanOrEqual(window.quality.score, 0.0)
+            XCTAssertLessThanOrEqual(window.quality.score, 1.0)
+            XCTAssertGreaterThanOrEqual(window.quality.rrCount, 0)
+            XCTAssertGreaterThanOrEqual(window.srmContext.totalCount, 0)
+        }
+    }
+
+    func testLastPreprocessedReturnsNilAfterReset() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        for w in 0..<3 { fillWindowAndTick(b, baseMs: now + Int64(w) * 15_000) }
+        b.reset()
+        XCTAssertNil(b.lastPreprocessed(), "lastPreprocessed should be nil after reset")
+    }
+
+    func testPreprocessedWindowModelParsesValidJSON() throws {
+        let jsonStr = """
+        {"schema_version":"1.0.0","window_start_ms":1000,"window_end_ms":11000,"session_id":"test_session","quality":{"score":0.85,"coverage_pct":0.9,"dropout_count":0,"rr_count":10,"artifact_pct":0.05},"derived_features":{"hrv":{"rmssd_ms":42.5,"sdnn_ms":38.0,"pnn50":0.25,"mean_rr_ms":800.0,"hr_mean_bpm":72.0,"hr_std_bpm":3.5,"rr_count":10},"motion":null,"artifact":null},"behavior_features":null,"srm_context":{"ready_count":0,"total_count":14,"deviations":{}},"embeddings":{"signal_embedding":{"vector":[0.1,0.2,0.3],"dimension":3,"space":"latent"}}}
+        """
+        let window = try PreprocessedWindow.fromJson(jsonStr)
+        XCTAssertEqual(window.schemaVersion, "1.0.0")
+        XCTAssertEqual(window.quality.score, 0.85, accuracy: 0.001)
+        XCTAssertEqual(window.quality.rrCount, 10)
+        XCTAssertEqual(window.derivedFeatures.hrv!.rmssdMs, 42.5, accuracy: 0.001)
+        XCTAssertEqual(window.srmContext.totalCount, 14)
+        XCTAssertEqual(window.embeddings.signalEmbedding.dimension, 3)
+    }
 }

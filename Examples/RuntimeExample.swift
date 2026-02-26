@@ -5,8 +5,9 @@
 // 1. SDK initialization
 // 2. Runtime version check and diagnostics
 // 3. Consent granting
-// 4. Session start with HSI subscription
-// 5. Runtime diagnostics logging
+// 4. Session start with HSI subscription + internal diagnostics
+// 5. Pre-processed data access (internal — R&D / training)
+// 6. Runtime diagnostics logging
 //
 // Run with:
 //   DYLD_LIBRARY_PATH=./lib swift run RuntimeExample
@@ -61,7 +62,23 @@ struct RuntimeExample {
             }
             .store(in: &cancellables)
 
-        // 5. Start session — data collection begins
+        // 5. Pre-processed data access (internal — R&D / training)
+        // This demonstrates accessing intermediate signal processing outputs
+        print("\n[Runtime] Pre-processed data access example:")
+        if let runtimeModule = Synheart.runtimeModule(),
+           let bridge = runtimeModule.bridge,
+           let json = bridge.lastPreprocessed() {
+            if let window = try? PreprocessedWindow.fromJson(json) {
+                print("  Quality score: \(window.quality.score)")
+                if let hrv = window.derivedFeatures.hrv {
+                    print("  HRV RMSSD: \(hrv.rmssdMs)ms")
+                }
+                print("  Embeddings dimension: \(window.embeddings.signalEmbedding.dimension)")
+                print("  SRM ready count: \(window.srmContext.readyCount)/\(window.srmContext.totalCount)")
+            }
+        }
+
+        // 6. Start session — data collection begins
         try await Synheart.startSession()
         print("[Synheart] Session started")
         print("[Synheart] Active features: \(Synheart.activatedFeatures())")

@@ -16,12 +16,6 @@ public enum SynheartFeature: String, CaseIterable, Sendable {
     /// Device motion, screen state, and app context
     case phoneContext
 
-    /// Focus inference head
-    case focus
-
-    /// Emotion inference head
-    case emotion
-
     /// Cloud upload connector
     case cloud
 
@@ -34,8 +28,6 @@ public enum SynheartFeature: String, CaseIterable, Sendable {
         case .wear:         return "biosignals"
         case .behavior:     return "behavior"
         case .phoneContext:  return "phoneContext"
-        case .focus:        return "biosignals"
-        case .emotion:      return "biosignals"
         case .cloud:        return "cloudUpload"
         case .syni:         return "syni"
         }

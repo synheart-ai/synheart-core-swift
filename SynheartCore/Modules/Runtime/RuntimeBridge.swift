@@ -116,6 +116,34 @@ public final class RuntimeBridge {
         return result
     }
 
+    /// Return the latest HSV (Human State Vector) values as JSON, or nil
+    /// if no window has completed yet.
+    ///
+    /// The JSON contains per-head values (emotion, focus, capacity, recovery,
+    /// strain, sleep) with confidence and inference metadata. This is the
+    /// canonical source for all HSV data.
+    public func lastHsv() -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.lastHsv(h) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
+    /// Return the latest pre-processed window as JSON (internal use only), or nil
+    /// if no window has completed yet.
+    ///
+    /// The JSON contains quality metrics, derived features (HRV, motion, artifact),
+    /// behavior features, SRM baseline context with Z-score deviations, and 64D
+    /// signal embeddings. Used for on-device model training, R&D, and diagnostics.
+    public func lastPreprocessed() -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.lastPreprocessed(h) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
     /// Number of HSI frames produced so far.
     public func frameCount() -> UInt64 {
         guard let h = handle else { return 0 }
@@ -192,6 +220,8 @@ private enum RuntimeFFI {
     private typealias PushBehaviorFn      = @convention(c) (OpaquePointer?, Int64, Int32, Double) -> Void
     private typealias TickFn              = @convention(c) (OpaquePointer?, Int64) -> UnsafeMutablePointer<CChar>?
     private typealias LastQualityFn       = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias LastHsvFn           = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias LastPreprocessedFn  = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias FrameCountFn        = @convention(c) (OpaquePointer?) -> UInt64
     private typealias ResetFn             = @convention(c) (OpaquePointer?) -> Void
     private typealias FreeStringFn        = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
@@ -253,6 +283,16 @@ private enum RuntimeFFI {
     private static let _lastQuality: LastQualityFn? = {
         guard let sym = dlsym(handle, "synheart_runtime_last_quality") else { return nil }
         return unsafeBitCast(sym, to: LastQualityFn.self)
+    }()
+
+    private static let _lastHsv: LastHsvFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_last_hsv") else { return nil }
+        return unsafeBitCast(sym, to: LastHsvFn.self)
+    }()
+
+    private static let _lastPreprocessed: LastPreprocessedFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_last_preprocessed") else { return nil }
+        return unsafeBitCast(sym, to: LastPreprocessedFn.self)
     }()
 
     private static let _frameCount: FrameCountFn? = {
@@ -332,6 +372,14 @@ private enum RuntimeFFI {
 
     static func lastQuality(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
         _lastQuality?(runtime)
+    }
+
+    static func lastHsv(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+        _lastHsv?(runtime)
+    }
+
+    static func lastPreprocessed(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+        _lastPreprocessed?(runtime)
     }
 
     static func frameCount(_ runtime: OpaquePointer?) -> UInt64 {

@@ -1,76 +1,52 @@
 import Foundation
 
-/// Human State Vector - the main data structure representing human state.
+/// Human State Vector - INTERNAL ONLY
 ///
-/// Aligned with synheart-runtime. The HSV is the canonical internal
-/// representation fusing physiology, behavior, and context modalities.
-/// External consumers receive HSI JSON (via synheart-runtime), never HSV directly.
+/// The HSV is an intermediate representation computed by synheart-runtime.
+/// It contains per-head inference results (emotion, focus, capacity, etc.)
+/// with confidence and metadata.
 ///
-/// This is the shared "state bus" that all Synheart components consume:
-/// - Core produces the base HSV with physiology + behavior + context
-/// - Emotion Head (via synheart-emotion SDK) populates `emotion`
-/// - Focus Head (via synheart-focus SDK) populates `focus`
-/// - synheart-runtime exports HSV → HSI internally
+/// This is NOT part of the public API - consumers use HSI instead.
+/// Used internally for quality assessment, diagnostics, and SRM baselines.
 public struct HumanStateVector: Codable {
-    // Physiology domain — wearable-derived readings with per-axis confidence
-    public var physiology: PhysiologyState
+    public let timestamp: Int64
+    public let meta: MetaState
+    public let physiology: PhysiologyState
+    public let heartRate: Float?
+    public let hrvRmssd: Float?
+    public let hrvSdnn: Float?
+    public let hsiEmbedding: [Float]
+    public let behavior: BehaviorState?
+    public let context: ContextState?
+    public let stateQuality: StateQuality
+    public let provenance: ProvenanceInfo
 
-    // Raw biometric signals (retained for backward compatibility / feature extraction)
-    public var heartRate: Float?
-    public var heartRateVariability: Float?
-    public var rmssd: Float?
-    public var sdnn: Float?
-
-    // Behavioral metrics
-    public var behavior: BehaviorState?
-
-    // Context information
-    public var context: ContextState?
-
-    // Emotion state (populated by synheart-emotion SDK via Emotion Head)
-    public var emotion: EmotionState?
-
-    // Focus state (populated by synheart-focus SDK via Focus Head)
-    public var focus: FocusState?
-
-    // Metadata
-    public var meta: MetaState
-
-    // Embedding representation (latent space)
-    public var hsiEmbedding: [Float]?
-
-    // Quality and provenance
-    public var stateQuality: StateQuality
-    public var provenance: ProvenanceInfo
-
-    public init(physiology: PhysiologyState = .empty,
-                heartRate: Float? = nil,
-                heartRateVariability: Float? = nil,
-                rmssd: Float? = nil,
-                sdnn: Float? = nil,
-                behavior: BehaviorState? = nil,
-                context: ContextState? = nil,
-                emotion: EmotionState? = nil,
-                focus: FocusState? = nil,
-                meta: MetaState,
-                hsiEmbedding: [Float]? = nil,
-                stateQuality: StateQuality = .empty,
-                provenance: ProvenanceInfo = .empty) {
+    public init(
+        timestamp: Int64,
+        meta: MetaState,
+        physiology: PhysiologyState = .empty,
+        heartRate: Float? = nil,
+        hrvRmssd: Float? = nil,
+        hrvSdnn: Float? = nil,
+        hsiEmbedding: [Float] = [],
+        behavior: BehaviorState? = nil,
+        context: ContextState? = nil,
+        stateQuality: StateQuality = .empty,
+        provenance: ProvenanceInfo = .empty
+    ) {
+        self.timestamp = timestamp
+        self.meta = meta
         self.physiology = physiology
         self.heartRate = heartRate
-        self.heartRateVariability = heartRateVariability
-        self.rmssd = rmssd
-        self.sdnn = sdnn
+        self.hrvRmssd = hrvRmssd
+        self.hrvSdnn = hrvSdnn
+        self.hsiEmbedding = hsiEmbedding
         self.behavior = behavior
         self.context = context
-        self.emotion = emotion
-        self.focus = focus
-        self.meta = meta
-        self.hsiEmbedding = hsiEmbedding
         self.stateQuality = stateQuality
         self.provenance = provenance
     }
 }
 
-// Type alias for convenience
+// Convenience alias
 public typealias HSV = HumanStateVector

@@ -76,10 +76,6 @@ public class Synheart {
     private var srmModule: SRMModule?
     private var cloudConnector: CloudConnectorModule?
 
-    // Optional interpretation modules
-    private var emotionHead: EmotionHead?
-    private var focusHead: FocusHead?
-
     // Activation manager (RFC-0005 four-authority model)
     private var _activationManager: ActivationManager?
 
@@ -91,8 +87,6 @@ public class Synheart {
 
     // Streams
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
-    private let emotionSubject = CurrentValueSubject<EmotionState?, Never>(nil)
-    private let focusSubject = CurrentValueSubject<FocusState?, Never>(nil)
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -122,27 +116,6 @@ public class Synheart {
             .eraseToAnyPublisher()
     }
 
-    /**
-     * Stream of emotion updates (optional interpretation)
-     *
-     * Only emits if emotion module is enabled via enableEmotion().
-     */
-    public static var onEmotionUpdate: AnyPublisher<EmotionState, Never> {
-        shared.emotionSubject
-            .compactMap { $0 }
-            .eraseToAnyPublisher()
-    }
-
-    /**
-     * Stream of focus updates (optional interpretation)
-     *
-     * Only emits if focus module is enabled via enableFocus().
-     */
-    public static var onFocusUpdate: AnyPublisher<FocusState, Never> {
-        shared.focusSubject
-            .compactMap { $0 }
-            .eraseToAnyPublisher()
-    }
 
     // MARK: - Activation API (RFC-0005)
 
@@ -624,20 +597,6 @@ public class Synheart {
             } else if !isOperational && phoneModule?.status == .running {
                 Task { do { try await phoneModule?.stop() } catch { SynheartLogger.log("[Synheart] Failed to stop phone module: \(error)") } }
             }
-        case .focus:
-            if isOperational && focusHead == nil {
-                focusHead = FocusHead()
-            } else if !isOperational && focusHead != nil {
-                focusHead = nil
-                focusSubject.send(nil)
-            }
-        case .emotion:
-            if isOperational && emotionHead == nil {
-                emotionHead = EmotionHead()
-            } else if !isOperational && emotionHead != nil {
-                emotionHead = nil
-                emotionSubject.send(nil)
-            }
         case .cloud:
             if isOperational && cloudConnector != nil {
                 Task { do { try await cloudConnector?.start() } catch { SynheartLogger.log("[Synheart] Failed to start cloud connector: \(error)") } }
@@ -676,8 +635,6 @@ public class Synheart {
         case .wear:         return cap.capability(.wear) != .none
         case .behavior:     return cap.capability(.behavior) != .none
         case .phoneContext:  return cap.capability(.phone) != .none
-        case .focus:        return cap.isEnabled(.hsiEmotionFocus)
-        case .emotion:      return cap.isEnabled(.hsiEmotionFocus)
         case .cloud:        return cap.capability(.cloud) != .none
         case .syni:         return true // no capability gate for syni yet
         }
@@ -711,8 +668,6 @@ public class Synheart {
         runtimeModule = nil
         srmModule = nil
         cloudConnector = nil
-        emotionHead = nil
-        focusHead = nil
         _activationManager = nil
         previousConsent = nil
         isConfigured = false
