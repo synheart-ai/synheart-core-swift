@@ -90,6 +90,13 @@ public class Synheart {
 
     private var cancellables = Set<AnyCancellable>()
 
+    // Session data buffers — accumulate during session, persist after stop
+    private let bufferQueue = DispatchQueue(label: "com.synheart.core.sessionBuffer")
+    private var sessionHsiBuffer: [String] = []
+    private var sessionWearBuffer: [WearSample] = []
+    private var sessionHsiCancellable: AnyCancellable?
+    private var sessionWearCancellable: AnyCancellable?
+
     private init() {}
 
     /// Whether the SDK has been initialized.
@@ -315,6 +322,24 @@ public class Synheart {
 
         SynheartLogger.log("[Synheart] Starting session...")
         try await moduleManager.startAll()
+
+        // Clear session buffers and start accumulating
+        bufferQueue.sync {
+            sessionHsiBuffer.removeAll()
+            sessionWearBuffer.removeAll()
+        }
+
+        sessionHsiCancellable = runtimeModule?.hsiStream
+            .sink { [weak self] hsiJson in
+                guard let self = self else { return }
+                self.bufferQueue.sync { self.sessionHsiBuffer.append(hsiJson) }
+            }
+        sessionWearCancellable = wearModule?.rawSamplePublisher
+            .sink { [weak self] sample in
+                guard let self = self else { return }
+                self.bufferQueue.sync { self.sessionWearBuffer.append(sample) }
+            }
+
         isRunning = true
         _reevaluateAllFeatures()
         SynheartLogger.log("[Synheart] Session started")
@@ -343,10 +368,31 @@ public class Synheart {
         }
 
         SynheartLogger.log("[Synheart] Stopping session...")
+
+        // Cancel buffer subscriptions but keep buffers for post-session queries
+        sessionHsiCancellable?.cancel()
+        sessionHsiCancellable = nil
+        sessionWearCancellable?.cancel()
+        sessionWearCancellable = nil
+
         isRunning = false
         _reevaluateAllFeatures()
         try await moduleManager.stopAll()
         SynheartLogger.log("[Synheart] Session stopped")
+    }
+
+    // MARK: - Session Data Buffers
+
+    /// Returns a snapshot of all HSI JSON windows accumulated during the current
+    /// (or most recent) session. The list is cleared when ``startSession()`` is called.
+    public static func getSessionHsiWindows() -> [String] {
+        shared.bufferQueue.sync { Array(shared.sessionHsiBuffer) }
+    }
+
+    /// Returns a snapshot of all raw wear samples accumulated during the current
+    /// (or most recent) session. The list is cleared when ``startSession()`` is called.
+    public static func getSessionWearSamples() -> [WearSample] {
+        shared.bufferQueue.sync { Array(shared.sessionWearBuffer) }
     }
 
     // MARK: - Interpretation Modules
@@ -657,6 +703,15 @@ public class Synheart {
     private func _dispose() async throws {
         try await _stopSession()
         try await moduleManager.disposeAll()
+
+        sessionHsiCancellable?.cancel()
+        sessionHsiCancellable = nil
+        sessionWearCancellable?.cancel()
+        sessionWearCancellable = nil
+        bufferQueue.sync {
+            sessionHsiBuffer.removeAll()
+            sessionWearBuffer.removeAll()
+        }
 
         cancellables.removeAll()
 

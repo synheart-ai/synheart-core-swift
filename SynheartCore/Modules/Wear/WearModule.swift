@@ -11,7 +11,13 @@ public class WearModule: BaseSynheartModule, WearFeatureProvider, RawWearDataPro
     private let capabilities: CapabilityProvider
     private let consent: ConsentProvider
 
+    private let rawSampleSubject = PassthroughSubject<WearSample, Never>()
     private var cancellables = Set<AnyCancellable>()
+
+    /// Publisher of raw wear samples (mirrors Dart rawSampleStream / Kotlin sampleFlow).
+    public var rawSamplePublisher: AnyPublisher<WearSample, Never> {
+        rawSampleSubject.eraseToAnyPublisher()
+    }
 
     public init(
         capabilities: CapabilityProvider,
@@ -71,6 +77,7 @@ public class WearModule: BaseSynheartModule, WearFeatureProvider, RawWearDataPro
                     },
                     receiveValue: { [weak self] sample in
                         self?.cache.addSample(sample)
+                        self?.rawSampleSubject.send(sample)
                     }
                 )
                 .store(in: &cancellables)
