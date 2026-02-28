@@ -332,6 +332,7 @@ public class Synheart {
         sessionHsiCancellable = runtimeModule?.hsiStream
             .sink { [weak self] hsiJson in
                 guard let self = self else { return }
+                guard self.consentModule?.current().biosignals == true else { return }
                 self.bufferQueue.sync { self.sessionHsiBuffer.append(hsiJson) }
             }
         sessionWearCancellable = wearModule?.rawSamplePublisher
