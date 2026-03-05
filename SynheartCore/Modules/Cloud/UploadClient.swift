@@ -20,17 +20,19 @@ public class UploadClient {
     ///
     /// - Parameters:
     ///   - payload: Upload request containing subject and snapshots
-    ///   - signer: HMAC signer instance
+    ///   - signer: HMAC signer instance (nil when authProvider is used)
     ///   - tenantId: Tenant identifier
+    ///   - authProvider: Optional custom auth provider (takes precedence over HMAC)
     /// - Returns: UploadResponse on success
     /// - Throws: CloudConnectorError on failure
     public func upload(
         payload: UploadRequest,
-        signer: HMACSigner,
-        tenantId: String
+        signer: HMACSigner?,
+        tenantId: String,
+        authProvider: AuthProvider? = nil
     ) async throws -> UploadResponse {
         let method = "POST"
-        let path = "/v1/ingest/hsi"
+        let path = ApiEndpoints.ingestPath
 
         // Serialize payload
         let encoder = JSONEncoder()
@@ -45,7 +47,8 @@ public class UploadClient {
             bodyData: bodyData,
             signer: signer,
             tenantId: tenantId,
-            maxAttempts: 3
+            maxAttempts: 3,
+            authProvider: authProvider
         )
     }
 
@@ -55,9 +58,10 @@ public class UploadClient {
         path: String,
         bodyJson: String,
         bodyData: Data,
-        signer: HMACSigner,
+        signer: HMACSigner?,
         tenantId: String,
-        maxAttempts: Int
+        maxAttempts: Int,
+        authProvider: AuthProvider?
     ) async throws -> UploadResponse {
         var attempts = 0
         let baseDelay: UInt64 = 1_000_000_000 // 1 second in nanoseconds
@@ -66,18 +70,6 @@ public class UploadClient {
             attempts += 1
 
             do {
-                // Generate fresh nonce and timestamp for each attempt
-                let nonce = signer.generateNonce()
-                let timestamp = Int(Date().timeIntervalSince1970)
-                let signature = signer.computeSignature(
-                    method: method,
-                    path: path,
-                    tenantId: tenantId,
-                    timestamp: timestamp,
-                    nonce: nonce,
-                    bodyJson: bodyJson
-                )
-
                 // Build request
                 guard let url = URL(string: "\(baseUrl)\(path)") else {
                     throw CloudConnectorError.networkError("Invalid URL")
@@ -86,12 +78,38 @@ public class UploadClient {
                 var request = URLRequest(url: url)
                 request.httpMethod = method
                 request.httpBody = bodyData
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue(tenantId, forHTTPHeaderField: "X-Synheart-Tenant")
-                request.setValue(signature, forHTTPHeaderField: "X-Synheart-Signature")
-                request.setValue(nonce, forHTTPHeaderField: "X-Synheart-Nonce")
-                request.setValue("\(timestamp)", forHTTPHeaderField: "X-Synheart-Timestamp")
-                request.setValue("1.0.0", forHTTPHeaderField: "X-Synheart-SDK-Version")
+
+                if let authProvider = authProvider {
+                    // AuthProvider path — provider controls all auth headers
+                    let authHeaders = try authProvider.signRequest(
+                        method: method,
+                        path: path,
+                        bodyBytes: bodyData
+                    )
+                    for (key, value) in authHeaders {
+                        request.setValue(value, forHTTPHeaderField: key)
+                    }
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                } else {
+                    // Existing HMAC path (unchanged)
+                    let nonce = signer!.generateNonce()
+                    let timestamp = Int(Date().timeIntervalSince1970)
+                    let signature = signer!.computeSignature(
+                        method: method,
+                        path: path,
+                        tenantId: tenantId,
+                        timestamp: timestamp,
+                        nonce: nonce,
+                        bodyJson: bodyJson
+                    )
+
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue(tenantId, forHTTPHeaderField: "X-Synheart-Tenant")
+                    request.setValue(signature, forHTTPHeaderField: "X-Synheart-Signature")
+                    request.setValue(nonce, forHTTPHeaderField: "X-Synheart-Nonce")
+                    request.setValue("\(timestamp)", forHTTPHeaderField: "X-Synheart-Timestamp")
+                    request.setValue("1.0.0", forHTTPHeaderField: "X-Synheart-SDK-Version")
+                }
 
                 // Execute request
                 let (data, response) = try await session.data(for: request)
@@ -108,6 +126,18 @@ public class UploadClient {
                 // Parse error response
                 let decoder = JSONDecoder()
                 let error = try decoder.decode(UploadErrorResponse.self, from: data)
+
+                // Handle 401 with AuthProvider retry
+                if httpResponse.statusCode == 401, let authProvider = authProvider {
+                    let responseHeaders = httpResponse.allHeaderFields as? [String: String] ?? [:]
+                    let handled = authProvider.onAuthError(
+                        statusCode: 401,
+                        responseHeaders: responseHeaders
+                    )
+                    if handled && attempts < maxAttempts {
+                        continue // Retry with corrected auth
+                    }
+                }
 
                 // Handle specific errors (non-retryable)
                 switch (httpResponse.statusCode, error.code) {

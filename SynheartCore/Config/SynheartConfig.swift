@@ -55,8 +55,12 @@ public struct CloudConfig {
     /// Tenant ID (from app registration)
     public let tenantId: String
 
-    /// HMAC secret for signing requests
-    public let hmacSecret: String
+    /// HMAC secret for signing requests (nil when authProvider is used)
+    public let hmacSecret: String?
+
+    /// Custom auth provider for request signing (e.g., ECDSA device-identity).
+    /// When set, takes precedence over the HMAC path.
+    public let authProvider: AuthProvider?
 
     /// Subject ID (pseudonymous user identifier)
     public let subjectId: String
@@ -84,10 +88,11 @@ public struct CloudConfig {
 
     public init(
         tenantId: String,
-        hmacSecret: String,
+        hmacSecret: String? = nil,
+        authProvider: AuthProvider? = nil,
         subjectId: String,
         instanceId: String = UUID().uuidString,
-        baseUrl: String = "https://api.synheart.com",
+        baseUrl: String = ApiEndpoints.defaultCloudBaseUrl,
         subjectType: String = "pseudonymous_user",
         maxQueueSize: Int = 100,
         batchSize: Int = 10,
@@ -95,8 +100,13 @@ public struct CloudConfig {
         maxRetries: Int = 3,
         enableBacklog: Bool = true
     ) {
+        precondition(
+            hmacSecret != nil || authProvider != nil,
+            "CloudConfig requires either hmacSecret or authProvider"
+        )
         self.tenantId = tenantId
         self.hmacSecret = hmacSecret
+        self.authProvider = authProvider
         self.subjectId = subjectId
         self.instanceId = instanceId
         self.baseUrl = baseUrl
