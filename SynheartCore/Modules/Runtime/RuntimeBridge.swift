@@ -203,6 +203,94 @@ public final class RuntimeBridge {
             RuntimeFFI.loadSrmSnapshot(h, cStr)
         }
     }
+
+    // MARK: - Lab Session
+
+    /// Whether the lab C ABI symbols are available in the linked runtime.
+    public var isLabAvailable: Bool { RuntimeFFI.isLabAvailable }
+
+    /// Start a lab session.
+    ///
+    /// `protocolJson` should contain: `namespace`, `protocol_version`, `parameters`,
+    /// and optionally `app_id`, `device_id`, `user_id`, `protocol_id`.
+    ///
+    /// Returns nil on success, or an error string on failure.
+    public func labStart(protocolJson: String, startedAtMs: Int64) -> String? {
+        guard let h = handle else { return "no handle" }
+        guard let ptr = protocolJson.withCString({ cStr in
+            RuntimeFFI.labStart(h, cStr, startedAtMs)
+        }) else {
+            return nil // success
+        }
+        let err = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return err
+    }
+
+    /// Open a window in the active lab session. Returns the window ID, or nil on failure.
+    public func labOpenWindow(
+        parentId: String?,
+        windowType: String,
+        label: String?,
+        startedAtMs: Int64
+    ) -> String? {
+        guard let h = handle else { return nil }
+
+        let result: UnsafeMutablePointer<CChar>? = windowType.withCString { wtCStr in
+            if let parentId = parentId {
+                return parentId.withCString { pidCStr in
+                    if let label = label {
+                        return label.withCString { lblCStr in
+                            RuntimeFFI.labOpenWindow(h, pidCStr, wtCStr, lblCStr, startedAtMs)
+                        }
+                    } else {
+                        return RuntimeFFI.labOpenWindow(h, pidCStr, wtCStr, nil, startedAtMs)
+                    }
+                }
+            } else {
+                if let label = label {
+                    return label.withCString { lblCStr in
+                        RuntimeFFI.labOpenWindow(h, nil, wtCStr, lblCStr, startedAtMs)
+                    }
+                } else {
+                    return RuntimeFFI.labOpenWindow(h, nil, wtCStr, nil, startedAtMs)
+                }
+            }
+        }
+
+        guard let ptr = result else { return nil }
+        let windowId = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return windowId
+    }
+
+    /// Close a window in the active lab session.
+    public func labCloseWindow(windowId: String, endedAtMs: Int64) {
+        guard let h = handle else { return }
+        windowId.withCString { wid in
+            RuntimeFFI.labCloseWindow(h, wid, endedAtMs)
+        }
+    }
+
+    /// Set protocol-specific values on a lab window.
+    public func labSetWindowValues(windowId: String, valuesJson: String) {
+        guard let h = handle else { return }
+        windowId.withCString { wid in
+            valuesJson.withCString { vjson in
+                RuntimeFFI.labSetWindowValues(h, wid, vjson)
+            }
+        }
+    }
+
+    /// Finalize the lab session and return the complete payload JSON.
+    /// Returns nil if no active session.
+    public func labFinalize(endedAtMs: Int64) -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.labFinalize(h, endedAtMs) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
 }
 
 // MARK: - Dynamic FFI Loading
@@ -232,6 +320,13 @@ private enum RuntimeFFI {
     private typealias BaselineSummaryFn   = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias ExportSrmSnapshotFn = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias LoadSrmSnapshotFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
+
+    // Lab
+    private typealias LabStartFn          = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Int64) -> UnsafeMutablePointer<CChar>?
+    private typealias LabOpenWindowFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int64) -> UnsafeMutablePointer<CChar>?
+    private typealias LabCloseWindowFn    = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Int64) -> Void
+    private typealias LabSetWindowValFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
+    private typealias LabFinalizeFn       = @convention(c) (OpaquePointer?, Int64) -> UnsafeMutablePointer<CChar>?
 
     // Try dlopen first (searches @rpath, /usr/local/lib, etc.), then RTLD_DEFAULT for already-linked images.
     private static let handle: UnsafeMutableRawPointer? = {
@@ -336,6 +431,32 @@ private enum RuntimeFFI {
         return unsafeBitCast(sym, to: LoadSrmSnapshotFn.self)
     }()
 
+    // Lab
+    private static let _labStart: LabStartFn? = {
+        guard let sym = dlsym(handle, "synheart_lab_start") else { return nil }
+        return unsafeBitCast(sym, to: LabStartFn.self)
+    }()
+
+    private static let _labOpenWindow: LabOpenWindowFn? = {
+        guard let sym = dlsym(handle, "synheart_lab_open_window") else { return nil }
+        return unsafeBitCast(sym, to: LabOpenWindowFn.self)
+    }()
+
+    private static let _labCloseWindow: LabCloseWindowFn? = {
+        guard let sym = dlsym(handle, "synheart_lab_close_window") else { return nil }
+        return unsafeBitCast(sym, to: LabCloseWindowFn.self)
+    }()
+
+    private static let _labSetWindowValues: LabSetWindowValFn? = {
+        guard let sym = dlsym(handle, "synheart_lab_set_window_values") else { return nil }
+        return unsafeBitCast(sym, to: LabSetWindowValFn.self)
+    }()
+
+    private static let _labFinalize: LabFinalizeFn? = {
+        guard let sym = dlsym(handle, "synheart_lab_finalize") else { return nil }
+        return unsafeBitCast(sym, to: LabFinalizeFn.self)
+    }()
+
     // MARK: Availability
 
     static var isAvailable: Bool { _runtimeNew != nil }
@@ -413,5 +534,28 @@ private enum RuntimeFFI {
 
     static func loadSrmSnapshot(_ runtime: OpaquePointer?, _ snapshotJson: UnsafePointer<CChar>?) -> Int32 {
         _loadSrmSnapshot?(runtime, snapshotJson) ?? 3003
+    }
+
+    // Lab
+    static var isLabAvailable: Bool { _labStart != nil }
+
+    static func labStart(_ runtime: OpaquePointer?, _ protocolJson: UnsafePointer<CChar>?, _ startedAtMs: Int64) -> UnsafeMutablePointer<CChar>? {
+        _labStart?(runtime, protocolJson, startedAtMs)
+    }
+
+    static func labOpenWindow(_ runtime: OpaquePointer?, _ parentId: UnsafePointer<CChar>?, _ windowType: UnsafePointer<CChar>?, _ label: UnsafePointer<CChar>?, _ startedAtMs: Int64) -> UnsafeMutablePointer<CChar>? {
+        _labOpenWindow?(runtime, parentId, windowType, label, startedAtMs)
+    }
+
+    static func labCloseWindow(_ runtime: OpaquePointer?, _ windowId: UnsafePointer<CChar>?, _ endedAtMs: Int64) {
+        _labCloseWindow?(runtime, windowId, endedAtMs)
+    }
+
+    static func labSetWindowValues(_ runtime: OpaquePointer?, _ windowId: UnsafePointer<CChar>?, _ valuesJson: UnsafePointer<CChar>?) {
+        _labSetWindowValues?(runtime, windowId, valuesJson)
+    }
+
+    static func labFinalize(_ runtime: OpaquePointer?, _ endedAtMs: Int64) -> UnsafeMutablePointer<CChar>? {
+        _labFinalize?(runtime, endedAtMs)
     }
 }
