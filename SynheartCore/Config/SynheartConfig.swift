@@ -6,6 +6,7 @@ public struct SynheartConfig {
     public let enablePhone: Bool
     public let enableBehavior: Bool
     public let cloudConfig: CloudConfig?
+    public let platformIngestConfig: PlatformIngestConfig?
 
     /// Server-signed capability token for feature gating
     public let capabilityToken: CapabilityToken?
@@ -21,6 +22,7 @@ public struct SynheartConfig {
         enablePhone: Bool = true,
         enableBehavior: Bool = true,
         cloudConfig: CloudConfig? = nil,
+        platformIngestConfig: PlatformIngestConfig? = nil,
         capabilityToken: CapabilityToken? = nil,
         capabilitySecret: String? = nil,
         allowUnsignedCapabilities: Bool = false
@@ -29,6 +31,7 @@ public struct SynheartConfig {
         self.enablePhone = enablePhone
         self.enableBehavior = enableBehavior
         self.cloudConfig = cloudConfig
+        self.platformIngestConfig = platformIngestConfig
         self.capabilityToken = capabilityToken
         self.capabilitySecret = capabilitySecret
         self.allowUnsignedCapabilities = allowUnsignedCapabilities

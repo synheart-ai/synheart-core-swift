@@ -75,6 +75,7 @@ public class Synheart {
     private var runtimeModule: RuntimeModule?
     private var srmModule: SRMModule?
     private var cloudConnector: CloudConnectorModule?
+    private var platformIngestModule: PlatformIngestModule?
 
     // Activation manager (RFC-0005 four-authority model)
     private var _activationManager: ActivationManager?
@@ -268,6 +269,18 @@ public class Synheart {
             )
         }
 
+        if let platformIngestConfig = config?.platformIngestConfig {
+            SynheartLogger.log("[Synheart] Initializing Platform Ingest...")
+            platformIngestModule = PlatformIngestModule(
+                consentModule: consentModule!,
+                config: platformIngestConfig
+            )
+            try moduleManager.registerModule(
+                platformIngestModule!,
+                dependsOn: ["consent"]
+            )
+        }
+
         SynheartLogger.log("[Synheart] Initializing all modules...")
         try await moduleManager.initializeAll()
 
@@ -441,6 +454,45 @@ public class Synheart {
         await cloudConnector.flushQueue()
     }
 
+
+    // MARK: - Platform Ingestion
+
+    /// Ingest a session payload via the Platform Ingest module.
+    ///
+    /// Requires `behavior` consent.
+    ///
+    /// - Throws: `SynheartError` if SDK not initialized or platform ingest not configured
+    public static func ingestSession(_ payload: [String: Any]) async throws -> PlatformIngestResponse {
+        guard shared.isConfigured else {
+            throw SynheartError.notInitialized
+        }
+        guard let module = shared.platformIngestModule else {
+            throw SynheartError.notImplemented("Platform ingest not configured")
+        }
+        return await module.ingestSession(payload)
+    }
+
+    /// Ingest a metadata payload via the Platform Ingest module.
+    ///
+    /// Requires `biosignals` consent.
+    ///
+    /// - Throws: `SynheartError` if SDK not initialized or platform ingest not configured
+    public static func ingestMetadata(_ payload: [String: Any]) async throws -> PlatformIngestResponse {
+        guard shared.isConfigured else {
+            throw SynheartError.notInitialized
+        }
+        guard let module = shared.platformIngestModule else {
+            throw SynheartError.notImplemented("Platform ingest not configured")
+        }
+        return await module.ingestMetadata(payload)
+    }
+
+    /// Get the underlying PlatformIngestClient for standalone/background usage.
+    ///
+    /// Returns nil if platform ingest is not configured.
+    public static var platformIngestClient: PlatformIngestClient? {
+        shared.platformIngestModule?.client
+    }
 
     /**
      * Check if user has granted a specific consent
@@ -724,6 +776,7 @@ public class Synheart {
         runtimeModule = nil
         srmModule = nil
         cloudConnector = nil
+        platformIngestModule = nil
         _activationManager = nil
         previousConsent = nil
         isConfigured = false
