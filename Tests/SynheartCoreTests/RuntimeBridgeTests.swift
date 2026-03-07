@@ -329,4 +329,93 @@ final class RuntimeBridgeTests: XCTestCase {
         XCTAssertEqual(window.srmContext.totalCount, 14)
         XCTAssertEqual(window.embeddings.signalEmbedding.dimension, 3)
     }
+
+    // MARK: - Batch Ingest
+
+    func testIngestBatchWithRREventsProducesHSIFrames() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var batch: [[String: Any]] = []
+
+        // Build batch of RR events spanning multiple windows
+        for i in 0..<30 {
+            batch.append(["type": "rr", "ts_ms": now + Int64(i) * 800, "rr_ms": 800.0])
+        }
+        // Add HR events
+        for i in 0..<25 {
+            batch.append(["type": "hr", "ts_ms": now + Int64(i) * 1000, "bpm": 72.0])
+        }
+
+        let batchData = try JSONSerialization.data(withJSONObject: batch)
+        let batchJson = String(data: batchData, encoding: .utf8)!
+
+        guard let result = b.ingestBatch(batchJson: batchJson, nowMs: now + 30_000) else {
+            // ingestBatch FFI symbol may not be available in this build
+            throw XCTSkip("ingestBatch not available in linked runtime")
+        }
+
+        let resultData = try XCTUnwrap(result.data(using: .utf8))
+        let parsed = try JSONSerialization.jsonObject(with: resultData) as! [String: Any]
+        XCTAssertEqual(parsed["ok"] as? Bool, true, "Batch ingest should succeed")
+
+        // Should have frames array or legacy hsi
+        let hasFrames = (parsed["frames"] as? [[String: Any]])?.isEmpty == false
+        let hasHsi = parsed["hsi"] != nil
+        XCTAssertTrue(hasFrames || hasHsi, "Result should contain frames array or hsi object")
+    }
+
+    func testIngestBatchWithBehaviorEventsProducesHSIFrames() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var batch: [[String: Any]] = []
+
+        // RR baseline
+        for i in 0..<30 {
+            batch.append(["type": "rr", "ts_ms": now + Int64(i) * 800, "rr_ms": 800.0])
+        }
+        for i in 0..<25 {
+            batch.append(["type": "hr", "ts_ms": now + Int64(i) * 1000, "bpm": 72.0])
+        }
+        // Behavior events
+        for i in 0..<10 {
+            batch.append([
+                "type": "behavior",
+                "ts_ms": now + Int64(i) * 500,
+                "event": "touch",
+                "provider": "behavior_app"
+            ])
+        }
+        batch.append([
+            "type": "behavior",
+            "ts_ms": now + 5000,
+            "event": "app_switch",
+            "provider": "behavior_app"
+        ])
+
+        let batchData = try JSONSerialization.data(withJSONObject: batch)
+        let batchJson = String(data: batchData, encoding: .utf8)!
+
+        guard let result = b.ingestBatch(batchJson: batchJson, nowMs: now + 30_000) else {
+            throw XCTSkip("ingestBatch not available in linked runtime")
+        }
+
+        let resultData = try XCTUnwrap(result.data(using: .utf8))
+        let parsed = try JSONSerialization.jsonObject(with: resultData) as! [String: Any]
+        XCTAssertEqual(parsed["ok"] as? Bool, true, "Batch ingest with behavior should succeed")
+    }
+
+    func testIngestBatchWithEmptyArrayReturnsOk() throws {
+        let b = try XCTUnwrap(bridge, "Native library not available")
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        guard let result = b.ingestBatch(batchJson: "[]", nowMs: now) else {
+            throw XCTSkip("ingestBatch not available in linked runtime")
+        }
+
+        let resultData = try XCTUnwrap(result.data(using: .utf8))
+        let parsed = try JSONSerialization.jsonObject(with: resultData) as! [String: Any]
+        XCTAssertEqual(parsed["ok"] as? Bool, true, "Empty batch should succeed")
+    }
 }

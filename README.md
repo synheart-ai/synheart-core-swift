@@ -284,6 +284,54 @@ do {
 | `SynheartError.notImplemented(String)` | Feature not yet available |
 | `CloudConnectorError.consentRequired(String)` | Cloud operation without consent |
 
+## Batch Ingest Mode
+
+By default, the runtime module streams data in real-time. **Batch ingest mode** buffers all events during a session and runs a single `ingestBatch` call on stop.
+
+```swift
+let runtimeModule = RuntimeModule(
+    bridge: bridge,
+    batchIngestOnStop: true  // Enable batch mode
+)
+```
+
+## Platform Ingestion
+
+Send structured session and metadata payloads to the Synheart platform API.
+
+### Auto-Ingest
+
+```swift
+let config = SynheartConfig(
+    appId: "your_app_id",
+    apiKey: "your_api_key",
+    subjectId: "sub_user_123",
+    platformIngestConfig: PlatformIngestConfig(
+        apiKey: "your_platform_api_key",
+        autoIngest: true
+    )
+)
+```
+
+### Manual Ingestion
+
+```swift
+// Ingest current session data
+try await synheart.ingestSession()
+
+// Ingest app/user metadata
+try await synheart.ingestMetadata()
+```
+
+### Standalone Payload Builder
+
+```swift
+let payload = PlatformPayloadBuilder.buildSession(
+    sessionId: "sess_123",
+    // ... other params
+)
+```
+
 ## Architecture Details
 
 Synheart Core SDK provides two complementary architectures:

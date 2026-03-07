@@ -107,6 +107,23 @@ public final class RuntimeBridge {
         return result
     }
 
+    /// Ingest a batch of events (JSON array). Returns result JSON or nil.
+    ///
+    /// The batch JSON is an array of event objects, each with `type`, `ts_ms`, and
+    /// type-specific fields (e.g., `rr_ms` for RR events, `event` for behavior).
+    ///
+    /// Returns a JSON result with `ok`, `frames` array (each containing `hsi`), or
+    /// legacy single `hsi` field.
+    public func ingestBatch(batchJson: String, nowMs: Int64) -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = batchJson.withCString({ cStr in
+            RuntimeFFI.ingestBatch(h, cStr, nowMs)
+        }) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
     /// Return the last quality-report JSON, or nil.
     public func lastQuality() -> String? {
         guard let h = handle else { return nil }
@@ -307,6 +324,7 @@ private enum RuntimeFFI {
     private typealias PushAccelFn         = @convention(c) (OpaquePointer?, Int64, Double, Double, Double) -> Void
     private typealias PushBehaviorFn      = @convention(c) (OpaquePointer?, Int64, Int32, Double) -> Void
     private typealias TickFn              = @convention(c) (OpaquePointer?, Int64) -> UnsafeMutablePointer<CChar>?
+    private typealias IngestBatchFn       = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Int64) -> UnsafeMutablePointer<CChar>?
     private typealias LastQualityFn       = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias LastHsvFn           = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias LastPreprocessedFn  = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
@@ -373,6 +391,11 @@ private enum RuntimeFFI {
     private static let _tick: TickFn? = {
         guard let sym = dlsym(handle, "synheart_runtime_tick") else { return nil }
         return unsafeBitCast(sym, to: TickFn.self)
+    }()
+
+    private static let _ingestBatch: IngestBatchFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_ingest_batch_json") else { return nil }
+        return unsafeBitCast(sym, to: IngestBatchFn.self)
     }()
 
     private static let _lastQuality: LastQualityFn? = {
@@ -489,6 +512,10 @@ private enum RuntimeFFI {
 
     static func tick(_ runtime: OpaquePointer?, _ nowMs: Int64) -> UnsafeMutablePointer<CChar>? {
         _tick?(runtime, nowMs)
+    }
+
+    static func ingestBatch(_ runtime: OpaquePointer?, _ batchJson: UnsafePointer<CChar>?, _ nowMs: Int64) -> UnsafeMutablePointer<CChar>? {
+        _ingestBatch?(runtime, batchJson, nowMs)
     }
 
     static func lastQuality(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {

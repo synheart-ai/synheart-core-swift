@@ -13,7 +13,7 @@ public enum ApiEndpoints {
     public static let ingestPath = "/v1/ingest/hsi"
 
     // MARK: - Platform Ingest
-    public static let defaultPlatformIngestBaseUrl = "https://ingest-service-temp-dev.synheart.io"
+    public static let defaultPlatformIngestBaseUrl = "https://api.synheart.ai"
     public static let platformSessionIngestPath = "/v1/platform/session/ingest"
     public static let platformMetadataIngestPath = "/v1/platform/metadata/ingest"
 }

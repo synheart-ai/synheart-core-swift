@@ -13,29 +13,20 @@ struct SimpleExample {
     static func main() async throws {
         var cancellables = Set<AnyCancellable>()
 
-        // Initialize with wearable data collection
-        try await Synheart.initialize(
-            userId: "user_123",
-            config: SynheartConfig(
-                allowUnsignedCapabilities: true,
-                enableWear: true
-            )
-        )
+        // Configure with wearable data collection
+        try await Synheart.configure(config: SynheartConfig(
+            appId: "com.example.app",
+            subjectId: "user_123",
+            allowUnsignedCapabilities: true
+        ))
 
         // Grant consent for biosignal collection
         try await Synheart.grantConsent("biosignals")
 
-        // Subscribe to HSI updates (JSON string from synheart-runtime)
-        Synheart.onHSIUpdate
-            .sink { hsiJson in
-                guard let data = hsiJson.data(using: .utf8),
-                      let hsi = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    return
-                }
-                if let affect = hsi["affect"] as? [String: Any] {
-                    print("Arousal: \(affect["arousal_index"] ?? 0)")
-                    print("Valence: \(affect["valence_index"] ?? 0)")
-                }
+        // Subscribe to typed state updates
+        Synheart.onStateUpdate
+            .sink { state in
+                print("State: \(state)")
             }
             .store(in: &cancellables)
 

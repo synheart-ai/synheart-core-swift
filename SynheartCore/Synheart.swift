@@ -14,50 +14,31 @@ import Combine
  * - Phone Module (motion/context)
  * - Behavior Module (interaction patterns)
  * - HSI Runtime (signal fusion & state computation)
- * - Cloud Connector (secure uploads)
- *
- * Optional interpretation modules:
- * - Emotion (affect modeling)
- * - Focus (engagement/focus estimation)
+ * - Auth Module (authentication)
+ * - Sync Module (secure sync, replaces Cloud Connector)
  *
  * Example usage:
  * ```swift
- * // Initialize
- * try await Synheart.initialize(
- *     userId: "anon_user_123",
- *     config: SynheartConfig(
- *         enableWear: true,
- *         enablePhone: true,
- *         enableBehavior: true
- *     )
- * )
+ * // Configure
+ * try await Synheart.configure(config: SynheartConfig(
+ *     appId: "com.example.app",
+ *     subjectId: "anon_user_123",
+ *     allowUnsignedCapabilities: true
+ * ))
  *
- * // Subscribe to HSI updates (core state representation)
+ * // Subscribe to typed state updates
  * var cancellables = Set<AnyCancellable>()
- * Synheart.onHSIUpdate
- *     .sink { hsi in
- *         print("Arousal Index: \(hsi.affect?.arousalIndex ?? 0)")
- *         print("Engagement Stability: \(hsi.engagement?.engagementStability ?? 0)")
+ * Synheart.onStateUpdate
+ *     .sink { state in
+ *         print("State: \(state)")
  *     }
  *     .store(in: &cancellables)
  *
- * // Optional: Enable interpretation modules
- * try await Synheart.enableFocus()
- * Synheart.onFocusUpdate
- *     .sink { focus in
- *         print("Focus Score: \(focus.score)")
- *     }
- *     .store(in: &cancellables)
+ * // Start session
+ * try await Synheart.startSession()
  *
- * try await Synheart.enableEmotion()
- * Synheart.onEmotionUpdate
- *     .sink { emotion in
- *         print("Stress Index: \(emotion.stress)")
- *     }
- *     .store(in: &cancellables)
- *
- * // Enable cloud upload (with consent)
- * try await Synheart.enableCloud()
+ * // Sync data
+ * try await Synheart.syncNow()
  * ```
  */
 public class Synheart {
@@ -73,8 +54,6 @@ public class Synheart {
     private var phoneModule: PhoneModule?
     private var behaviorModule: BehaviorModule?
     private var runtimeModule: RuntimeModule?
-    private var srmModule: SRMModule?
-    private var cloudConnector: CloudConnectorModule?
     private var platformIngestModule: PlatformIngestModule?
 
     // Activation manager (RFC-0005 four-authority model)
@@ -85,6 +64,19 @@ public class Synheart {
     private var isRunning = false
     private var userId: String?
     private var previousConsent: ConsentSnapshot?
+
+    // Phase 1: Storage and artifact pipeline
+    private var storageManager: StorageManager?
+    private var _storagePolicy: StoragePolicy?
+    private var artifactPipeline: ArtifactPipeline?
+    private var _smk: SMK?
+    private var _currentSessionHandle: SessionHandle?
+    private var artifactHsiCancellable: AnyCancellable?
+    private var _synheartConfig: SynheartConfig?
+
+    // Phase 3: Auth & Sync
+    private var _authModule: AuthModule?
+    private var _syncModule: SyncModule?
 
     // Streams
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
@@ -103,6 +95,24 @@ public class Synheart {
     /// Whether the SDK has been initialized.
     public static var isInitialized: Bool {
         shared.isConfigured
+    }
+
+    /// The currently active session, if any.
+    public static var currentSession: SessionHandle? {
+        shared._currentSessionHandle
+    }
+
+    /// Configure the SDK using RFC-CORE-0007 config shape.
+    ///
+    /// This is the preferred entry point for Phase 1+. Sets up operational mode,
+    /// storage, and artifact pipeline.
+    public static func configure(config: SynheartConfig) async throws {
+        try config.validate()
+        try await shared._initialize(
+            userId: config.subjectId,
+            config: config,
+            appKey: "configured"
+        )
     }
 
     /// Whether the SDK is currently running.
@@ -124,6 +134,207 @@ public class Synheart {
             .eraseToAnyPublisher()
     }
 
+
+    // MARK: - Phase 2: Typed State Subscription
+
+    /// Stream of typed HSIState updates (RFC-CORE-0007 §3).
+    public static var onStateUpdate: AnyPublisher<HSIState, Never> {
+        shared.hsiSubject
+            .compactMap { $0 }
+            .map { HSIState.fromJson($0, subjectId: shared._synheartConfig?.subjectId ?? shared.userId ?? "") }
+            .eraseToAnyPublisher()
+    }
+
+    /// Get the current HSI state as a typed object.
+    public static var currentHSIState: HSIState? {
+        guard let json = shared.hsiSubject.value else { return nil }
+        return HSIState.fromJson(json, subjectId: shared._synheartConfig?.subjectId ?? shared.userId ?? "")
+    }
+
+    // MARK: - Phase 2: Metrics API
+
+    /// Record a single metric event for the current session.
+    public static func recordMetric(_ event: MetricEvent) throws {
+        guard let handle = shared._currentSessionHandle else { return }
+        guard shared._storagePolicy?.canIncludeMetrics() == true else { return }
+        try shared.storageManager?.insertMetric(sessionId: handle.sessionId, event: event)
+    }
+
+    // MARK: - Phase 2: Local Query API
+
+    /// List stored sessions with optional filters.
+    public static func listSessions(range: SessionRange? = nil) throws -> [SessionRecord] {
+        guard let sm = shared.storageManager, sm.isOpen else { return [] }
+        let mode: SynheartMode? = range?.mode.flatMap { SynheartMode(rawValue: $0) }
+        return try sm.listSessions(startMs: range?.startMs, endMs: range?.endMs, mode: mode)
+    }
+
+    /// Get a session summary (decrypted) for the given session.
+    public static func getSessionSummary(_ sessionId: String) throws -> [String: Any]? {
+        guard let sm = shared.storageManager, sm.isOpen else { return nil }
+
+        // Check cache first
+        if let cached = try sm.getSummaryJson(sessionId),
+           let data = cached.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return json
+        }
+
+        // Find and decrypt the artifact
+        guard let smk = shared._smk else { return nil }
+        let artifacts = try sm.getArtifactsBySession(sessionId, type: "session_summary")
+        guard let first = artifacts.first else { return nil }
+        return try? ArtifactCrypto.decrypt(smk: smk, combined: first.payload)
+    }
+
+    /// Get decrypted HSI window artifacts for a session.
+    public static func getHSIWindows(_ sessionId: String, range: WindowRange? = nil) throws -> [[String: Any]] {
+        guard let sm = shared.storageManager, sm.isOpen, let smk = shared._smk else { return [] }
+
+        let artifacts = try sm.getArtifactsBySession(sessionId, type: "hsi_window")
+        var results: [[String: Any]] = []
+        for art in artifacts {
+            if let s = range?.startMs, art.startMs < s { continue }
+            if let e = range?.endMs, art.endMs > e { continue }
+            if let json = try? ArtifactCrypto.decrypt(smk: smk, combined: art.payload) {
+                results.append(json)
+            }
+            if let limit = range?.limit, results.count >= limit { break }
+        }
+        return results
+    }
+
+    // MARK: - Phase 2: Storage & Retention
+
+    /// Get storage usage statistics.
+    public static func getStorageUsage() throws -> StorageUsage {
+        guard let sm = shared.storageManager, sm.isOpen else {
+            return StorageUsage(totalBytes: 0, bySessionBytes: [:])
+        }
+        return try sm.getStorageUsage()
+    }
+
+    /// Set retention policy. Deletes sessions older than the given number of days.
+    public static func setRetentionDays(_ days: Int?) throws {
+        guard let days = days else { return }
+        guard let sm = shared.storageManager, sm.isOpen else { return }
+        let cutoffMs = Int64(Date().timeIntervalSince1970 * 1000) - Int64(days) * 86400000
+        _ = try sm.enforceRetention(cutoffMs: cutoffMs)
+    }
+
+    // MARK: - Phase 2: Deletion API
+
+    /// Delete a session and all its artifacts locally.
+    public static func deleteLocalSession(_ sessionId: String) throws {
+        guard let sm = shared.storageManager, sm.isOpen else { return }
+        try sm.deleteSession(sessionId, createTombstones: true)
+    }
+
+    /// Wipe all local data.
+    public static func wipeLocalData() async throws {
+        if shared.isRunning {
+            try await shared._stopSession()
+        }
+        if let sm = shared.storageManager, sm.isOpen {
+            try sm.wipeAll()
+            sm.close()
+        }
+        shared.storageManager = nil
+        SMK.delete()
+        URK.delete()
+
+        // Phase 3: Clear auth/sync state
+        shared._syncModule?.dispose()
+        shared._syncModule = nil
+        shared._authModule?.logout()
+        shared._authModule = nil
+
+        shared.artifactPipeline = nil
+        shared._storagePolicy = nil
+        shared._smk = nil
+        shared._currentSessionHandle = nil
+    }
+
+    /// Request account deletion — wipes local data and requests server-side deletion.
+    public static func requestAccountDeletion() async throws -> DeletionRequestResult {
+        // POST server-side deletion request if authenticated
+        if let auth = shared._authModule, auth.isAuthenticated, let token = auth.accessToken {
+            let url = URL(string: "https://api.synheart.com/v1/account/delete")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["confirmation": "DELETE_MY_ACCOUNT"])
+
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            if statusCode != 200 && statusCode != 202 {
+                // Log but continue with local wipe
+                SynheartLogger.log("[Synheart] Server account deletion request returned status \(statusCode)")
+            }
+        }
+
+        try await wipeLocalData()
+        return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion pending.")
+    }
+
+    /// Cancel a pending account deletion request.
+    public static func cancelAccountDeletion() async throws -> Bool {
+        guard let auth = shared._authModule, auth.isAuthenticated, let token = auth.accessToken else {
+            return false
+        }
+
+        let url = URL(string: "https://api.synheart.com/v1/account/delete/cancel")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        return statusCode == 200
+    }
+
+    // MARK: - Phase 3: Auth API
+
+    /// Authenticate with a provider token.
+    public static func authenticate(provider: String, token: String) async throws -> AuthResult {
+        guard let auth = shared._authModule else { throw SynheartError.notInitialized }
+        return try await auth.authenticate(provider: provider, token: token)
+    }
+
+    /// Get current auth status.
+    public static var authStatus: AuthStatus? {
+        shared._authModule?.status
+    }
+
+    /// Log out and clear auth state.
+    public static func logout() {
+        shared._syncModule?.dispose()
+        shared._authModule?.logout()
+        URK.delete()
+    }
+
+    // MARK: - Phase 3: Sync API
+
+    /// Enable or disable sync.
+    public static func setSyncEnabled(_ enabled: Bool) async throws {
+        try await shared._syncModule?.setSyncEnabled(enabled)
+    }
+
+    /// Execute a sync cycle (push + pull).
+    public static func syncNow() async throws -> SyncResult {
+        guard let sync = shared._syncModule else { return SyncResult() }
+        return try await sync.syncNow()
+    }
+
+    /// Get current sync status.
+    public static func getSyncStatus() throws -> SyncStatus {
+        guard let sync = shared._syncModule else {
+            return SyncStatus(enabled: false)
+        }
+        return try sync.getStatus()
+    }
 
     // MARK: - Activation API (RFC-0005)
 
@@ -229,12 +440,8 @@ public class Synheart {
         try moduleManager.registerModule(phoneModule!, dependsOn: ["capabilities", "consent"])
         try moduleManager.registerModule(behaviorModule!, dependsOn: ["capabilities", "consent"])
 
-        SynheartLogger.log("[Synheart] Initializing SRM...")
-        srmModule = SRMModule(storage: SRMSnapshotStorage())
-        try moduleManager.registerModule(
-            srmModule!,
-            dependsOn: ["capabilities", "consent"]
-        )
+        // SRM is handled by the native runtime (RuntimeBridge.exportSrmSnapshot /
+        // loadSrmSnapshot). BaselineSnapshot artifacts are produced via ArtifactPipeline.
 
         SynheartLogger.log("[Synheart] Initializing Runtime...")
         let runtimeSessionId = UUID().uuidString
@@ -254,20 +461,6 @@ public class Synheart {
             runtimeModule!,
             dependsOn: ["wear", "phone", "behavior", "srm"]
         )
-
-        if let cloudConfig = config?.cloudConfig {
-            SynheartLogger.log("[Synheart] Initializing Cloud Connector...")
-            cloudConnector = CloudConnectorModule(
-                capabilities: capabilityModule!,
-                consent: consentModule!,
-                runtimeModule: runtimeModule!,
-                config: cloudConfig
-            )
-            try moduleManager.registerModule(
-                cloudConnector!,
-                dependsOn: ["capabilities", "consent", "runtime"]
-            )
-        }
 
         if let platformIngestConfig = config?.platformIngestConfig {
             SynheartLogger.log("[Synheart] Initializing Platform Ingest...")
@@ -299,6 +492,58 @@ public class Synheart {
 
         _activationManager = ActivationManager()
         _activationManager!.activateFromConfig(resolvedConfig)
+
+        // Phase 1: Initialize storage and artifact pipeline
+        _synheartConfig = resolvedConfig
+        if resolvedConfig.storage.enabled && !resolvedConfig.appId.isEmpty && !resolvedConfig.subjectId.isEmpty {
+            do {
+                _storagePolicy = storagePolicyForMode(resolvedConfig.mode)
+                _smk = try SMK.loadOrCreate()
+                let basePath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
+                storageManager = StorageManager(basePath: basePath)
+                try storageManager!.open()
+
+                artifactPipeline = ArtifactPipeline(
+                    storage: storageManager!,
+                    policy: _storagePolicy!,
+                    smk: _smk!,
+                    subjectId: resolvedConfig.subjectId,
+                    appId: resolvedConfig.appId,
+                    appVersion: resolvedConfig.appVersion,
+                    deviceId: resolvedConfig.deviceId,
+                    platform: resolvedConfig.platform
+                )
+
+                // Wire HSI stream to artifact pipeline
+                artifactHsiCancellable = runtimeModule?.hsiStream
+                    .sink { [weak self] hsiJson in
+                        guard let self = self, let pipeline = self.artifactPipeline, self._currentSessionHandle != nil else { return }
+                        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                        try? pipeline.ingestHsiFrame(hsiJson, timestampMs: nowMs)
+                    }
+
+                SynheartLogger.log("[Synheart] Storage and artifact pipeline initialized")
+            } catch {
+                SynheartLogger.log("[Synheart] Storage init failed (non-fatal): \(error)")
+            }
+        }
+
+        // Phase 3: Initialize auth and sync modules
+        let appId = resolvedConfig.appId
+        if !appId.isEmpty {
+            _authModule = AuthModule(appId: appId)
+            _ = await _authModule!.restoreSession()
+
+            if let sm = storageManager, sm.isOpen {
+                _syncModule = SyncModule(
+                    auth: _authModule!,
+                    storage: sm,
+                    smk: _smk,
+                    baseUrl: "https://api.synheart.com"
+                )
+            }
+            SynheartLogger.log("[Synheart] Auth and sync modules initialized")
+        }
 
         isConfigured = true
         SynheartLogger.log("[Synheart] Initialization complete. Call startSession() to begin.")
@@ -354,6 +599,27 @@ public class Synheart {
                 self.bufferQueue.sync { self.sessionWearBuffer.append(sample) }
             }
 
+        // Phase 1: Create session record and start artifact pipeline
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let sessionId = "core_\(nowMs)"
+        let mode = _synheartConfig?.mode ?? .personal
+
+        if let sm = storageManager, sm.isOpen {
+            try? sm.insertSession(SessionRecord(
+                sessionId: sessionId,
+                subjectId: _synheartConfig?.subjectId ?? userId ?? "",
+                mode: mode.rawValue,
+                createdAtUtc: nowMs / 1000,
+                startUtc: nowMs / 1000,
+                appId: _synheartConfig?.appId ?? "",
+                appVersion: _synheartConfig?.appVersion ?? "0.0.0",
+                deviceId: _synheartConfig?.deviceId ?? "",
+                platform: _synheartConfig?.platform ?? "ios"
+            ))
+            artifactPipeline?.onSessionStart(sessionId, mode: mode)
+        }
+        _currentSessionHandle = SessionHandle(sessionId: sessionId, startedAtMs: nowMs, mode: mode)
+
         isRunning = true
         _reevaluateAllFeatures()
         SynheartLogger.log("[Synheart] Session started")
@@ -389,10 +655,67 @@ public class Synheart {
         sessionWearCancellable?.cancel()
         sessionWearCancellable = nil
 
+        // Phase 1: Finalize session summary and baseline snapshot
+        if let handle = _currentSessionHandle, let pipeline = artifactPipeline {
+            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+            // SessionSummary artifact
+            do {
+                _ = try pipeline.finalizeSession(sessionStartMs: handle.startedAtMs, sessionEndMs: nowMs)
+                SynheartLogger.log("[Synheart] Session summary artifact created")
+            } catch {
+                SynheartLogger.log("[Synheart] Session summary creation failed: \(error)")
+            }
+
+            // BaselineSnapshot from native SRM export
+            do {
+                if let srmJson = runtimeModule?.bridge?.exportSrmSnapshot() {
+                    _ = try pipeline.produceBaselineSnapshot(srmJson)
+                    SynheartLogger.log("[Synheart] Baseline snapshot artifact created")
+                }
+            } catch {
+                SynheartLogger.log("[Synheart] Baseline snapshot creation failed: \(error)")
+            }
+        }
+        // Auto-ingest session data via Platform Ingest
+        if let piConfig = _synheartConfig?.platformIngestConfig, piConfig.autoIngest, let handle = _currentSessionHandle, platformIngestModule != nil {
+            await _autoIngestSession(handle)
+        }
+
+        _currentSessionHandle = nil
+
+        // Auto-sync after session ends
+        if let sync = _syncModule, sync.enabled {
+            Task { try? await sync.syncNow() }
+        }
+
         isRunning = false
         _reevaluateAllFeatures()
         try await moduleManager.stopAll()
         SynheartLogger.log("[Synheart] Session stopped")
+    }
+
+    // MARK: - Auto-Ingest
+
+    private func _autoIngestSession(_ session: SessionHandle) async {
+        let wearSamples: [WearSample]
+        bufferQueue.sync { wearSamples = Array(sessionWearBuffer) }
+        let behaviorEvents = behaviorModule?.rawEvents(window: .window1h) ?? []
+        let phoneDataPoints = phoneModule?.rawDataPoints(window: .window1h) ?? []
+
+        let payload = PlatformPayloadBuilder.buildSession(
+            sessionId: session.sessionId,
+            deviceId: _synheartConfig?.deviceId ?? "",
+            appId: _synheartConfig?.appId ?? "",
+            userId: _synheartConfig?.subjectId ?? "",
+            startedAtMs: session.startedAtMs,
+            endedAtMs: Int64(Date().timeIntervalSince1970 * 1000),
+            dataOnCloud: _syncModule?.enabled ?? false,
+            wearSamples: wearSamples,
+            behaviorEvents: behaviorEvents,
+            phoneDataPoints: phoneDataPoints
+        )
+        let _ = await platformIngestModule!.ingestSession(payload)
     }
 
     // MARK: - Session Data Buffers
@@ -408,52 +731,6 @@ public class Synheart {
     public static func getSessionWearSamples() -> [WearSample] {
         shared.bufferQueue.sync { Array(shared.sessionWearBuffer) }
     }
-
-    // MARK: - Interpretation Modules
-
-
-    /**
-     * Force upload of queued snapshots now
-     *
-     * - Throws: CloudConnectorError if cloudUpload consent not granted
-     */
-    public static func uploadNow() async throws {
-        try await shared._uploadNow()
-    }
-
-    private func _uploadNow() async throws {
-        guard isConfigured else {
-            throw SynheartError.notInitialized
-        }
-
-        guard let cloudConnector = cloudConnector else {
-            throw SynheartError.notImplemented("Cloud connector not enabled")
-        }
-
-        try await cloudConnector.uploadNow()
-    }
-
-    /**
-     * Flush entire upload queue
-     *
-     * Attempts to upload all queued snapshots while online.
-     */
-    public static func flushUploadQueue() async throws {
-        try await shared._flushUploadQueue()
-    }
-
-    private func _flushUploadQueue() async throws {
-        guard isConfigured else {
-            throw SynheartError.notInitialized
-        }
-
-        guard let cloudConnector = cloudConnector else {
-            throw SynheartError.notImplemented("Cloud connector not enabled")
-        }
-
-        await cloudConnector.flushQueue()
-    }
-
 
     // MARK: - Platform Ingestion
 
@@ -697,11 +974,7 @@ public class Synheart {
                 Task { do { try await phoneModule?.stop() } catch { SynheartLogger.log("[Synheart] Failed to stop phone module: \(error)") } }
             }
         case .cloud:
-            if isOperational && cloudConnector != nil {
-                Task { do { try await cloudConnector?.start() } catch { SynheartLogger.log("[Synheart] Failed to start cloud connector: \(error)") } }
-            } else if !isOperational && cloudConnector != nil {
-                Task { do { try await cloudConnector?.stop() } catch { SynheartLogger.log("[Synheart] Failed to stop cloud connector: \(error)") } }
-            }
+            break // Cloud connector replaced by SyncModule
         case .syni:
             break
         }
@@ -768,14 +1041,29 @@ public class Synheart {
 
         cancellables.removeAll()
 
+        // Phase 1: Clean up storage and artifact pipeline
+        artifactHsiCancellable?.cancel()
+        artifactHsiCancellable = nil
+        storageManager?.close()
+        storageManager = nil
+        artifactPipeline = nil
+        _storagePolicy = nil
+        _smk = nil
+        _currentSessionHandle = nil
+        _synheartConfig = nil
+
+        // Phase 3
+        _syncModule?.dispose()
+        _syncModule = nil
+        _authModule?.logout()
+        _authModule = nil
+
         consentModule = nil
         capabilityModule = nil
         wearModule = nil
         phoneModule = nil
         behaviorModule = nil
         runtimeModule = nil
-        srmModule = nil
-        cloudConnector = nil
         platformIngestModule = nil
         _activationManager = nil
         previousConsent = nil

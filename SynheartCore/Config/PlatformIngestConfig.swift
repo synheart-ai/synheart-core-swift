@@ -28,17 +28,22 @@ public struct PlatformIngestConfig {
     /// Maximum retry attempts for failed requests.
     public let maxRetries: Int
 
+    /// When true, automatically ingest session data when a session stops.
+    public let autoIngest: Bool
+
     public init(
         apiKey: String,
         hmacSecret: String,
         baseUrl: String = ApiEndpoints.defaultPlatformIngestBaseUrl,
         timeout: TimeInterval = 30,
-        maxRetries: Int = 3
+        maxRetries: Int = 3,
+        autoIngest: Bool = false
     ) {
         self.apiKey = apiKey
         self.hmacSecret = hmacSecret
         self.baseUrl = baseUrl
         self.timeout = timeout
         self.maxRetries = maxRetries
+        self.autoIngest = autoIngest
     }
 }

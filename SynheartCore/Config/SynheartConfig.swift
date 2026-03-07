@@ -1,7 +1,52 @@
 import Foundation
 
+/// Storage sub-configuration (RFC-CORE-0004).
+public struct StorageConfig {
+    public let enabled: Bool
+    public let retentionDays: Int?
+
+    public init(enabled: Bool = true, retentionDays: Int? = nil) {
+        self.enabled = enabled
+        self.retentionDays = retentionDays
+    }
+}
+
+/// Sync sub-configuration (RFC-CORE-0005, Phase 3).
+public struct SyncConfig {
+    public let enabled: Bool
+
+    public init(enabled: Bool = false) {
+        self.enabled = enabled
+    }
+}
+
+/// Privacy sub-configuration (RFC-CORE-0003).
+public struct PrivacyConfig {
+    public let allowResearch: Bool
+
+    public init(allowResearch: Bool = false) {
+        self.allowResearch = allowResearch
+    }
+}
+
 /// Main configuration for Synheart SDK
 public struct SynheartConfig {
+    // RFC-CORE-0007 fields
+    public let appId: String
+    public let subjectId: String
+    public let mode: SynheartMode
+    public let appVersion: String
+    public let appName: String
+    public let category: String
+    public let developer: String
+    public let additionalAppMetadata: [String: Any]
+    public let deviceId: String
+    public let platform: String
+    public let storage: StorageConfig
+    public let sync: SyncConfig
+    public let privacy: PrivacyConfig
+
+    // Legacy fields (backward-compatible)
     public let enableWear: Bool
     public let enablePhone: Bool
     public let enableBehavior: Bool
@@ -18,6 +63,19 @@ public struct SynheartConfig {
     public let allowUnsignedCapabilities: Bool
 
     public init(
+        appId: String = "",
+        subjectId: String = "",
+        mode: SynheartMode = .personal,
+        appVersion: String = "0.0.0",
+        appName: String = "",
+        category: String = "",
+        developer: String = "",
+        additionalAppMetadata: [String: Any] = [:],
+        deviceId: String = "",
+        platform: String = "ios",
+        storage: StorageConfig = StorageConfig(),
+        sync: SyncConfig = SyncConfig(),
+        privacy: PrivacyConfig = PrivacyConfig(),
         enableWear: Bool = true,
         enablePhone: Bool = true,
         enableBehavior: Bool = true,
@@ -27,6 +85,19 @@ public struct SynheartConfig {
         capabilitySecret: String? = nil,
         allowUnsignedCapabilities: Bool = false
     ) {
+        self.appId = appId
+        self.subjectId = subjectId
+        self.mode = mode
+        self.appVersion = appVersion
+        self.appName = appName
+        self.category = category
+        self.developer = developer
+        self.additionalAppMetadata = additionalAppMetadata
+        self.deviceId = deviceId
+        self.platform = platform
+        self.storage = storage
+        self.sync = sync
+        self.privacy = privacy
         self.enableWear = enableWear
         self.enablePhone = enablePhone
         self.enableBehavior = enableBehavior
@@ -35,6 +106,22 @@ public struct SynheartConfig {
         self.capabilityToken = capabilityToken
         self.capabilitySecret = capabilitySecret
         self.allowUnsignedCapabilities = allowUnsignedCapabilities
+    }
+
+    /// Validate config and throw on violations.
+    public func validate() throws {
+        if mode == .research && !privacy.allowResearch {
+            throw SynheartCoreError.researchNotAllowed
+        }
+        guard !appId.isEmpty else {
+            throw SynheartCoreError.notConfigured("appId must not be empty")
+        }
+        guard !subjectId.isEmpty else {
+            throw SynheartCoreError.notConfigured("subjectId must not be empty")
+        }
+        guard !subjectId.contains("|") else {
+            throw SynheartCoreError.invalidMode("subjectId must not contain pipe character")
+        }
     }
 }
 

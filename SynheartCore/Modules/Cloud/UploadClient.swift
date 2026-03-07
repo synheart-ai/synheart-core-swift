@@ -123,9 +123,17 @@ public class UploadClient {
                     return try decoder.decode(UploadResponse.self, from: data)
                 }
 
-                // Parse error response
-                let decoder = JSONDecoder()
-                let error = try decoder.decode(UploadErrorResponse.self, from: data)
+                // Parse error response (API may return JSON or plain text e.g. "404 page not found")
+                let error: UploadErrorResponse
+                do {
+                    let decoder = JSONDecoder()
+                    error = try decoder.decode(UploadErrorResponse.self, from: data)
+                } catch {
+                    let bodyStr = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+                    throw CloudConnectorError.networkError(
+                        "Upload failed: \(httpResponse.statusCode) \(bodyStr)"
+                    )
+                }
 
                 // Handle 401 with AuthProvider retry
                 if httpResponse.statusCode == 401, let authProvider = authProvider {
