@@ -13,8 +13,8 @@ struct SimpleExample {
     static func main() async throws {
         var cancellables = Set<AnyCancellable>()
 
-        // Configure with wearable data collection
-        try await Synheart.configure(config: SynheartConfig(
+        // Initialize with wearable data collection
+        try await Synheart.initialize(config: SynheartConfig(
             appId: "com.example.app",
             subjectId: "user_123",
             allowUnsignedCapabilities: true

@@ -5,7 +5,7 @@ import Combine
 ///
 /// Captures device-level motion and context signals.
 /// RFC-CORE-0007 compliant: no feature computation in Core.
-public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneDataProvider {
+public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
     private let motionCollector = MotionCollector()
     private let screenTracker = ScreenStateTracker()
     private let appTracker = AppFocusTracker()
@@ -24,14 +24,6 @@ public class PhoneModule: BaseSynheartModule, PhoneFeatureProvider, RawPhoneData
         self.capabilities = capabilities
         self.consent = consent
         super.init(moduleId: "phone")
-    }
-
-    // MARK: - PhoneFeatureProvider
-
-    public func features(_ window: WindowType) -> PhoneWindowFeatures? {
-        // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by synheart-runtime when wired.
-        return nil
     }
 
     // MARK: - RawPhoneDataProvider

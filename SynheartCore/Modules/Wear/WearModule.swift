@@ -5,7 +5,7 @@ import Combine
 ///
 /// Collects and buffers raw biosignals from wearables.
 /// RFC-CORE-0007 compliant: no feature computation in Core.
-public class WearModule: BaseSynheartModule, WearFeatureProvider, RawWearDataProvider {
+public class WearModule: BaseSynheartModule, RawWearDataProvider {
     private let sources: [WearSourceHandler]
     private let cache = WearCache()
     private let capabilities: CapabilityProvider
@@ -28,14 +28,6 @@ public class WearModule: BaseSynheartModule, WearFeatureProvider, RawWearDataPro
         self.consent = consent
         self.sources = sources ?? [MockWearSourceHandler()]
         super.init(moduleId: "wear")
-    }
-
-    // MARK: - WearFeatureProvider
-
-    public func features(_ window: WindowType) -> WearWindowFeatures? {
-        // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by synheart-runtime when wired.
-        return nil
     }
 
     // MARK: - RawWearDataProvider

@@ -29,16 +29,12 @@ struct RuntimeExample {
         print("[Runtime] Version: \(runtimeVersion ?? "unavailable")")
         print("[Runtime] Native library loaded: \(runtimeVersion != nil)")
 
-        // 2. Initialize SDK with all modules enabled
-        try await Synheart.initialize(
-            userId: "runtime_example_user",
-            config: SynheartConfig(
-                allowUnsignedCapabilities: true,
-                enableWear: true,
-                enablePhone: true,
-                enableBehavior: true
-            )
-        )
+        // 2. Initialize SDK
+        try await Synheart.initialize(config: SynheartConfig(
+            appId: "com.example.runtime",
+            subjectId: "runtime_example_user",
+            allowUnsignedCapabilities: true
+        ))
         print("[Synheart] SDK initialized")
 
         // 3. Grant consent for all data types

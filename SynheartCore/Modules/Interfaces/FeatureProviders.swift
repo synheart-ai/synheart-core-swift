@@ -25,12 +25,6 @@ public enum SleepStage {
 
 // MARK: - Wear Module
 
-/// Wear module feature provider
-public protocol WearFeatureProvider: AnyObject {
-    /// Get biosignal features for a specific window
-    func features(_ window: WindowType) -> WearWindowFeatures?
-}
-
 /// Biosignal features from wearables
 public struct WearWindowFeatures {
     /// Window duration
@@ -80,12 +74,6 @@ public struct WearWindowFeatures {
 
 // MARK: - Phone Module
 
-/// Phone module feature provider
-public protocol PhoneFeatureProvider: AnyObject {
-    /// Get phone features for a specific window
-    func features(_ window: WindowType) -> PhoneWindowFeatures?
-}
-
 /// Phone context features
 public struct PhoneWindowFeatures {
     /// Motion level (0.0 - 1.0)
@@ -114,12 +102,6 @@ public struct PhoneWindowFeatures {
 }
 
 // MARK: - Behavior Module
-
-/// Behavior module feature provider
-public protocol BehaviorFeatureProvider: AnyObject {
-    /// Get behavioral features for a specific window
-    func features(_ window: WindowType) -> BehaviorWindowFeatures?
-}
 
 /// Behavioral interaction features
 public struct BehaviorWindowFeatures {

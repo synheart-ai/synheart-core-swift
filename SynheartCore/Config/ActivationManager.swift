@@ -32,23 +32,11 @@ final class ActivationManager {
         activated
     }
 
-    /// Bulk-activate features based on SynheartConfig flags.
+    /// Bulk-activate features based on SynheartConfig.
     ///
-    /// Maps config booleans/objects to the corresponding feature activations:
-    /// - `enableWear` → `.wear`
-    /// - `enablePhone` → `.phoneContext`
-    /// - `enableBehavior` → `.behavior`
+    /// Maps config objects to the corresponding feature activations:
     /// - `cloudConfig != nil` → `.cloud`
     func activateFromConfig(_ config: SynheartConfig) {
-        if config.enableWear {
-            activated.insert(.wear)
-        }
-        if config.enablePhone {
-            activated.insert(.phoneContext)
-        }
-        if config.enableBehavior {
-            activated.insert(.behavior)
-        }
         if config.cloudConfig != nil {
             activated.insert(.cloud)
         }

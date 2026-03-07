@@ -33,7 +33,7 @@ public enum SynheartCoreError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .notConfigured(let msg):
-            return "SynheartCoreError(\(code)): \(msg ?? "Synheart.configure() must be called before this operation.")"
+            return "SynheartCoreError(\(code)): \(msg ?? "Synheart.initialize() must be called before this operation.")"
         case .invalidMode(let msg):
             return "SynheartCoreError(\(code)): \(msg ?? "The specified mode is not valid for this operation.")"
         case .researchNotAllowed:

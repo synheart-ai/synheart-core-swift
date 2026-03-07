@@ -19,8 +19,8 @@ import Combine
  *
  * Example usage:
  * ```swift
- * // Configure
- * try await Synheart.configure(config: SynheartConfig(
+ * // Initialize
+ * try await Synheart.initialize(config: SynheartConfig(
  *     appId: "com.example.app",
  *     subjectId: "anon_user_123",
  *     allowUnsignedCapabilities: true
@@ -100,19 +100,6 @@ public class Synheart {
     /// The currently active session, if any.
     public static var currentSession: SessionHandle? {
         shared._currentSessionHandle
-    }
-
-    /// Configure the SDK using RFC-CORE-0007 config shape.
-    ///
-    /// This is the preferred entry point for Phase 1+. Sets up operational mode,
-    /// storage, and artifact pipeline.
-    public static func configure(config: SynheartConfig) async throws {
-        try config.validate()
-        try await shared._initialize(
-            userId: config.subjectId,
-            config: config,
-            appKey: "configured"
-        )
     }
 
     /// Whether the SDK is currently running.
@@ -364,30 +351,36 @@ public class Synheart {
     /**
      * Initialize Synheart Core SDK
      *
-     * This must be called before any other operations.
+     * This is the single entry point for the SDK. Must be called before any
+     * other operations. Idempotent — throws if already initialized.
      *
      * Example:
      * ```swift
-     * try await Synheart.initialize(
-     *     userId: "anon_user_123",
-     *     config: SynheartConfig(
-     *         enableWear: true,
-     *         enablePhone: true,
-     *         enableBehavior: true
-     *     )
-     * )
+     * try await Synheart.initialize(config: SynheartConfig(
+     *     appId: "com.example.app",
+     *     subjectId: "anon_user_123",
+     *     allowUnsignedCapabilities: true
+     * ))
      * ```
      */
     public static func initialize(
-        userId: String,
         config: SynheartConfig? = nil,
-        appKey: String = "mock_app_key"
+        userId: String? = nil,
+        autoStart: Bool = false
     ) async throws {
+        if let config = config {
+            try config.validate()
+        }
+        let resolvedUserId = userId ?? config?.subjectId ?? ""
+        let appKey = config?.appId ?? "default"
         try await shared._initialize(
-            userId: userId,
+            userId: resolvedUserId,
             config: config,
             appKey: appKey
         )
+        if autoStart {
+            try await shared._startSession()
+        }
     }
 
     private func _initialize(
@@ -562,7 +555,11 @@ public class Synheart {
      *
      * Example:
      * ```swift
-     * try await Synheart.initialize(userId: "user_123")
+     * try await Synheart.initialize(config: SynheartConfig(
+     *     appId: "com.example.app",
+     *     subjectId: "user_123",
+     *     allowUnsignedCapabilities: true
+     * ))
      * try await Synheart.startSession()
      * ```
      */

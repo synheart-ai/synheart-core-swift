@@ -29,7 +29,7 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 - **HSI Runtime** → Signal fusion + state computation (via synheart-runtime Rust engine)
 - **Consent Module** → User permission management
 - **Capabilities Module** → Feature gating (core/extended/research)
-- **Cloud Connector** → Secure HSI snapshot uploads
+- **Sync Module** → Secure artifact sync (replaces Cloud Connector)
 
 **Key principle:**
 > One SDK, many modules, unified human-state model
@@ -55,12 +55,7 @@ The Core SDK strictly separates:
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
 6. **HSI Runtime** - Signal fusion and state computation (via synheart-runtime)
-7. **Cloud Connector** - Secure HSI snapshot uploads
-
-### Optional Interpretation Modules
-
-- **Synheart Focus** - Focus/engagement estimation (optional, explicit enable)
-- **Synheart Emotion** - Affect modeling (optional, explicit enable)
+7. **Sync Module** - Secure artifact sync (replaces Cloud Connector)
 
 ### Data Flow
 
@@ -100,15 +95,14 @@ import SynheartCore
 import Combine
 
 // Initialize the Core SDK
-try await Synheart.initialize(
-    userId: "anon_user_123",
-    config: SynheartConfig(
-        allowUnsignedCapabilities: true,  // Use capabilityToken + capabilitySecret in production
-        enableWear: true,
-        enablePhone: true,
-        enableBehavior: true
-    )
-)
+try await Synheart.initialize(config: SynheartConfig(
+    appId: "com.example.app",
+    subjectId: "anon_user_123",
+    allowUnsignedCapabilities: true  // Use capabilityToken + capabilitySecret in production
+))
+
+// Grant consent for biosignal collection
+try await Synheart.grantConsent("biosignals")
 
 // Subscribe to HSI updates (core state representation)
 var cancellables = Set<AnyCancellable>()
@@ -119,26 +113,19 @@ Synheart.onHSIUpdate
     }
     .store(in: &cancellables)
 
-// Optional: Enable interpretation modules (activate API preferred)
-Synheart.activate(.focus)
-Synheart.onFocusUpdate
-    .sink { focus in
-        print("Focus Score: \(focus.score)")
+// Subscribe to typed state updates
+Synheart.onStateUpdate
+    .sink { state in
+        print("State: \(state)")
     }
     .store(in: &cancellables)
 
-Synheart.activate(.emotion)
-Synheart.onEmotionUpdate
-    .sink { emotion in
-        print("Stress Index: \(emotion.stress)")
-    }
-    .store(in: &cancellables)
-
-// Optional: Enable cloud sync (requires consent)
-// Synheart.activate(.cloud)
+// Start session — data collection begins
+try await Synheart.startSession()
 
 // Later, stop when done
-try await Synheart.stop()
+try await Synheart.stopSession()
+try await Synheart.dispose()
 ```
 
 ### Module-Based Architecture
@@ -199,58 +186,17 @@ runtime.hsiStream
 ### Accessing Current State
 
 ```swift
-// Preferred: Synheart is the canonical entry point.
-if let currentState = Synheart.currentState {
-    // Use current state
-    print("Current heart rate: \(currentState.heartRate ?? 0)")
+// currentState returns the latest raw HSI JSON frame (String?).
+if let currentJson = Synheart.currentState {
+    print("Latest HSI JSON: \(currentJson)")
+}
+
+// For typed access, use currentHSIState:
+if let state = Synheart.currentHSIState {
+    print("Current state: \(state)")
 }
 ```
 
-### Custom Model Integration
-
-To integrate with your own emotion or focus models:
-
-```swift
-// Create custom emotion model
-class MyEmotionModel: EmotionModelProtocol {
-    func predict(features: [String: Float]) async throws -> [String: Float] {
-        // Your model implementation
-        return [
-            "stress": 0.5,
-            "calm": 0.5,
-            "engagement": 0.7,
-            "activation": 0.6,
-            "valence": 0.3
-        ]
-    }
-}
-
-// Create custom focus model
-class MyFocusModel: FocusModelProtocol {
-    func predict(features: [String: Float]) async throws -> [String: Float] {
-        // Your model implementation
-        return [
-            "score": 0.8,
-            "cognitive_load": 0.4,
-            "clarity": 0.9,
-            "distraction": 0.2
-        ]
-    }
-}
-
-// Preferred: inject models via SynheartConfig (used by RuntimeModule)
-try await Synheart.initialize(
-    userId: "anon_user_123",
-    config: SynheartConfig(
-        allowUnsignedCapabilities: true,  // Use capabilityToken + capabilitySecret in production
-        enableWear: true,
-        enablePhone: true,
-        enableBehavior: true,
-        emotionModel: MyEmotionModel(),
-        focusModel: MyFocusModel()
-    )
-)
-```
 
 ## Error Handling
 
@@ -258,10 +204,11 @@ The SDK uses Swift's native error handling with typed errors:
 
 ```swift
 do {
-    try await Synheart.initialize(
-        userId: "user_123",
-        config: SynheartConfig(allowUnsignedCapabilities: true)
-    )
+    try await Synheart.initialize(config: SynheartConfig(
+        appId: "com.example.app",
+        subjectId: "user_123",
+        allowUnsignedCapabilities: true
+    ))
     try await Synheart.startSession()
 } catch SynheartError.alreadyConfigured {
     print("SDK already initialized")
@@ -282,7 +229,6 @@ do {
 | `SynheartError.alreadyConfigured` | `initialize()` called twice |
 | `SynheartError.capabilityTokenRequired` | No token provided and `allowUnsignedCapabilities` is false |
 | `SynheartError.notImplemented(String)` | Feature not yet available |
-| `CloudConnectorError.consentRequired(String)` | Cloud operation without consent |
 
 ## Batch Ingest Mode
 
@@ -304,7 +250,6 @@ Send structured session and metadata payloads to the Synheart platform API.
 ```swift
 let config = SynheartConfig(
     appId: "your_app_id",
-    apiKey: "your_api_key",
     subjectId: "sub_user_123",
     platformIngestConfig: PlatformIngestConfig(
         apiKey: "your_platform_api_key",
@@ -334,22 +279,9 @@ let payload = PlatformPayloadBuilder.buildSession(
 
 ## Architecture Details
 
-Synheart Core SDK provides two complementary architectures:
-
-### Core Architecture (`SynheartCore/Core/`)
-
-A direct, non-modular pipeline for ingestion/processing/fusion:
-
-- **StateEngine**: Orchestrates ingestion, processing, and fusion
-- **IngestionService**: Collects raw signals from HealthKit, CoreMotion, and behavior adapters
-- **SignalProcessor**: Normalizes, cleans, and calculates derived metrics (RMSSD, SDNN)
-- **FusionEngine**: Generates embeddings and creates base HSV
-- **EmotionHead**: Populates emotion state using emotion models
-- **FocusHead**: Populates focus state using focus models
-
 ### Modular Architecture (`SynheartCore/Modules/`)
 
-A module-based system for windowed feature collection:
+A module-based system for data collection and processing:
 
 - **RuntimeModule**: Orchestrates window-based processing (30s, 5m, 1h, 24h windows)
 - **WearModule**: Collects biosignal features from wearables
@@ -388,12 +320,12 @@ For the modular architecture, features are collected in time windows:
 
 | Method | Description |
 |--------|-------------|
-| `initialize(userId:config:appKey:)` | Initialize the SDK (must be called first) |
+| `initialize(config:userId:autoStart:)` | Initialize the SDK (must be called first) |
 | `startSession()` | Start data collection |
 | `stopSession()` | Stop data collection |
-| `activate(_:)` | Enable a feature (focus, emotion, cloud, etc.) |
+| `activate(_:)` | Enable a feature (wear, behavior, phoneContext, etc.) |
 | `deactivate(_:)` | Disable a feature |
-| `uploadNow()` | Force upload queued snapshots |
+| `syncNow()` | Execute a sync cycle (push + pull) |
 | `grantConsent(_:)` | Grant consent for a data type |
 | `revokeConsent(_:)` | Revoke consent for a data type |
 | `hasConsent(_:)` | Check if consent is granted |
@@ -405,9 +337,9 @@ For the modular architecture, features are collected in time windows:
 | Property | Type | Description |
 |----------|------|-------------|
 | `onHSIUpdate` | `AnyPublisher<String, Never>` | HSI JSON frames from synheart-runtime |
-| `onEmotionUpdate` | `AnyPublisher<EmotionState, Never>` | Stream of emotion updates |
-| `onFocusUpdate` | `AnyPublisher<FocusState, Never>` | Stream of focus updates |
+| `onStateUpdate` | `AnyPublisher<HSIState, Never>` | Typed HSI state updates |
 | `currentState` | `String?` | Latest HSI JSON frame |
+| `currentHSIState` | `HSIState?` | Latest typed HSI state |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |
 | `isInitialized` | `Bool` | Whether SDK is initialized |
 | `isRunning` | `Bool` | Whether a session is active |
@@ -422,9 +354,6 @@ SynheartCore/
 │   ├── SignalProcessor.swift
 │   ├── FusionEngine.swift
 │   └── [Adapters]          # HealthKit, CoreMotion, Behavior, Context
-├── Heads/                   # Model heads for enrichment
-│   ├── EmotionHead.swift
-│   └── FocusHead.swift
 ├── Models/                  # Data models
 │   ├── Hsv.swift           # HumanStateVector
 │   ├── Emotion.swift
@@ -441,7 +370,7 @@ SynheartCore/
 │   ├── Capabilities/       # Feature flags and capabilities
 │   ├── Consent/            # Consent management
 │   ├── SRM/                # Self-Reference Model (baseline persistence)
-│   └── Interfaces/         # Feature provider protocols
+│   └── Interfaces/         # Module contracts and data types
 └── Synheart.swift          # Public SDK facade / main entry point
 ```
 
@@ -505,10 +434,11 @@ To test your integration without hardware:
 
 ```swift
 // Initialize with default capabilities (no real token needed)
-try await Synheart.initialize(
-    userId: "test_user",
-    config: SynheartConfig(allowUnsignedCapabilities: true)
-)
+try await Synheart.initialize(config: SynheartConfig(
+    appId: "com.example.test",
+    subjectId: "test_user",
+    allowUnsignedCapabilities: true
+))
 
 // Start session — mock data will flow through all streams
 try await Synheart.startSession()

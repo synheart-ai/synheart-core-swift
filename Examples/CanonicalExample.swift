@@ -26,17 +26,17 @@ struct CanonicalExample {
         //    In production, replace allowUnsignedCapabilities with
         //    capabilityToken + capabilitySecret from your server.
         do {
-            try await Synheart.configure(config: SynheartConfig(
+            try await Synheart.initialize(config: SynheartConfig(
                 appId: "com.example.app",
                 subjectId: "example_user_123",
                 allowUnsignedCapabilities: true
             ))
-            print("[Synheart] SDK configured")
+            print("[Synheart] SDK initialized")
         } catch SynheartError.capabilityTokenRequired {
             print("[Synheart] Error: Capability token required in production mode")
             return
         } catch {
-            print("[Synheart] Configuration failed: \(error)")
+            print("[Synheart] Initialization failed: \(error)")
             return
         }
 

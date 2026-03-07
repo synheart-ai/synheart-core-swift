@@ -5,7 +5,7 @@ import Combine
 ///
 /// Captures user-device interaction patterns.
 /// RFC-CORE-0007 compliant: no feature computation in Core.
-public class BehaviorModule: BaseSynheartModule, BehaviorFeatureProvider, RawBehaviorDataProvider {
+public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
     private let eventStream = BehaviorEventStream()
     private let aggregator = WindowAggregator()
 
@@ -27,14 +27,6 @@ public class BehaviorModule: BaseSynheartModule, BehaviorFeatureProvider, RawBeh
     /// Get the event stream for recording events
     public var eventStreamInstance: BehaviorEventStream {
         return eventStream
-    }
-
-    // MARK: - BehaviorFeatureProvider
-
-    public func features(_ window: WindowType) -> BehaviorWindowFeatures? {
-        // Feature computation removed per RFC-CORE-0007.
-        // Features will be computed by synheart-runtime when wired.
-        return nil
     }
 
     // MARK: - RawBehaviorDataProvider

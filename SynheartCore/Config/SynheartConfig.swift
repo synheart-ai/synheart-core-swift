@@ -46,10 +46,6 @@ public struct SynheartConfig {
     public let sync: SyncConfig
     public let privacy: PrivacyConfig
 
-    // Legacy fields (backward-compatible)
-    public let enableWear: Bool
-    public let enablePhone: Bool
-    public let enableBehavior: Bool
     public let cloudConfig: CloudConfig?
     public let platformIngestConfig: PlatformIngestConfig?
 
@@ -76,9 +72,6 @@ public struct SynheartConfig {
         storage: StorageConfig = StorageConfig(),
         sync: SyncConfig = SyncConfig(),
         privacy: PrivacyConfig = PrivacyConfig(),
-        enableWear: Bool = true,
-        enablePhone: Bool = true,
-        enableBehavior: Bool = true,
         cloudConfig: CloudConfig? = nil,
         platformIngestConfig: PlatformIngestConfig? = nil,
         capabilityToken: CapabilityToken? = nil,
@@ -98,9 +91,6 @@ public struct SynheartConfig {
         self.storage = storage
         self.sync = sync
         self.privacy = privacy
-        self.enableWear = enableWear
-        self.enablePhone = enablePhone
-        self.enableBehavior = enableBehavior
         self.cloudConfig = cloudConfig
         self.platformIngestConfig = platformIngestConfig
         self.capabilityToken = capabilityToken

@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`PlatformPayloadBuilder`** — Builds structured platform ingestion payloads for session and metadata upload.
 - **`PlatformIngestConfig.autoIngest`** — When enabled, automatically ingests session data to the Synheart platform on stop.
 
+### Removed
+
+- **`configure()` method** — Removed legacy `configure()` entry point. The single entry point is now `Synheart.initialize(config:userId:autoStart:)`.
+- **Feature provider protocols** — Removed `WearFeatureProvider`, `PhoneFeatureProvider`, and `BehaviorFeatureProvider` protocols. Feature computation lives in synheart-runtime.
+- **Legacy config fields** — Removed `enableWear`, `enablePhone`, `enableBehavior` from `SynheartConfig`. Module activation is handled via `activate(_:)` / `deactivate(_:)`.
+- **Empty `Heads/` directory** — Removed empty directory (head logic lives in synheart-runtime).
+
 ## [1.2.0] - 2026-02-23
 
 ### Removed
