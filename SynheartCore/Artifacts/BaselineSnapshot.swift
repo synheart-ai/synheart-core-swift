@@ -77,13 +77,50 @@ public struct BaselineData: Codable {
 public struct BaselineSnapshotArtifact: Codable {
     public let header: ArtifactHeader
     public let baseline: BaselineData
+    public let wearableReference: [String: Any]?
 
-    public init(header: ArtifactHeader, baseline: BaselineData) {
-        self.header = header
-        self.baseline = baseline
+    enum CodingKeys: String, CodingKey {
+        case header
+        case baseline
+        case wearableReference = "wearable_reference"
     }
 
-    public static func create(subjectId: String, baseline: BaselineData) -> BaselineSnapshotArtifact {
+    public init(header: ArtifactHeader, baseline: BaselineData, wearableReference: [String: Any]? = nil) {
+        self.header = header
+        self.baseline = baseline
+        self.wearableReference = wearableReference
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        header = try container.decode(ArtifactHeader.self, forKey: .header)
+        baseline = try container.decode(BaselineData.self, forKey: .baseline)
+
+        // Decode [String: Any] from a JSON string or dictionary
+        if let jsonString = try? container.decode(String.self, forKey: .wearableReference),
+           let data = jsonString.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            wearableReference = dict
+        } else {
+            wearableReference = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(header, forKey: .header)
+        try container.encode(baseline, forKey: .baseline)
+
+        if let ref = wearableReference,
+           let data = try? JSONSerialization.data(withJSONObject: ref),
+           let str = String(data: data, encoding: .utf8) {
+            try container.encode(str, forKey: .wearableReference)
+        } else {
+            try container.encodeNil(forKey: .wearableReference)
+        }
+    }
+
+    public static func create(subjectId: String, baseline: BaselineData, wearableReference: [String: Any]? = nil) -> BaselineSnapshotArtifact {
         let header = ArtifactHeader(
             type: "baseline_snapshot",
             subjectId: subjectId,
@@ -91,6 +128,6 @@ public struct BaselineSnapshotArtifact: Codable {
             timeRange: TimeRange(startMs: baseline.coverage.startMs, endMs: baseline.coverage.endMs),
             schema: SchemaRef(name: "baseline_snapshot", version: "1")
         )
-        return BaselineSnapshotArtifact(header: header, baseline: baseline)
+        return BaselineSnapshotArtifact(header: header, baseline: baseline, wearableReference: wearableReference)
     }
 }

@@ -7,6 +7,7 @@ public protocol StoragePolicy {
     func canPersistArtifact(_ type: String) -> Bool
     func canPersistStream(_ streamType: String) -> Bool
     func canIncludeMetrics() -> Bool
+    func canPersistWearableEvent() -> Bool
 }
 
 public func storagePolicyForMode(_ mode: SynheartMode) -> StoragePolicy {
@@ -28,6 +29,8 @@ private struct PersonalPolicy: StoragePolicy {
     }
 
     func canIncludeMetrics() -> Bool { false }
+
+    func canPersistWearableEvent() -> Bool { true }
 }
 
 private struct InsightPolicy: StoragePolicy {
@@ -42,10 +45,13 @@ private struct InsightPolicy: StoragePolicy {
     }
 
     func canIncludeMetrics() -> Bool { true }
+
+    func canPersistWearableEvent() -> Bool { true }
 }
 
 private struct ResearchPolicy: StoragePolicy {
     func canPersistArtifact(_ type: String) -> Bool { true }
     func canPersistStream(_ streamType: String) -> Bool { true }
     func canIncludeMetrics() -> Bool { true }
+    func canPersistWearableEvent() -> Bool { true }
 }

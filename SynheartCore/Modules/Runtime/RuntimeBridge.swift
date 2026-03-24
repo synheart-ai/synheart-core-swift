@@ -182,6 +182,31 @@ public final class RuntimeBridge {
         return result
     }
 
+    // MARK: - Wearable SRM
+
+    /// Push a daily value for a longitudinal wearable dimension.
+    public func pushWearableDailyValue(dimension: String, dayIndex: Int, value: Double, confidence: Double, fidelity: Int32) {
+        guard let h = handle else { return }
+        dimension.withCString { dimCStr in
+            RuntimeFFI.pushWearableDailyValue(h, dimCStr, UInt32(dayIndex), value, confidence, fidelity)
+        }
+    }
+
+    /// Trigger longitudinal recompute and pass the reference to state runtime.
+    public func triggerWearableRecompute(triggerType: Int32, asOfDay: Int) {
+        guard let h = handle else { return }
+        RuntimeFFI.triggerWearableRecompute(h, triggerType, UInt32(asOfDay))
+    }
+
+    /// Return the current wearable reference as JSON, or nil if EMPTY.
+    public func getWearableReference() -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.getWearableReference(h) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
     // MARK: - SRM Baselines
 
     /// Return all SRM baselines as JSON, or nil.
@@ -333,6 +358,11 @@ private enum RuntimeFFI {
     private typealias FreeStringFn        = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
     private typealias VersionFn           = @convention(c) () -> UnsafeMutablePointer<CChar>?
 
+    // Wearable SRM
+    private typealias PushWearableDailyValueFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UInt32, Double, Double, Int32) -> Int32
+    private typealias TriggerWearableRecomputeFn = @convention(c) (OpaquePointer?, Int32, UInt32) -> Int32
+    private typealias GetWearableReferenceFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+
     // SRM
     private typealias BaselinesJsonFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias BaselineSummaryFn   = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
@@ -431,6 +461,22 @@ private enum RuntimeFFI {
     private static let _version: VersionFn? = {
         guard let sym = dlsym(handle, "synheart_runtime_version") else { return nil }
         return unsafeBitCast(sym, to: VersionFn.self)
+    }()
+
+    // Wearable SRM
+    private static let _pushWearableDailyValue: PushWearableDailyValueFn? = {
+        guard let sym = dlsym(handle, "synheart_srm_push_wearable_daily_value") else { return nil }
+        return unsafeBitCast(sym, to: PushWearableDailyValueFn.self)
+    }()
+
+    private static let _triggerWearableRecompute: TriggerWearableRecomputeFn? = {
+        guard let sym = dlsym(handle, "synheart_srm_trigger_wearable_recompute") else { return nil }
+        return unsafeBitCast(sym, to: TriggerWearableRecomputeFn.self)
+    }()
+
+    private static let _getWearableReference: GetWearableReferenceFn? = {
+        guard let sym = dlsym(handle, "synheart_srm_get_wearable_reference") else { return nil }
+        return unsafeBitCast(sym, to: GetWearableReferenceFn.self)
     }()
 
     // SRM
@@ -544,6 +590,21 @@ private enum RuntimeFFI {
 
     static func version() -> UnsafeMutablePointer<CChar>? {
         _version?()
+    }
+
+    // Wearable SRM
+    @discardableResult
+    static func pushWearableDailyValue(_ runtime: OpaquePointer?, _ dimension: UnsafePointer<CChar>?, _ dayIndex: UInt32, _ value: Double, _ confidence: Double, _ fidelity: Int32) -> Int32 {
+        _pushWearableDailyValue?(runtime, dimension, dayIndex, value, confidence, fidelity) ?? -1
+    }
+
+    @discardableResult
+    static func triggerWearableRecompute(_ runtime: OpaquePointer?, _ triggerType: Int32, _ asOfDay: UInt32) -> Int32 {
+        _triggerWearableRecompute?(runtime, triggerType, asOfDay) ?? -1
+    }
+
+    static func getWearableReference(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+        _getWearableReference?(runtime)
     }
 
     // SRM
