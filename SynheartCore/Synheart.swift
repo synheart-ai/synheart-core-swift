@@ -246,7 +246,7 @@ public class Synheart {
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
         // POST server-side deletion request if authenticated
         if let auth = shared._authModule, auth.isAuthenticated, let token = auth.accessToken {
-            let url = URL(string: "https://api.synheart.com/v1/account/delete")!
+            let url = URL(string: "https://api.synheart.ai/v1/account/delete")!
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -271,7 +271,7 @@ public class Synheart {
             return false
         }
 
-        let url = URL(string: "https://api.synheart.com/v1/account/delete/cancel")!
+        let url = URL(string: "https://api.synheart.ai/v1/account/delete/cancel")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -532,7 +532,7 @@ public class Synheart {
                     auth: _authModule!,
                     storage: sm,
                     smk: _smk,
-                    baseUrl: "https://api.synheart.com"
+                    baseUrl: "https://api.synheart.ai"
                 )
             }
             SynheartLogger.log("[Synheart] Auth and sync modules initialized")
