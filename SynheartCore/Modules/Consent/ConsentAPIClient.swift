@@ -21,9 +21,9 @@ public class ConsentAPIClient {
 
     /// Fetch available consent profiles for this app
     ///
-    /// GET /api/v1/apps/{app_id}/consent-profiles?active_only=true
+    /// GET /consent/v1/apps/{app_id}/consent-profiles?active_only=true
     public func getAvailableProfiles(activeOnly: Bool = true) async throws -> [ConsentProfile] {
-        let path = "/api/v1/apps/\(appId)/consent-profiles"
+        let path = "/consent/v1/apps/\(appId)/consent-profiles"
         guard var components = URLComponents(string: "\(baseUrl)\(path)") else {
             throw ConsentAPIError.networkError("Invalid URL")
         }
@@ -86,7 +86,7 @@ public class ConsentAPIClient {
 
     /// Issue SDK token after user consent
     ///
-    /// POST /api/v1/sdk/consent-token
+    /// POST /consent/v1/sdk/consent-token
     public func issueToken(
         deviceId: String,
         consentProfileId: String,
@@ -96,7 +96,7 @@ public class ConsentAPIClient {
         ipAddress: String? = nil,
         userAgent: String? = nil
     ) async throws -> ConsentToken {
-        let path = "/api/v1/sdk/consent-token"
+        let path = "/consent/v1/sdk/consent-token"
         guard let url = URL(string: "\(baseUrl)\(path)") else {
             throw ConsentAPIError.networkError("Invalid URL")
         }
@@ -155,9 +155,9 @@ public class ConsentAPIClient {
 
     /// Revoke consent (notify cloud service)
     ///
-    /// POST /api/v1/sdk/consent-revoke
+    /// POST /consent/v1/sdk/consent-revoke
     public func revokeConsent(deviceId: String, profileId: String) async {
-        let path = "/api/v1/sdk/consent-revoke"
+        let path = "/consent/v1/sdk/consent-revoke"
         guard let url = URL(string: "\(baseUrl)\(path)") else { return }
 
         let body: [String: Any] = [
