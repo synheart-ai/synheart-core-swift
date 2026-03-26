@@ -35,7 +35,7 @@ public class PlatformIngestClient {
         }
     }
 
-    /// POST a session payload to `/v1/platform/session/ingest`.
+    /// POST a session payload to `/platform/v1/session/ingest`.
     public func ingestSession(
         payload: [String: Any],
         hmacSecret: String,
@@ -51,7 +51,7 @@ public class PlatformIngestClient {
         )
     }
 
-    /// POST a metadata payload to `/v1/platform/metadata/ingest`.
+    /// POST a metadata payload to `/platform/v1/metadata/ingest`.
     public func ingestMetadata(
         payload: [String: Any],
         hmacSecret: String,

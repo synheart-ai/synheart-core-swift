@@ -148,7 +148,7 @@ public class SyncModule {
               let token = auth.accessToken else { return }
 
         // 1. Try to fetch existing bundle from server
-        let bundleUrl = URL(string: "\(baseUrl)/v1/sync/urk-bundle")!
+        let bundleUrl = URL(string: "\(baseUrl)/sync/v1/urk-bundle")!
         var getRequest = URLRequest(url: bundleUrl)
         getRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 

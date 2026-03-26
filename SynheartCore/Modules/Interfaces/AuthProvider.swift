@@ -15,7 +15,7 @@ public protocol AuthProvider: AnyObject {
     ///
     /// - Parameters:
     ///   - method: HTTP method (e.g., "POST")
-    ///   - path: Request path (e.g., "/v1/ingest/hsi")
+    ///   - path: Request path (e.g., "/ingest/v1/hsi")
     ///   - bodyBytes: Serialized request body
     /// - Returns: Header name-value pairs to attach to the request
     /// - Throws: If signing fails (e.g., keychain unavailable)

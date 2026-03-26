@@ -54,7 +54,7 @@ class SyncEngine {
             envelopes.append(env.toJson())
         }
 
-        let url = URL(string: "\(baseUrl)/v1/sync/push")!
+        let url = URL(string: "\(baseUrl)/sync/v1/push")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -80,7 +80,7 @@ class SyncEngine {
         var currentCursor = cursor
 
         while true {
-            var components = URLComponents(string: "\(baseUrl)/v1/sync/pull")!
+            var components = URLComponents(string: "\(baseUrl)/sync/v1/pull")!
             var queryItems = [
                 URLQueryItem(name: "subject_id", value: subjectId),
                 URLQueryItem(name: "limit", value: "100"),

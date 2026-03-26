@@ -10,19 +10,19 @@ public enum ApiEndpoints {
     public static let defaultCloudBaseUrl = "https://api.synheart.ai"
 
     // MARK: - Cloud Ingest
-    public static let ingestPath = "/v1/ingest/hsi"
+    public static let ingestPath = "/ingest/v1/hsi"
 
     // MARK: - Platform Ingest
     public static let defaultPlatformIngestBaseUrl = "https://api.synheart.ai"
-    public static let platformSessionIngestPath = "/v1/platform/session/ingest"
-    public static let platformMetadataIngestPath = "/v1/platform/metadata/ingest"
+    public static let platformSessionIngestPath = "/platform/v1/session/ingest"
+    public static let platformMetadataIngestPath = "/platform/v1/metadata/ingest"
 
     // MARK: - Consent Service
     public static let defaultConsentBaseUrl = "https://api.synheart.ai"
 
     public static func consentProfilesPath(appId: String) -> String {
-        "/api/v1/apps/\(appId)/consent-profiles"
+        "/consent/v1/apps/\(appId)/consent-profiles"
     }
-    public static let consentTokenPath = "/api/v1/sdk/consent-token"
-    public static let consentRevokePath = "/api/v1/sdk/consent-revoke"
+    public static let consentTokenPath = "/consent/v1/sdk/consent-token"
+    public static let consentRevokePath = "/consent/v1/sdk/consent-revoke"
 }

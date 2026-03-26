@@ -38,7 +38,7 @@ public class HMACSigner {
     ///
     /// - Parameters:
     ///   - method: HTTP method (e.g., "POST")
-    ///   - path: Request path (e.g., "/v1/ingest/hsi")
+    ///   - path: Request path (e.g., "/ingest/v1/hsi")
     ///   - tenantId: Tenant identifier
     ///   - timestamp: Unix timestamp (seconds)
     ///   - nonce: Time-windowed nonce
