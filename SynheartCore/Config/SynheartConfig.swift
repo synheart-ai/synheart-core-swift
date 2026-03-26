@@ -42,12 +42,15 @@ public struct SynheartConfig {
     public let additionalAppMetadata: [String: Any]
     public let deviceId: String
     public let platform: String
+    /// Device role — controls which modules are enabled. Defaults to .phone.
+    public let deviceRole: DeviceRole
     public let storage: StorageConfig
     public let sync: SyncConfig
     public let privacy: PrivacyConfig
 
     public let cloudConfig: CloudConfig?
     public let platformIngestConfig: PlatformIngestConfig?
+    public let consentConfig: ConsentConfig?
 
     /// Server-signed capability token for feature gating
     public let capabilityToken: CapabilityToken?
@@ -69,11 +72,13 @@ public struct SynheartConfig {
         additionalAppMetadata: [String: Any] = [:],
         deviceId: String = "",
         platform: String = "ios",
+        deviceRole: DeviceRole = .phone,
         storage: StorageConfig = StorageConfig(),
         sync: SyncConfig = SyncConfig(),
         privacy: PrivacyConfig = PrivacyConfig(),
         cloudConfig: CloudConfig? = nil,
         platformIngestConfig: PlatformIngestConfig? = nil,
+        consentConfig: ConsentConfig? = nil,
         capabilityToken: CapabilityToken? = nil,
         capabilitySecret: String? = nil,
         allowUnsignedCapabilities: Bool = false
@@ -88,11 +93,13 @@ public struct SynheartConfig {
         self.additionalAppMetadata = additionalAppMetadata
         self.deviceId = deviceId
         self.platform = platform
+        self.deviceRole = deviceRole
         self.storage = storage
         self.sync = sync
         self.privacy = privacy
         self.cloudConfig = cloudConfig
         self.platformIngestConfig = platformIngestConfig
+        self.consentConfig = consentConfig
         self.capabilityToken = capabilityToken
         self.capabilitySecret = capabilitySecret
         self.allowUnsignedCapabilities = allowUnsignedCapabilities
@@ -196,5 +203,55 @@ public struct CloudConfig {
         self.uploadInterval = uploadInterval
         self.maxRetries = maxRetries
         self.enableBacklog = enableBacklog
+    }
+}
+
+/// Configuration for Consent Service integration
+///
+/// When configured with appId and appApiKey, the SDK can fetch consent profiles
+/// from the cloud consent service and issue JWT tokens for cloud uploads.
+public struct ConsentConfig {
+    /// Base URL for consent service
+    public let consentServiceUrl: String
+
+    /// App ID for consent service
+    public let appId: String?
+
+    /// App API key for consent service authentication
+    public let appApiKey: String?
+
+    /// Device ID (UUID for this device, auto-generated if not provided)
+    public let deviceId: String?
+
+    /// Platform identifier ("ios", "android")
+    public let platform: String
+
+    /// User ID (optional, for pseudonymous identification)
+    public let userId: String?
+
+    /// Region code (e.g., "US", "EU")
+    public let region: String?
+
+    public init(
+        consentServiceUrl: String = ApiEndpoints.defaultConsentBaseUrl,
+        appId: String? = nil,
+        appApiKey: String? = nil,
+        deviceId: String? = nil,
+        platform: String = "ios",
+        userId: String? = nil,
+        region: String? = nil
+    ) {
+        self.consentServiceUrl = consentServiceUrl
+        self.appId = appId
+        self.appApiKey = appApiKey
+        self.deviceId = deviceId
+        self.platform = platform
+        self.userId = userId
+        self.region = region
+    }
+
+    /// Check if consent service is configured
+    public var isConfigured: Bool {
+        appId != nil && appApiKey != nil
     }
 }

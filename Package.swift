@@ -24,8 +24,9 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../synheart-wear-swift"),
-        .package(path: "../synheart-emotion-swift"),
-        .package(path: "../synheart-focus-swift"),
+        // synheart-emotion-swift and synheart-focus-swift removed —
+        // emotion and focus are now computed by synheart-runtime
+        // and accessed via RuntimeBridge.
         .package(path: "../synheart-behavior-swift"),
         .package(path: "../synheart-session-swift"),
     ],
@@ -34,8 +35,6 @@ let package = Package(
             name: "SynheartCore",
             dependencies: [
                 .product(name: "SynheartWear", package: "synheart-wear-swift"),
-                .product(name: "SynheartEmotion", package: "synheart-emotion-swift"),
-                .product(name: "SynheartFocus", package: "synheart-focus-swift"),
                 .product(name: "SynheartBehavior", package: "synheart-behavior-swift",
                          condition: .when(platforms: [.iOS, .macOS])),
                 .product(name: "SynheartSession", package: "synheart-session-swift"),
