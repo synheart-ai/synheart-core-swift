@@ -7,7 +7,7 @@ import Security
 /// URK is a 32-byte key used to derive per-artifact encryption keys for sync.
 public final class URK {
     public static let keyLengthBytes = 32
-    private static let keychainService = "com.synheart.urk"
+    private static let keychainService = "ai.synheart.urk"
     private static let wrappedAccount = "urk_wrapped"
     private static let kekAccount = "urk_kek"
     private static let bundleKdfInfo = "synheart-urk-bundle:v1"

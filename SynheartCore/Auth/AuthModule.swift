@@ -41,7 +41,7 @@ public class AuthModule {
     private let appId: String
     private var refreshTask: Task<Void, Never>?
 
-    public init(appId: String, baseUrl: String = "https://api.synheart.com", tokenStorage: TokenStorage? = nil) {
+    public init(appId: String, baseUrl: String = "https://api.synheart.ai", tokenStorage: TokenStorage? = nil) {
         self.appId = appId
         self.baseUrl = baseUrl
         self.tokenStorage = tokenStorage ?? TokenStorage()

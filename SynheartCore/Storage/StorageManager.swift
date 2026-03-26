@@ -233,6 +233,28 @@ public final class StorageManager {
                 value TEXT NOT NULL
             )
         """)
+
+        try exec("""
+            CREATE TABLE IF NOT EXISTS wearable_events (
+                event_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_class TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                provider_record_id TEXT,
+                observed_at TEXT NOT NULL,
+                ingested_at TEXT NOT NULL,
+                effective_start TEXT,
+                effective_end TEXT,
+                payload BLOB NOT NULL,
+                provenance TEXT,
+                confidence REAL NOT NULL,
+                source_fidelity TEXT NOT NULL,
+                schema_version INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        try exec("CREATE INDEX IF NOT EXISTS idx_we_type_observed ON wearable_events(event_type, observed_at)")
+        try exec("CREATE INDEX IF NOT EXISTS idx_we_subject ON wearable_events(subject_id)")
     }
 
     // MARK: - Sessions
@@ -667,6 +689,98 @@ public final class StorageManager {
         return String(cString: sqlite3_column_text(stmt, 0))
     }
 
+    // MARK: - Wearable Events
+
+    public func insertWearableEvent(_ record: [String: Any]) throws {
+        let sql = """
+            INSERT OR IGNORE INTO wearable_events
+            (event_id, subject_id, event_type, event_class, provider, provider_record_id,
+             observed_at, ingested_at, effective_start, effective_end, payload,
+             provenance, confidence, source_fidelity, schema_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { throw sqliteError() }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, ((record["event_id"] as? String ?? "") as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, ((record["subject_id"] as? String ?? "") as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 3, ((record["event_type"] as? String ?? "") as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 4, ((record["event_class"] as? String ?? "") as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 5, ((record["provider"] as? String ?? "") as NSString).utf8String, -1, nil)
+
+        if let rid = record["provider_record_id"] as? String {
+            sqlite3_bind_text(stmt, 6, (rid as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(stmt, 6)
+        }
+
+        sqlite3_bind_text(stmt, 7, ((record["observed_at"] as? String ?? "") as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 8, ((record["ingested_at"] as? String ?? "") as NSString).utf8String, -1, nil)
+
+        if let es = record["effective_start"] as? String {
+            sqlite3_bind_text(stmt, 9, (es as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(stmt, 9)
+        }
+
+        if let ee = record["effective_end"] as? String {
+            sqlite3_bind_text(stmt, 10, (ee as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(stmt, 10)
+        }
+
+        if let payloadStr = record["payload"] as? String,
+           let payloadData = payloadStr.data(using: .utf8) {
+            payloadData.withUnsafeBytes { ptr in
+                sqlite3_bind_blob(stmt, 11, ptr.baseAddress, Int32(payloadData.count), nil)
+            }
+        } else {
+            let empty = Data("{}".utf8)
+            empty.withUnsafeBytes { ptr in
+                sqlite3_bind_blob(stmt, 11, ptr.baseAddress, Int32(empty.count), nil)
+            }
+        }
+
+        if let prov = record["provenance"] as? String {
+            sqlite3_bind_text(stmt, 12, (prov as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(stmt, 12)
+        }
+
+        sqlite3_bind_double(stmt, 13, record["confidence"] as? Double ?? 0.0)
+        sqlite3_bind_text(stmt, 14, ((record["source_fidelity"] as? String ?? "provider_summary") as NSString).utf8String, -1, nil)
+        sqlite3_bind_int(stmt, 15, Int32(record["schema_version"] as? Int ?? 1))
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError() }
+    }
+
+    public func queryWearableEvents(eventType: String, startDate: String, endDate: String) throws -> [[String: Any]] {
+        let sql = "SELECT * FROM wearable_events WHERE event_type = ? AND observed_at >= ? AND observed_at <= ? ORDER BY observed_at ASC"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { throw sqliteError() }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (eventType as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (startDate as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 3, (endDate as NSString).utf8String, -1, nil)
+
+        var results: [[String: Any]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            results.append(wearableEventFromRow(stmt))
+        }
+        return results
+    }
+
+    public func wearableEventCount() throws -> Int {
+        let sql = "SELECT COUNT(*) FROM wearable_events"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { throw sqliteError() }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
+
     public func wipeAll() throws {
         try exec("DELETE FROM metrics")
         try exec("DELETE FROM tombstones")
@@ -674,6 +788,7 @@ public final class StorageManager {
         try exec("DELETE FROM artifacts")
         try exec("DELETE FROM sessions")
         try exec("DELETE FROM sync_state")
+        try exec("DELETE FROM wearable_events")
     }
 
     // MARK: - Helpers
@@ -735,6 +850,46 @@ public final class StorageManager {
             payloadSha256: String(cString: sqlite3_column_text(stmt, 12)),
             syncState: sqlite3_column_type(stmt, 13) == SQLITE_NULL ? "pending" : String(cString: sqlite3_column_text(stmt, 13))
         )
+    }
+
+    private func wearableEventFromRow(_ stmt: OpaquePointer?) -> [String: Any] {
+        var row: [String: Any] = [
+            "event_id": String(cString: sqlite3_column_text(stmt, 0)),
+            "subject_id": String(cString: sqlite3_column_text(stmt, 1)),
+            "event_type": String(cString: sqlite3_column_text(stmt, 2)),
+            "event_class": String(cString: sqlite3_column_text(stmt, 3)),
+            "provider": String(cString: sqlite3_column_text(stmt, 4)),
+            "observed_at": String(cString: sqlite3_column_text(stmt, 6)),
+            "ingested_at": String(cString: sqlite3_column_text(stmt, 7)),
+            "confidence": sqlite3_column_double(stmt, 12),
+            "source_fidelity": String(cString: sqlite3_column_text(stmt, 13)),
+            "schema_version": Int(sqlite3_column_int(stmt, 14)),
+        ]
+
+        if sqlite3_column_type(stmt, 5) != SQLITE_NULL {
+            row["provider_record_id"] = String(cString: sqlite3_column_text(stmt, 5))
+        }
+        if sqlite3_column_type(stmt, 8) != SQLITE_NULL {
+            row["effective_start"] = String(cString: sqlite3_column_text(stmt, 8))
+        }
+        if sqlite3_column_type(stmt, 9) != SQLITE_NULL {
+            row["effective_end"] = String(cString: sqlite3_column_text(stmt, 9))
+        }
+
+        let blobPtr = sqlite3_column_blob(stmt, 10)
+        let blobLen = sqlite3_column_bytes(stmt, 10)
+        if let ptr = blobPtr, blobLen > 0 {
+            let data = Data(bytes: ptr, count: Int(blobLen))
+            if let str = String(data: data, encoding: .utf8) {
+                row["payload"] = str
+            }
+        }
+
+        if sqlite3_column_type(stmt, 11) != SQLITE_NULL {
+            row["provenance"] = String(cString: sqlite3_column_text(stmt, 11))
+        }
+
+        return row
     }
 
     deinit {

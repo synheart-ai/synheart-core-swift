@@ -7,7 +7,7 @@ import Security
 /// See RFC-CORE-0004 Section 9.1.
 public final class SMK {
     public static let keyLengthBytes = 32
-    private static let keychainService = "com.synheart.smk"
+    private static let keychainService = "ai.synheart.smk"
     private static let keychainAccount = "storage_master_key"
 
     public let bytes: Data

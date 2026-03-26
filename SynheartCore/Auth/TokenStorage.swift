@@ -3,7 +3,7 @@ import Security
 
 /// Secure token storage using iOS/macOS Keychain (RFC-CORE-0008 §1.5).
 public class TokenStorage {
-    private static let service = "com.synheart.auth"
+    private static let service = "ai.synheart.auth"
 
     private enum Key: String {
         case refreshToken = "refresh_token"

@@ -4,7 +4,7 @@ import Security
 /// Encrypted storage for consent snapshots using iOS Keychain
 public class ConsentStorage {
     private static let storageKey = "synheart_consent_snapshot"
-    private let service = "com.synheart.hsi"
+    private let service = "ai.synheart.hsi"
     
     public init() {
     }

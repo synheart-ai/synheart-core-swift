@@ -182,6 +182,31 @@ public final class RuntimeBridge {
         return result
     }
 
+    // MARK: - Wearable SRM
+
+    /// Push a daily value for a longitudinal wearable dimension.
+    public func pushWearableDailyValue(dimension: String, dayIndex: Int, value: Double, confidence: Double, fidelity: Int32) {
+        guard let h = handle else { return }
+        dimension.withCString { dimCStr in
+            RuntimeFFI.pushWearableDailyValue(h, dimCStr, UInt32(dayIndex), value, confidence, fidelity)
+        }
+    }
+
+    /// Trigger longitudinal recompute and pass the reference to state runtime.
+    public func triggerWearableRecompute(triggerType: Int32, asOfDay: Int) {
+        guard let h = handle else { return }
+        RuntimeFFI.triggerWearableRecompute(h, triggerType, UInt32(asOfDay))
+    }
+
+    /// Return the current wearable reference as JSON, or nil if EMPTY.
+    public func getWearableReference() -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.getWearableReference(h) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
     // MARK: - SRM Baselines
 
     /// Return all SRM baselines as JSON, or nil.
@@ -308,6 +333,60 @@ public final class RuntimeBridge {
         RuntimeFFI.freeString(ptr)
         return result
     }
+
+    /// Merge extra data into the active lab session. Returns result JSON or nil.
+    public func labMergeSessionExtraData(patchJson: String) -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = patchJson.withCString({ cStr in
+            RuntimeFFI.labMergeExtraData(h, cStr)
+        }) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
+    /// Set state overrides on a lab window.
+    public func labSetWindowStateOverrides(windowId: String, overridesJson: String) {
+        guard let h = handle else { return }
+        windowId.withCString { wid in
+            overridesJson.withCString { oj in
+                RuntimeFFI.labSetWindowStateOverrides(h, wid, oj)
+            }
+        }
+    }
+
+    // MARK: - Sleep Stages
+
+    /// Push sleep stage data as JSON into the runtime.
+    public func pushSleepStages(json: String) {
+        guard let h = handle else { return }
+        json.withCString { cStr in
+            RuntimeFFI.pushSleepStages(h, cStr)
+        }
+    }
+
+    // MARK: - Diagnostics
+
+    /// Return the last error code (0 = no error).
+    public func lastErrorCode() -> Int32 {
+        guard let h = handle else { return 0 }
+        return RuntimeFFI.lastErrorCode(h)
+    }
+
+    /// Return diagnostics as JSON, or nil.
+    public func diagnosticsJson() -> String? {
+        guard let h = handle else { return nil }
+        guard let ptr = RuntimeFFI.diagnosticsJson(h) else { return nil }
+        let result = String(cString: ptr)
+        RuntimeFFI.freeString(ptr)
+        return result
+    }
+
+    /// Clear accumulated diagnostics counters.
+    public func clearDiagnostics() {
+        guard let h = handle else { return }
+        RuntimeFFI.clearDiagnostics(h)
+    }
 }
 
 // MARK: - Dynamic FFI Loading
@@ -333,6 +412,11 @@ private enum RuntimeFFI {
     private typealias FreeStringFn        = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
     private typealias VersionFn           = @convention(c) () -> UnsafeMutablePointer<CChar>?
 
+    // Wearable SRM
+    private typealias PushWearableDailyValueFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UInt32, Double, Double, Int32) -> Int32
+    private typealias TriggerWearableRecomputeFn = @convention(c) (OpaquePointer?, Int32, UInt32) -> Int32
+    private typealias GetWearableReferenceFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+
     // SRM
     private typealias BaselinesJsonFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias BaselineSummaryFn   = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
@@ -345,6 +429,14 @@ private enum RuntimeFFI {
     private typealias LabCloseWindowFn    = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Int64) -> Void
     private typealias LabSetWindowValFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
     private typealias LabFinalizeFn       = @convention(c) (OpaquePointer?, Int64) -> UnsafeMutablePointer<CChar>?
+    private typealias LabMergeExtraFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+    private typealias LabSetWinOverFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Void
+
+    // Sleep stages + Diagnostics
+    private typealias PushSleepStagesFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Void
+    private typealias LastErrorCodeFn     = @convention(c) (OpaquePointer?) -> Int32
+    private typealias DiagnosticsJsonFn   = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias ClearDiagnosticsFn  = @convention(c) (OpaquePointer?) -> Void
 
     // Try dlopen first (searches @rpath, /usr/local/lib, etc.), then RTLD_DEFAULT for already-linked images.
     private static let handle: UnsafeMutableRawPointer? = {
@@ -433,6 +525,22 @@ private enum RuntimeFFI {
         return unsafeBitCast(sym, to: VersionFn.self)
     }()
 
+    // Wearable SRM
+    private static let _pushWearableDailyValue: PushWearableDailyValueFn? = {
+        guard let sym = dlsym(handle, "synheart_srm_push_wearable_daily_value") else { return nil }
+        return unsafeBitCast(sym, to: PushWearableDailyValueFn.self)
+    }()
+
+    private static let _triggerWearableRecompute: TriggerWearableRecomputeFn? = {
+        guard let sym = dlsym(handle, "synheart_srm_trigger_wearable_recompute") else { return nil }
+        return unsafeBitCast(sym, to: TriggerWearableRecomputeFn.self)
+    }()
+
+    private static let _getWearableReference: GetWearableReferenceFn? = {
+        guard let sym = dlsym(handle, "synheart_srm_get_wearable_reference") else { return nil }
+        return unsafeBitCast(sym, to: GetWearableReferenceFn.self)
+    }()
+
     // SRM
     private static let _baselinesJson: BaselinesJsonFn? = {
         guard let sym = dlsym(handle, "synheart_runtime_baselines_json") else { return nil }
@@ -478,6 +586,36 @@ private enum RuntimeFFI {
     private static let _labFinalize: LabFinalizeFn? = {
         guard let sym = dlsym(handle, "synheart_lab_finalize") else { return nil }
         return unsafeBitCast(sym, to: LabFinalizeFn.self)
+    }()
+
+    private static let _labMergeExtra: LabMergeExtraFn? = {
+        guard let sym = dlsym(handle, "synheart_lab_merge_session_extra_data") else { return nil }
+        return unsafeBitCast(sym, to: LabMergeExtraFn.self)
+    }()
+
+    private static let _labSetWinOver: LabSetWinOverFn? = {
+        guard let sym = dlsym(handle, "synheart_lab_set_window_state_overrides") else { return nil }
+        return unsafeBitCast(sym, to: LabSetWinOverFn.self)
+    }()
+
+    private static let _pushSleepStages: PushSleepStagesFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_push_sleep_stages") else { return nil }
+        return unsafeBitCast(sym, to: PushSleepStagesFn.self)
+    }()
+
+    private static let _lastErrorCode: LastErrorCodeFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_last_error_code") else { return nil }
+        return unsafeBitCast(sym, to: LastErrorCodeFn.self)
+    }()
+
+    private static let _diagnosticsJson: DiagnosticsJsonFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_diagnostics_json") else { return nil }
+        return unsafeBitCast(sym, to: DiagnosticsJsonFn.self)
+    }()
+
+    private static let _clearDiagnostics: ClearDiagnosticsFn? = {
+        guard let sym = dlsym(handle, "synheart_runtime_clear_diagnostics") else { return nil }
+        return unsafeBitCast(sym, to: ClearDiagnosticsFn.self)
     }()
 
     // MARK: Availability
@@ -546,6 +684,21 @@ private enum RuntimeFFI {
         _version?()
     }
 
+    // Wearable SRM
+    @discardableResult
+    static func pushWearableDailyValue(_ runtime: OpaquePointer?, _ dimension: UnsafePointer<CChar>?, _ dayIndex: UInt32, _ value: Double, _ confidence: Double, _ fidelity: Int32) -> Int32 {
+        _pushWearableDailyValue?(runtime, dimension, dayIndex, value, confidence, fidelity) ?? -1
+    }
+
+    @discardableResult
+    static func triggerWearableRecompute(_ runtime: OpaquePointer?, _ triggerType: Int32, _ asOfDay: UInt32) -> Int32 {
+        _triggerWearableRecompute?(runtime, triggerType, asOfDay) ?? -1
+    }
+
+    static func getWearableReference(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+        _getWearableReference?(runtime)
+    }
+
     // SRM
     static func baselinesJson(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
         _baselinesJson?(runtime)
@@ -584,5 +737,29 @@ private enum RuntimeFFI {
 
     static func labFinalize(_ runtime: OpaquePointer?, _ endedAtMs: Int64) -> UnsafeMutablePointer<CChar>? {
         _labFinalize?(runtime, endedAtMs)
+    }
+
+    static func labMergeExtraData(_ runtime: OpaquePointer?, _ patchJson: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+        _labMergeExtra?(runtime, patchJson)
+    }
+
+    static func labSetWindowStateOverrides(_ runtime: OpaquePointer?, _ windowId: UnsafePointer<CChar>?, _ overridesJson: UnsafePointer<CChar>?) {
+        _labSetWinOver?(runtime, windowId, overridesJson)
+    }
+
+    static func pushSleepStages(_ runtime: OpaquePointer?, _ json: UnsafePointer<CChar>?) {
+        _pushSleepStages?(runtime, json)
+    }
+
+    static func lastErrorCode(_ runtime: OpaquePointer?) -> Int32 {
+        _lastErrorCode?(runtime) ?? 0
+    }
+
+    static func diagnosticsJson(_ runtime: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+        _diagnosticsJson?(runtime)
+    }
+
+    static func clearDiagnostics(_ runtime: OpaquePointer?) {
+        _clearDiagnostics?(runtime)
     }
 }

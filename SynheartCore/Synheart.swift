@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SynheartSession
 
 /**
  * Synheart Core SDK - Main Entry Point
@@ -78,17 +79,15 @@ public class Synheart {
     private var _authModule: AuthModule?
     private var _syncModule: SyncModule?
 
+    // Session module (wraps SessionEngine from synheart-session-swift)
+    private var sessionModule: SessionModule?
+    private var sessionSubscription: AnyCancellable?
+    private var hsiToSessionCancellable: AnyCancellable?
+
     // Streams
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
 
     private var cancellables = Set<AnyCancellable>()
-
-    // Session data buffers — accumulate during session, persist after stop
-    private let bufferQueue = DispatchQueue(label: "com.synheart.core.sessionBuffer")
-    private var sessionHsiBuffer: [String] = []
-    private var sessionWearBuffer: [WearSample] = []
-    private var sessionHsiCancellable: AnyCancellable?
-    private var sessionWearCancellable: AnyCancellable?
 
     private init() {}
 
@@ -246,7 +245,7 @@ public class Synheart {
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
         // POST server-side deletion request if authenticated
         if let auth = shared._authModule, auth.isAuthenticated, let token = auth.accessToken {
-            let url = URL(string: "https://api.synheart.com/v1/account/delete")!
+            let url = URL(string: "https://api.synheart.ai/v1/account/delete")!
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -271,7 +270,7 @@ public class Synheart {
             return false
         }
 
-        let url = URL(string: "https://api.synheart.com/v1/account/delete/cancel")!
+        let url = URL(string: "https://api.synheart.ai/v1/account/delete/cancel")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -483,6 +482,28 @@ public class Synheart {
             }
             .store(in: &cancellables)
 
+        // Create SessionModule with adapted providers (mirrors Dart's
+        // _watchSessionModule + _mainSession initialization pattern).
+        let biosignalAdapter = WearModuleBiosignalAdapter(
+            rawSamplePublisher: wearModule?.rawSamplePublisher ?? Empty<WearSample, Never>().eraseToAnyPublisher()
+        )
+        let behaviorAdapter: BehaviorModuleAdapter? = behaviorModule.map { BehaviorModuleAdapter(behaviorModule: $0) }
+        sessionModule = SessionModule(
+            biosignalProvider: biosignalAdapter,
+            behaviorProvider: behaviorAdapter
+        )
+
+        // Bridge HSI metrics from runtime -> session engine (HRV is authoritative
+        // from session-runtime; the session SDK no longer computes it locally).
+        hsiToSessionCancellable = runtimeModule?.hsiStream
+            .sink { [weak self] hsiJson in
+                guard let self = self, self.sessionModule?.isActive == true else { return }
+                if let data = hsiJson.data(using: .utf8),
+                   let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    self.sessionModule?.ingestHsiMetrics(parsed)
+                }
+            }
+
         _activationManager = ActivationManager()
         _activationManager!.activateFromConfig(resolvedConfig)
 
@@ -532,7 +553,7 @@ public class Synheart {
                     auth: _authModule!,
                     storage: sm,
                     smk: _smk,
-                    baseUrl: "https://api.synheart.com"
+                    baseUrl: "https://api.synheart.ai"
                 )
             }
             SynheartLogger.log("[Synheart] Auth and sync modules initialized")
@@ -576,31 +597,41 @@ public class Synheart {
         }
 
         SynheartLogger.log("[Synheart] Starting session...")
-        try await moduleManager.startAll()
 
-        // Clear session buffers and start accumulating
-        bufferQueue.sync {
-            sessionHsiBuffer.removeAll()
-            sessionWearBuffer.removeAll()
-        }
-
-        sessionHsiCancellable = runtimeModule?.hsiStream
-            .sink { [weak self] hsiJson in
-                guard let self = self else { return }
-                guard self.consentModule?.current().biosignals == true else { return }
-                self.bufferQueue.sync { self.sessionHsiBuffer.append(hsiJson) }
-            }
-        sessionWearCancellable = wearModule?.rawSamplePublisher
-            .sink { [weak self] sample in
-                guard let self = self else { return }
-                self.bufferQueue.sync { self.sessionWearBuffer.append(sample) }
-            }
-
-        // Phase 1: Create session record and start artifact pipeline
+        // Open main collection session via Session SDK (RFC: session boundary)
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let sessionId = "core_\(nowMs)"
         let mode = _synheartConfig?.mode ?? .personal
+        let durationSec = 86400 // default 24h — long-lived; stop explicitly
 
+        let config = SessionConfig(
+            sessionId: sessionId,
+            mode: .focus,
+            durationSec: durationSec
+        )
+
+        if let module = sessionModule {
+            let stream = module.startSession(config: config)
+            sessionSubscription = stream
+                .sink(
+                    receiveCompletion: { [weak self] _ in
+                        guard let self = self else { return }
+                        if self.isRunning {
+                            self.isRunning = false
+                            self._reevaluateAllFeatures()
+                            Task { try? await self.moduleManager.stopAll() }
+                            SynheartLogger.log(
+                                "[Synheart] Main session ended (duration or stream closed)"
+                            )
+                        }
+                    },
+                    receiveValue: { _ in }
+                )
+        }
+
+        try await moduleManager.startAll()
+
+        // Phase 1: Create session record and start artifact pipeline
         if let sm = storageManager, sm.isOpen {
             try? sm.insertSession(SessionRecord(
                 sessionId: sessionId,
@@ -646,11 +677,12 @@ public class Synheart {
 
         SynheartLogger.log("[Synheart] Stopping session...")
 
-        // Cancel buffer subscriptions but keep buffers for post-session queries
-        sessionHsiCancellable?.cancel()
-        sessionHsiCancellable = nil
-        sessionWearCancellable?.cancel()
-        sessionWearCancellable = nil
+        // Close main collection session via Session SDK
+        if let activeId = sessionModule?.currentSessionId {
+            sessionModule?.stopSession(sessionId: activeId)
+        }
+        sessionSubscription?.cancel()
+        sessionSubscription = nil
 
         // Phase 1: Finalize session summary and baseline snapshot
         if let handle = _currentSessionHandle, let pipeline = artifactPipeline {
@@ -695,10 +727,8 @@ public class Synheart {
     // MARK: - Auto-Ingest
 
     private func _autoIngestSession(_ session: SessionHandle) async {
-        let wearSamples: [WearSample]
-        bufferQueue.sync { wearSamples = Array(sessionWearBuffer) }
-        let behaviorEvents = behaviorModule?.rawEvents(window: .window1h) ?? []
-        let phoneDataPoints = phoneModule?.rawDataPoints(window: .window1h) ?? []
+        let behaviorEvents = behaviorModule?.rawEvents(.window1h) ?? []
+        let phoneDataPoints = phoneModule?.rawDataPoints(.window1h) ?? []
 
         let payload = PlatformPayloadBuilder.buildSession(
             sessionId: session.sessionId,
@@ -708,25 +738,25 @@ public class Synheart {
             startedAtMs: session.startedAtMs,
             endedAtMs: Int64(Date().timeIntervalSince1970 * 1000),
             dataOnCloud: _syncModule?.enabled ?? false,
-            wearSamples: wearSamples,
+            wearSamples: [],
             behaviorEvents: behaviorEvents,
             phoneDataPoints: phoneDataPoints
         )
         let _ = await platformIngestModule!.ingestSession(payload)
     }
 
-    // MARK: - Session Data Buffers
+    // MARK: - Session Module Access
 
-    /// Returns a snapshot of all HSI JSON windows accumulated during the current
-    /// (or most recent) session. The list is cleared when ``startSession()`` is called.
-    public static func getSessionHsiWindows() -> [String] {
-        shared.bufferQueue.sync { Array(shared.sessionHsiBuffer) }
+    /// Stream of typed session events from the active session.
+    /// Returns a publisher that emits `SessionEvent` values from the underlying
+    /// `SessionEngine` (via `SessionModule`).
+    public static var onSessionEvent: AnyPublisher<SessionEvent, Never> {
+        shared.sessionModule?.events ?? Empty<SessionEvent, Never>().eraseToAnyPublisher()
     }
 
-    /// Returns a snapshot of all raw wear samples accumulated during the current
-    /// (or most recent) session. The list is cleared when ``startSession()`` is called.
-    public static func getSessionWearSamples() -> [WearSample] {
-        shared.bufferQueue.sync { Array(shared.sessionWearBuffer) }
+    /// Get the status of the current session from the session engine.
+    public static func getSessionStatus() -> [String: Any]? {
+        shared.sessionModule?.getStatus()
     }
 
     // MARK: - Platform Ingestion
@@ -1027,14 +1057,12 @@ public class Synheart {
         try await _stopSession()
         try await moduleManager.disposeAll()
 
-        sessionHsiCancellable?.cancel()
-        sessionHsiCancellable = nil
-        sessionWearCancellable?.cancel()
-        sessionWearCancellable = nil
-        bufferQueue.sync {
-            sessionHsiBuffer.removeAll()
-            sessionWearBuffer.removeAll()
-        }
+        sessionModule?.dispose()
+        sessionModule = nil
+        sessionSubscription?.cancel()
+        sessionSubscription = nil
+        hsiToSessionCancellable?.cancel()
+        hsiToSessionCancellable = nil
 
         cancellables.removeAll()
 

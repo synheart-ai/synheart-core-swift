@@ -32,6 +32,7 @@ public class CloudConnectorModule: BaseSynheartModule {
     private var uploadQueue: UploadQueue!
     private var rateLimiter: RateLimiter!
     private var networkMonitor: NetworkMonitor!
+    private var schemaTransformer: HsiSchemaTransformer!
 
     // Subscriptions
     private var cancellables = Set<AnyCancellable>()
@@ -59,6 +60,7 @@ public class CloudConnectorModule: BaseSynheartModule {
         uploadQueue = UploadQueue(maxSize: config.maxQueueSize)
         rateLimiter = RateLimiter(capabilityProvider: capabilities)
         networkMonitor = NetworkMonitor()
+        schemaTransformer = HsiSchemaTransformer()
 
         await uploadQueue.loadFromStorage()
 
@@ -155,11 +157,13 @@ public class CloudConnectorModule: BaseSynheartModule {
 
         do {
             // HSI JSON comes directly from synheart-runtime
+            // Apply schema transformer to ensure conformance with hsi-1.1.schema.json
             let snapshots = batch.compactMap { json -> [String: AnyCodable]? in
                 guard let data = json.data(using: .utf8),
-                      let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                      var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     return nil
                 }
+                schemaTransformer.patch(&dict)
                 return dict.mapValues { AnyCodable($0) }
             }
 
