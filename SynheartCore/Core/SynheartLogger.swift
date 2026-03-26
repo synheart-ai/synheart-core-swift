@@ -9,7 +9,7 @@ public final class SynheartLogger {
     /// When `false`, all log output is suppressed. Defaults to `true`.
     public static var enabled: Bool = true
 
-    private static let subsystem = "com.synheart.core"
+    private static let subsystem = "ai.synheart.core"
     private static let logger = os.Logger(subsystem: subsystem, category: "SynheartCore")
 
     /// Log a message. No-op when ``enabled`` is `false`.

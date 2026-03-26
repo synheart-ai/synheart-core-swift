@@ -84,7 +84,7 @@ public class Synheart {
     private var cancellables = Set<AnyCancellable>()
 
     // Session data buffers — accumulate during session, persist after stop
-    private let bufferQueue = DispatchQueue(label: "com.synheart.core.sessionBuffer")
+    private let bufferQueue = DispatchQueue(label: "ai.synheart.core.sessionBuffer")
     private var sessionHsiBuffer: [String] = []
     private var sessionWearBuffer: [WearSample] = []
     private var sessionHsiCancellable: AnyCancellable?

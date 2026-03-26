@@ -6,7 +6,7 @@ import Security
 /// Mirrors the ConsentStorage pattern — Keychain with
 /// `kSecAttrAccessibleAfterFirstUnlock`.
 public class SRMSnapshotStorage {
-    private let service = "com.synheart.hsi"
+    private let service = "ai.synheart.hsi"
     private let account = "synheart_srm_snapshot"
 
     public init() {}

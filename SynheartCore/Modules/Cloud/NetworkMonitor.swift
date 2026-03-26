@@ -8,7 +8,7 @@ import Combine
 /// Used to trigger auto-flush when network becomes available.
 public class NetworkMonitor {
     private let monitor: NWPathMonitor
-    private let queue = DispatchQueue(label: "com.synheart.networkmonitor")
+    private let queue = DispatchQueue(label: "ai.synheart.networkmonitor")
 
     private let connectivitySubject = CurrentValueSubject<Bool, Never>(false)
     public var connectivityPublisher: AnyPublisher<Bool, Never> {
