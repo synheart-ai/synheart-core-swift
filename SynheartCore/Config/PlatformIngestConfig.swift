@@ -17,10 +17,12 @@ public struct PlatformIngestConfig {
     public let baseUrl: String
 
     /// API key for authentication (X-API-Key header).
-    public let apiKey: String
+    /// Optional when device auth is configured (DeviceAuthProvider signs requests).
+    public let apiKey: String?
 
     /// HMAC secret for request signing.
-    public let hmacSecret: String
+    /// Optional when device auth is configured (DeviceAuthProvider signs requests).
+    public let hmacSecret: String?
 
     /// HTTP request timeout (default: 30 seconds).
     public let timeout: TimeInterval
@@ -32,8 +34,8 @@ public struct PlatformIngestConfig {
     public let autoIngest: Bool
 
     public init(
-        apiKey: String,
-        hmacSecret: String,
+        apiKey: String? = nil,
+        hmacSecret: String? = nil,
         baseUrl: String = ApiEndpoints.defaultPlatformIngestBaseUrl,
         timeout: TimeInterval = 30,
         maxRetries: Int = 3,

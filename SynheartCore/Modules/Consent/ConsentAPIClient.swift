@@ -23,7 +23,7 @@ public class ConsentAPIClient {
     ///
     /// GET /consent/v1/apps/{app_id}/consent-profiles?active_only=true
     public func getAvailableProfiles(activeOnly: Bool = true) async throws -> [ConsentProfile] {
-        let path = "/consent/v1/apps/\(appId)/consent-profiles"
+        let path = ApiEndpoints.consentProfilesPath(appId: appId)
         guard var components = URLComponents(string: "\(baseUrl)\(path)") else {
             throw ConsentAPIError.networkError("Invalid URL")
         }
@@ -96,7 +96,7 @@ public class ConsentAPIClient {
         ipAddress: String? = nil,
         userAgent: String? = nil
     ) async throws -> ConsentToken {
-        let path = "/consent/v1/sdk/consent-token"
+        let path = ApiEndpoints.consentTokenPath
         guard let url = URL(string: "\(baseUrl)\(path)") else {
             throw ConsentAPIError.networkError("Invalid URL")
         }
@@ -157,7 +157,7 @@ public class ConsentAPIClient {
     ///
     /// POST /consent/v1/sdk/consent-revoke
     public func revokeConsent(deviceId: String, profileId: String) async {
-        let path = "/consent/v1/sdk/consent-revoke"
+        let path = ApiEndpoints.consentRevokePath
         guard let url = URL(string: "\(baseUrl)\(path)") else { return }
 
         let body: [String: Any] = [

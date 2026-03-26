@@ -57,8 +57,8 @@ public class PlatformIngestModule: BaseSynheartModule {
 
         return await _client.ingestSession(
             payload: payload,
-            hmacSecret: config.hmacSecret,
-            apiKey: config.apiKey
+            hmacSecret: config.hmacSecret ?? "",
+            apiKey: config.apiKey ?? ""
         )
     }
 
@@ -75,8 +75,8 @@ public class PlatformIngestModule: BaseSynheartModule {
 
         return await _client.ingestMetadata(
             payload: payload,
-            hmacSecret: config.hmacSecret,
-            apiKey: config.apiKey
+            hmacSecret: config.hmacSecret ?? "",
+            apiKey: config.apiKey ?? ""
         )
     }
 }

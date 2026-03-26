@@ -1,28 +1,27 @@
 import Foundation
 
-/// Central registry of all Synheart API endpoints and default base URLs.
+/// Central registry of all Synheart API endpoints.
 ///
-/// API paths are constants — they follow the server's versioned routes.
-/// Base URLs have sensible production defaults but can be overridden
-/// via ``CloudConfig``.
+/// Service paths are within each service (after gateway routing).
+/// Base URLs resolve to: gateway (api.synheart.ai/{service}) or direct ({service}-dev.synheart.io)
 public enum ApiEndpoints {
     // MARK: - Base URLs (defaults)
     public static let defaultCloudBaseUrl = "https://api.synheart.ai"
 
-    // MARK: - Cloud Ingest
-    public static let ingestPath = "/ingest/v1/hsi"
+    // MARK: - Cloud / HSI Ingest
+    public static let ingestPath = "/v1/hsi/ingest"
 
-    // MARK: - Platform Ingest
+    // MARK: - Platform Ingest (lab/raw data)
     public static let defaultPlatformIngestBaseUrl = "https://api.synheart.ai"
-    public static let platformSessionIngestPath = "/platform/v1/session/ingest"
-    public static let platformMetadataIngestPath = "/platform/v1/metadata/ingest"
+    public static let platformSessionIngestPath = "/v1/platform/session/ingest"
+    public static let platformMetadataIngestPath = "/v1/platform/metadata/ingest"
 
     // MARK: - Consent Service
     public static let defaultConsentBaseUrl = "https://api.synheart.ai"
 
     public static func consentProfilesPath(appId: String) -> String {
-        "/consent/v1/apps/\(appId)/consent-profiles"
+        "/v1/apps/\(appId)/consent-profiles"
     }
-    public static let consentTokenPath = "/consent/v1/sdk/consent-token"
-    public static let consentRevokePath = "/consent/v1/sdk/consent-revoke"
+    public static let consentTokenPath = "/v1/sdk/consent-token"
+    public static let consentRevokePath = "/v1/sdk/consent-revoke"
 }

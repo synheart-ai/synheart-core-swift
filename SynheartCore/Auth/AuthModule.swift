@@ -61,7 +61,7 @@ public class AuthModule {
 
     /// Token-based auth — exchanges a provider token for Synheart credentials.
     public func authenticate(provider: String, token: String) async throws -> AuthResult {
-        let url = URL(string: "\(baseUrl)/auth/v1/exchange")!
+        let url = URL(string: "\(baseUrl)/v1/exchange")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -109,7 +109,7 @@ public class AuthModule {
             throw AuthError.noRefreshToken
         }
 
-        let url = URL(string: "\(baseUrl)/auth/v1/refresh")!
+        let url = URL(string: "\(baseUrl)/v1/refresh")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
