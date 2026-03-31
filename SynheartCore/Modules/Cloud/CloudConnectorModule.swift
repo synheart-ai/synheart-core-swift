@@ -27,7 +27,6 @@ public class CloudConnectorModule: BaseSynheartModule {
     private let config: CloudConfig
 
     // Components
-    private var hmacSigner: HMACSigner?
     private var uploadClient: UploadClient!
     private var uploadQueue: UploadQueue!
     private var rateLimiter: RateLimiter!
@@ -53,9 +52,6 @@ public class CloudConnectorModule: BaseSynheartModule {
     public override func onInitialize() async throws {
         SynheartLogger.log("[CloudConnector] Initializing...")
 
-        if let secret = config.hmacSecret {
-            hmacSigner = HMACSigner(hmacSecret: secret)
-        }
         uploadClient = UploadClient(baseUrl: config.baseUrl)
         uploadQueue = UploadQueue(maxSize: config.maxQueueSize)
         rateLimiter = RateLimiter(capabilityProvider: capabilities)
@@ -175,12 +171,12 @@ public class CloudConnectorModule: BaseSynheartModule {
                 snapshots: snapshots
             )
 
-            // Sign and upload
+            // Upload with Bearer token + optional device signing
+            let consentToken = consent.getCurrentToken()
             let response = try await uploadClient.upload(
                 payload: payload,
-                signer: hmacSigner,
-                tenantId: config.tenantId,
-                authProvider: config.authProvider
+                consentToken: consentToken,
+                deviceAuth: config.authProvider
             )
 
             // Success - remove from queue

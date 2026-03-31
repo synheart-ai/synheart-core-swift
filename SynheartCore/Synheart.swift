@@ -75,7 +75,6 @@ public class Synheart {
     private var _synheartConfig: SynheartConfig?
 
     // Phase 3: Auth & Sync
-    // AuthModule removed — ConsentModule is the single auth/token path.
     private var _syncModule: SyncModule?
 
     // Session module (wraps SessionEngine from synheart-session-swift)
@@ -561,7 +560,7 @@ public class Synheart {
                 SynheartLogger.log("[Synheart] session_secret init failed (non-fatal): \(error)")
             }
 
-            // SyncModule uses ConsentModule's token — no separate AuthModule needed.
+            // Sync uses ConsentModule's token for Bearer auth.
             if let sm = storageManager, sm.isOpen, let cm = consentModule {
                 _syncModule = SyncModule(
                     consent: cm,
@@ -1096,7 +1095,6 @@ public class Synheart {
         // Phase 3
         _syncModule?.dispose()
         _syncModule = nil
-        // AuthModule removed — consent handles token lifecycle
 
         consentModule = nil
         capabilityModule = nil
