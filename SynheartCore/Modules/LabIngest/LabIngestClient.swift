@@ -9,14 +9,14 @@ import CryptoKit
 ///
 /// Uses a simpler HMAC signing scheme than the cloud connector:
 /// `HMAC-SHA256(timestamp_bytes + body_bytes, secret)`
-public class PlatformIngestClient {
+public class LabIngestClient {
     private let baseUrl: String
     private let timeout: TimeInterval
     private let maxRetries: Int
     private let session: URLSession
 
     public init(
-        baseUrl: String = ApiEndpoints.defaultPlatformIngestBaseUrl,
+        baseUrl: String = ApiEndpoints.defaultLabIngestBaseUrl,
         timeout: TimeInterval = 30,
         maxRetries: Int = 3,
         session: URLSession? = nil
@@ -41,9 +41,9 @@ public class PlatformIngestClient {
         hmacSecret: String,
         apiKey: String,
         consentToken: String? = nil
-    ) async -> PlatformIngestResponse {
+    ) async -> LabIngestResponse {
         return await post(
-            path: ApiEndpoints.platformSessionIngestPath,
+            path: ApiEndpoints.labSessionIngestPath,
             payload: payload,
             hmacSecret: hmacSecret,
             apiKey: apiKey,
@@ -57,9 +57,9 @@ public class PlatformIngestClient {
         hmacSecret: String,
         apiKey: String,
         consentToken: String? = nil
-    ) async -> PlatformIngestResponse {
+    ) async -> LabIngestResponse {
         return await post(
-            path: ApiEndpoints.platformMetadataIngestPath,
+            path: ApiEndpoints.labMetadataIngestPath,
             payload: payload,
             hmacSecret: hmacSecret,
             apiKey: apiKey,
@@ -73,10 +73,10 @@ public class PlatformIngestClient {
         hmacSecret: String,
         apiKey: String,
         consentToken: String?
-    ) async -> PlatformIngestResponse {
+    ) async -> LabIngestResponse {
         guard let bodyData = try? JSONSerialization.data(withJSONObject: payload),
               let bodyJson = String(data: bodyData, encoding: .utf8) else {
-            return PlatformIngestResponse(
+            return LabIngestResponse(
                 success: false,
                 statusCode: 0,
                 errorMessage: "Failed to serialize payload to JSON"
@@ -89,7 +89,7 @@ public class PlatformIngestClient {
             attempts += 1
             do {
                 guard let url = URL(string: "\(baseUrl)\(path)") else {
-                    return PlatformIngestResponse(
+                    return LabIngestResponse(
                         success: false,
                         statusCode: 0,
                         errorMessage: "Invalid URL: \(baseUrl)\(path)"
@@ -121,7 +121,7 @@ public class PlatformIngestClient {
 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     if attempts >= maxRetries {
-                        return PlatformIngestResponse(
+                        return LabIngestResponse(
                             success: false,
                             statusCode: 0,
                             errorMessage: "Invalid response"
@@ -133,7 +133,7 @@ public class PlatformIngestClient {
 
                 if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
                     let parsedBody = tryParseJson(data)
-                    return PlatformIngestResponse(
+                    return LabIngestResponse(
                         success: true,
                         statusCode: httpResponse.statusCode,
                         body: parsedBody
@@ -142,7 +142,7 @@ public class PlatformIngestClient {
 
                 // 4xx — don't retry client errors
                 if httpResponse.statusCode >= 400 && httpResponse.statusCode < 500 {
-                    return PlatformIngestResponse(
+                    return LabIngestResponse(
                         success: false,
                         statusCode: httpResponse.statusCode,
                         body: tryParseJson(data),
@@ -157,7 +157,7 @@ public class PlatformIngestClient {
                     continue
                 }
 
-                return PlatformIngestResponse(
+                return LabIngestResponse(
                     success: false,
                     statusCode: httpResponse.statusCode,
                     body: tryParseJson(data),
@@ -165,7 +165,7 @@ public class PlatformIngestClient {
                 )
             } catch {
                 if attempts >= maxRetries {
-                    return PlatformIngestResponse(
+                    return LabIngestResponse(
                         success: false,
                         statusCode: 0,
                         errorMessage: "Request failed after \(maxRetries) attempts: \(error.localizedDescription)"
@@ -175,7 +175,7 @@ public class PlatformIngestClient {
                     let delay = UInt64(1_000_000_000 * (1 << attempts))
                     try await Task.sleep(nanoseconds: delay)
                 } catch {
-                    return PlatformIngestResponse(
+                    return LabIngestResponse(
                         success: false,
                         statusCode: 0,
                         errorMessage: "Request cancelled"
@@ -184,14 +184,14 @@ public class PlatformIngestClient {
             }
         }
 
-        return PlatformIngestResponse(
+        return LabIngestResponse(
             success: false,
             statusCode: 0,
             errorMessage: "Request failed: max retries exceeded"
         )
     }
 
-    /// Compute HMAC-SHA256 signature for platform ingestion.
+    /// Compute HMAC-SHA256 signature for lab ingestion.
     ///
     /// Formula: `HMAC-SHA256(timestamp_bytes + body_bytes, secret)`
     private func computeSignature(

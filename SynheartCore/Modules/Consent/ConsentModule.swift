@@ -44,6 +44,13 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
         }
     }
 
+    /// Set the device request signer on the internal ConsentAPIClient.
+    /// Called by Synheart entry point once device auth is initialized,
+    /// so that all consent-token requests are signed with device identity.
+    public func setDeviceSigner(_ signer: @escaping DeviceRequestSigner) {
+        apiClient?.deviceSigner = signer
+    }
+
     // MARK: - ConsentProvider
 
     public func current() -> ConsentSnapshot {
@@ -230,7 +237,12 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
     public func requestConsentByProfileId(
         _ profileId: String,
         ipAddress: String? = nil,
-        userAgent: String? = nil
+        userAgent: String? = nil,
+        grantedChannels: ConsentChannels? = nil,
+        tier: ConsentTier? = nil,
+        cloud: Bool? = nil,
+        vendorSync: Bool? = nil,
+        research: Bool = false
     ) async throws -> ConsentToken {
         guard let apiClient = apiClient, let consentConfig = consentConfig else {
             throw NSError(domain: "ConsentModule", code: 2, userInfo: [
@@ -252,7 +264,12 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
             userId: consentConfig.userId,
             region: consentConfig.region,
             ipAddress: ipAddress,
-            userAgent: userAgent
+            userAgent: userAgent,
+            grantedChannels: grantedChannels,
+            tier: tier,
+            cloud: cloud,
+            vendorSync: vendorSync,
+            research: research
         )
 
         try tokenStorage?.saveToken(token)
@@ -395,14 +412,19 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
 
     /// Update local consent snapshot from profile
     private func updateConsentFromProfile(_ profile: ConsentProfile) async throws {
+        // Determine tier from profile flags
+        let tier: ConsentTier = profile.cloudEnabled ? .cloud : .local
+
         let snapshot = ConsentSnapshot(
-            biosignals: profile.channels.biosignals.vitals || profile.channels.biosignals.sleep,
+            biosignals: profile.channels.biosignals.vitals || profile.channels.biosignals.cardioAdvanced || profile.channels.biosignals.neuromuscular || profile.channels.biosignals.wearableMotion || profile.channels.biosignals.sleep,
             behavior: profile.channels.behavior.enabled,
-            phoneContext: profile.channels.phoneContext.motion || profile.channels.phoneContext.screenState,
+            phoneContext: profile.channels.phoneContext.deviceMotion || profile.channels.phoneContext.deviceContext || profile.channels.phoneContext.systemState,
             cloudUpload: profile.cloudEnabled,
             syni: false,
-            focusEstimation: false,
-            emotionEstimation: false,
+            focusEstimation: profile.channels.interpretation.focusEstimation,
+            emotionEstimation: profile.channels.interpretation.emotionEstimation,
+            tier: tier,
+            channels: profile.channels,
             timestamp: Date()
         )
 

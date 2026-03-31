@@ -2,30 +2,30 @@ import Foundation
 
 /// Module for custom platform session and metadata ingestion.
 ///
-/// Wraps ``PlatformIngestClient`` with consent gating via ``ConsentModule``.
+/// Wraps ``LabIngestClient`` with consent gating via ``ConsentModule``.
 /// Uploads are on-demand (not streaming), so ``onStart()``/``onStop()`` are no-ops.
-public class PlatformIngestModule: BaseSynheartModule {
+public class LabIngestModule: BaseSynheartModule {
     private let consentModule: ConsentModule
-    private let config: PlatformIngestConfig
+    private let config: LabIngestConfig
 
-    private var _client: PlatformIngestClient!
+    private var _client: LabIngestClient!
 
     /// The underlying client — exposed for standalone/background usage.
-    public var client: PlatformIngestClient {
+    public var client: LabIngestClient {
         _client
     }
 
     public init(
         consentModule: ConsentModule,
-        config: PlatformIngestConfig
+        config: LabIngestConfig
     ) {
         self.consentModule = consentModule
         self.config = config
-        super.init(moduleId: "platform_ingest")
+        super.init(moduleId: "lab_ingest")
     }
 
     public override func onInitialize() async throws {
-        _client = PlatformIngestClient(
+        _client = LabIngestClient(
             baseUrl: config.baseUrl,
             timeout: config.timeout,
             maxRetries: config.maxRetries
@@ -45,10 +45,10 @@ public class PlatformIngestModule: BaseSynheartModule {
     }
 
     /// Ingest a session payload. Requires `behavior` consent.
-    public func ingestSession(_ payload: [String: Any]) async -> PlatformIngestResponse {
+    public func ingestSession(_ payload: [String: Any]) async -> LabIngestResponse {
         let consent = consentModule.current()
         guard consent.behavior else {
-            return PlatformIngestResponse(
+            return LabIngestResponse(
                 success: false,
                 statusCode: 0,
                 errorMessage: "Behavior consent not granted"
@@ -57,16 +57,16 @@ public class PlatformIngestModule: BaseSynheartModule {
 
         return await _client.ingestSession(
             payload: payload,
-            hmacSecret: config.hmacSecret,
-            apiKey: config.apiKey
+            hmacSecret: config.hmacSecret ?? "",
+            apiKey: config.apiKey ?? ""
         )
     }
 
     /// Ingest a metadata payload. Requires `biosignals` consent.
-    public func ingestMetadata(_ payload: [String: Any]) async -> PlatformIngestResponse {
+    public func ingestMetadata(_ payload: [String: Any]) async -> LabIngestResponse {
         let consent = consentModule.current()
         guard consent.biosignals else {
-            return PlatformIngestResponse(
+            return LabIngestResponse(
                 success: false,
                 statusCode: 0,
                 errorMessage: "Biosignals consent not granted"
@@ -75,8 +75,8 @@ public class PlatformIngestModule: BaseSynheartModule {
 
         return await _client.ingestMetadata(
             payload: payload,
-            hmacSecret: config.hmacSecret,
-            apiKey: config.apiKey
+            hmacSecret: config.hmacSecret ?? "",
+            apiKey: config.apiKey ?? ""
         )
     }
 }

@@ -93,12 +93,33 @@ public struct ConsentChannels: Codable {
         self.interpretation = interpretation
     }
 
+    enum CodingKeys: String, CodingKey {
+        case biosignals
+        case phoneContext
+        case phoneContextSnake = "phone_context"
+        case behavior
+        case interpretation
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         biosignals = (try? container.decode(BiosignalsConsent.self, forKey: .biosignals)) ?? BiosignalsConsent()
-        phoneContext = (try? container.decode(PhoneContextConsent.self, forKey: .phoneContext)) ?? PhoneContextConsent()
+        // Try camelCase first, then snake_case
+        if let ctx = try? container.decode(PhoneContextConsent.self, forKey: .phoneContext) {
+            phoneContext = ctx
+        } else {
+            phoneContext = (try? container.decode(PhoneContextConsent.self, forKey: .phoneContextSnake)) ?? PhoneContextConsent()
+        }
         behavior = (try? container.decode(BehaviorConsent.self, forKey: .behavior)) ?? BehaviorConsent()
         interpretation = (try? container.decode(InterpretationConsent.self, forKey: .interpretation)) ?? InterpretationConsent()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(biosignals, forKey: .biosignals)
+        try container.encode(phoneContext, forKey: .phoneContext)
+        try container.encode(behavior, forKey: .behavior)
+        try container.encode(interpretation, forKey: .interpretation)
     }
 }
 
@@ -107,36 +128,168 @@ public struct BiosignalsConsent: Codable {
     /// Consent for vitals (HR, HRV)
     public let vitals: Bool
 
+    /// Consent for advanced cardiac metrics (e.g. ECG, BP estimation)
+    public let cardioAdvanced: Bool
+
+    /// Consent for neuromuscular signals (e.g. EMG, EDA)
+    public let neuromuscular: Bool
+
+    /// Consent for wearable motion data (e.g. accelerometer, gyroscope)
+    public let wearableMotion: Bool
+
     /// Consent for sleep data
     public let sleep: Bool
 
-    public init(vitals: Bool = false, sleep: Bool = false) {
+    enum CodingKeys: String, CodingKey {
+        case vitals
+        case cardioAdvanced = "cardio_advanced"
+        case neuromuscular
+        case wearableMotion = "wearable_motion"
+        case sleep
+    }
+
+    public init(
+        vitals: Bool = false,
+        cardioAdvanced: Bool = false,
+        neuromuscular: Bool = false,
+        wearableMotion: Bool = false,
+        sleep: Bool = false
+    ) {
         self.vitals = vitals
+        self.cardioAdvanced = cardioAdvanced
+        self.neuromuscular = neuromuscular
+        self.wearableMotion = wearableMotion
         self.sleep = sleep
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        vitals = (try? container.decode(Bool.self, forKey: .vitals)) ?? false
+        cardioAdvanced = (try? container.decode(Bool.self, forKey: .cardioAdvanced)) ?? false
+        neuromuscular = (try? container.decode(Bool.self, forKey: .neuromuscular)) ?? false
+        wearableMotion = (try? container.decode(Bool.self, forKey: .wearableMotion)) ?? false
+        sleep = (try? container.decode(Bool.self, forKey: .sleep)) ?? false
     }
 }
 
 /// Phone context consent configuration
 public struct PhoneContextConsent: Codable {
-    /// Consent for motion data
-    public let motion: Bool
+    /// Consent for device motion sensors (accelerometer, gyroscope)
+    public let deviceMotion: Bool
 
-    /// Consent for screen state
-    public let screenState: Bool
+    /// Consent for device context (locale, timezone, device type)
+    public let deviceContext: Bool
 
-    public init(motion: Bool = false, screenState: Bool = false) {
-        self.motion = motion
-        self.screenState = screenState
+    /// Consent for system state (screen on/off, charging, connectivity)
+    public let systemState: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case deviceMotion = "device_motion"
+        case deviceContext = "device_context"
+        case systemState = "system_state"
+        // Legacy keys for backward-compat decoding
+        case legacyMotion = "motion"
+        case legacyScreenState = "screenState"
+    }
+
+    public init(
+        deviceMotion: Bool = false,
+        deviceContext: Bool = false,
+        systemState: Bool = false
+    ) {
+        self.deviceMotion = deviceMotion
+        self.deviceContext = deviceContext
+        self.systemState = systemState
+    }
+
+    /// Backward-compatible alias for `deviceMotion`
+    @available(*, deprecated, renamed: "deviceMotion")
+    public var motion: Bool { deviceMotion }
+
+    /// Backward-compatible alias for `systemState`
+    @available(*, deprecated, renamed: "systemState")
+    public var screenState: Bool { systemState }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Try new key first, fall back to legacy key
+        if let val = try? container.decode(Bool.self, forKey: .deviceMotion) {
+            deviceMotion = val
+        } else {
+            deviceMotion = (try? container.decode(Bool.self, forKey: .legacyMotion)) ?? false
+        }
+        deviceContext = (try? container.decode(Bool.self, forKey: .deviceContext)) ?? false
+        if let val = try? container.decode(Bool.self, forKey: .systemState) {
+            systemState = val
+        } else {
+            systemState = (try? container.decode(Bool.self, forKey: .legacyScreenState)) ?? false
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceMotion, forKey: .deviceMotion)
+        try container.encode(deviceContext, forKey: .deviceContext)
+        try container.encode(systemState, forKey: .systemState)
     }
 }
 
 /// Behavior consent configuration
 public struct BehaviorConsent: Codable {
-    /// Consent for behavior tracking
-    public let enabled: Bool
+    /// Consent for digital activity tracking (typing, mouse, app usage)
+    public let digitalActivity: Bool
 
-    public init(enabled: Bool = false) {
-        self.enabled = enabled
+    /// Consent for notification pattern analysis
+    public let notificationPatterns: Bool
+
+    /// Consent for app context collection
+    public let appContext: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case digitalActivity = "digital_activity"
+        case notificationPatterns = "notification_patterns"
+        case appContext = "app_context"
+        // Legacy key for backward-compat decoding
+        case legacyEnabled = "enabled"
+    }
+
+    public init(
+        digitalActivity: Bool = false,
+        notificationPatterns: Bool = false,
+        appContext: Bool = false
+    ) {
+        self.digitalActivity = digitalActivity
+        self.notificationPatterns = notificationPatterns
+        self.appContext = appContext
+    }
+
+    /// Backward-compatible computed property: true if any behavior channel is enabled
+    public var enabled: Bool { digitalActivity || notificationPatterns || appContext }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Try new granular keys first
+        if let val = try? container.decode(Bool.self, forKey: .digitalActivity) {
+            digitalActivity = val
+            notificationPatterns = (try? container.decode(Bool.self, forKey: .notificationPatterns)) ?? false
+            appContext = (try? container.decode(Bool.self, forKey: .appContext)) ?? false
+        } else if let legacyEnabled = try? container.decode(Bool.self, forKey: .legacyEnabled) {
+            // Legacy: map old `enabled` to `digitalActivity`
+            digitalActivity = legacyEnabled
+            notificationPatterns = false
+            appContext = false
+        } else {
+            digitalActivity = false
+            notificationPatterns = false
+            appContext = false
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(digitalActivity, forKey: .digitalActivity)
+        try container.encode(notificationPatterns, forKey: .notificationPatterns)
+        try container.encode(appContext, forKey: .appContext)
     }
 }
 

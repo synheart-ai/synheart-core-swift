@@ -49,7 +49,7 @@ public struct SynheartConfig {
     public let privacy: PrivacyConfig
 
     public let cloudConfig: CloudConfig?
-    public let platformIngestConfig: PlatformIngestConfig?
+    public let labIngestConfig: LabIngestConfig?
     public let consentConfig: ConsentConfig?
 
     /// Server-signed capability token for feature gating
@@ -77,7 +77,7 @@ public struct SynheartConfig {
         sync: SyncConfig = SyncConfig(),
         privacy: PrivacyConfig = PrivacyConfig(),
         cloudConfig: CloudConfig? = nil,
-        platformIngestConfig: PlatformIngestConfig? = nil,
+        labIngestConfig: LabIngestConfig? = nil,
         consentConfig: ConsentConfig? = nil,
         capabilityToken: CapabilityToken? = nil,
         capabilitySecret: String? = nil,
@@ -98,7 +98,7 @@ public struct SynheartConfig {
         self.sync = sync
         self.privacy = privacy
         self.cloudConfig = cloudConfig
-        self.platformIngestConfig = platformIngestConfig
+        self.labIngestConfig = labIngestConfig
         self.consentConfig = consentConfig
         self.capabilityToken = capabilityToken
         self.capabilitySecret = capabilitySecret

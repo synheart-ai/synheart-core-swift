@@ -1,12 +1,12 @@
 import Foundation
 
-/// HTTP client for uploading HSI 1.1 snapshots to Synheart Platform
+/// HTTP client for uploading HSI snapshots to Synheart Platform.
 ///
-/// Features:
-/// - HMAC-SHA256 authentication
-/// - Exponential backoff retry (1s, 2s, 4s)
-/// - Max 3 retry attempts
-/// - Specific error handling per status code
+/// Auth model:
+///   Authorization: Bearer {consentToken}   — standard JWT from ConsentModule
+///   + device signature headers              — defense-in-depth (optional)
+///
+/// HMAC signing removed — device attestation at token issuance replaces it.
 public class UploadClient {
     private let baseUrl: String
     private let session: URLSession
@@ -16,61 +16,42 @@ public class UploadClient {
         self.session = session
     }
 
-    /// Upload HSI 1.1 snapshots to the platform
-    ///
-    /// - Parameters:
-    ///   - payload: Upload request containing subject and snapshots
-    ///   - signer: HMAC signer instance (nil when authProvider is used)
-    ///   - tenantId: Tenant identifier
-    ///   - authProvider: Optional custom auth provider (takes precedence over HMAC)
-    /// - Returns: UploadResponse on success
-    /// - Throws: CloudConnectorError on failure
     public func upload(
         payload: UploadRequest,
-        signer: HMACSigner?,
-        tenantId: String,
-        authProvider: AuthProvider? = nil
+        consentToken: ConsentToken?,
+        deviceAuth: AuthProvider? = nil
     ) async throws -> UploadResponse {
         let method = "POST"
         let path = ApiEndpoints.ingestPath
 
-        // Serialize payload
         let encoder = JSONEncoder()
         let bodyData = try encoder.encode(payload)
-        let bodyJson = String(data: bodyData, encoding: .utf8)!
 
-        // Upload with retry logic
         return try await uploadWithRetry(
             method: method,
             path: path,
-            bodyJson: bodyJson,
             bodyData: bodyData,
-            signer: signer,
-            tenantId: tenantId,
             maxAttempts: 3,
-            authProvider: authProvider
+            consentToken: consentToken,
+            deviceAuth: deviceAuth
         )
     }
 
-    /// Upload with exponential backoff retry
     private func uploadWithRetry(
         method: String,
         path: String,
-        bodyJson: String,
         bodyData: Data,
-        signer: HMACSigner?,
-        tenantId: String,
         maxAttempts: Int,
-        authProvider: AuthProvider?
+        consentToken: ConsentToken?,
+        deviceAuth: AuthProvider?
     ) async throws -> UploadResponse {
         var attempts = 0
-        let baseDelay: UInt64 = 1_000_000_000 // 1 second in nanoseconds
+        let baseDelay: UInt64 = 1_000_000_000
 
         while attempts < maxAttempts {
             attempts += 1
 
             do {
-                // Build request
                 guard let url = URL(string: "\(baseUrl)\(path)") else {
                     throw CloudConnectorError.networkError("Invalid URL")
                 }
@@ -78,56 +59,39 @@ public class UploadClient {
                 var request = URLRequest(url: url)
                 request.httpMethod = method
                 request.httpBody = bodyData
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-                if let authProvider = authProvider {
-                    // AuthProvider path — provider controls all auth headers
-                    let authHeaders = try authProvider.signRequest(
+                // Bearer token from consent module
+                if let token = consentToken, token.isValid {
+                    request.setValue("Bearer \(token.token)", forHTTPHeaderField: "Authorization")
+                }
+
+                // Device signature headers (defense-in-depth)
+                if let deviceAuth = deviceAuth {
+                    let deviceHeaders = try deviceAuth.signRequest(
                         method: method,
                         path: path,
                         bodyBytes: bodyData
                     )
-                    for (key, value) in authHeaders {
+                    for (key, value) in deviceHeaders {
                         request.setValue(value, forHTTPHeaderField: key)
                     }
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                } else {
-                    // Existing HMAC path (unchanged)
-                    let nonce = signer!.generateNonce()
-                    let timestamp = Int(Date().timeIntervalSince1970)
-                    let signature = signer!.computeSignature(
-                        method: method,
-                        path: path,
-                        tenantId: tenantId,
-                        timestamp: timestamp,
-                        nonce: nonce,
-                        bodyJson: bodyJson
-                    )
-
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue(tenantId, forHTTPHeaderField: "X-Synheart-Tenant")
-                    request.setValue(signature, forHTTPHeaderField: "X-Synheart-Signature")
-                    request.setValue(nonce, forHTTPHeaderField: "X-Synheart-Nonce")
-                    request.setValue("\(timestamp)", forHTTPHeaderField: "X-Synheart-Timestamp")
-                    request.setValue("1.0.0", forHTTPHeaderField: "X-Synheart-SDK-Version")
                 }
 
-                // Execute request
                 let (data, response) = try await session.data(for: request)
 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     throw CloudConnectorError.networkError("Invalid response")
                 }
 
-                if httpResponse.statusCode == 200 {
+                if httpResponse.statusCode == 200 || httpResponse.statusCode == 202 {
                     let decoder = JSONDecoder()
                     return try decoder.decode(UploadResponse.self, from: data)
                 }
 
-                // Parse error response (API may return JSON or plain text e.g. "404 page not found")
                 let error: UploadErrorResponse
                 do {
-                    let decoder = JSONDecoder()
-                    error = try decoder.decode(UploadErrorResponse.self, from: data)
+                    error = try JSONDecoder().decode(UploadErrorResponse.self, from: data)
                 } catch {
                     let bodyStr = String(data: data, encoding: .utf8) ?? "<non-utf8>"
                     throw CloudConnectorError.networkError(
@@ -135,42 +99,36 @@ public class UploadClient {
                     )
                 }
 
-                // Handle 401 with AuthProvider retry
-                if httpResponse.statusCode == 401, let authProvider = authProvider {
+                // Handle 401 with device auth retry
+                if httpResponse.statusCode == 401, let deviceAuth = deviceAuth {
                     let responseHeaders = httpResponse.allHeaderFields as? [String: String] ?? [:]
-                    let handled = authProvider.onAuthError(
+                    let handled = deviceAuth.onAuthError(
                         statusCode: 401,
                         responseHeaders: responseHeaders
                     )
                     if handled && attempts < maxAttempts {
-                        continue // Retry with corrected auth
+                        continue
                     }
                 }
 
-                // Handle specific errors (non-retryable)
                 switch (httpResponse.statusCode, error.code) {
-                case (401, "invalid_signature"):
+                case (401, _):
                     throw CloudConnectorError.invalidSignature
-                case (403, "invalid_tenant"):
+                case (403, _):
                     throw CloudConnectorError.invalidTenant
-                case (400, "schema_validation_failed"):
+                case (400, "schema_validation_failed"), (400, "hsi_schema_validation_failed"):
                     throw CloudConnectorError.schemaValidation
                 case (429, _):
-                    throw CloudConnectorError.rateLimitExceeded(
-                        retryAfter: error.retryAfter ?? 60
-                    )
+                    throw CloudConnectorError.rateLimitExceeded(retryAfter: error.retryAfter ?? 60)
                 default:
-                    // Generic error - retry if attempts remaining
                     if attempts >= maxAttempts {
                         throw CloudConnectorError.generic("Upload failed: \(error.message)")
                     }
                 }
 
             } catch let error as CloudConnectorError {
-                // Don't retry on known exceptions
                 throw error
             } catch {
-                // Network or parsing error - retry if attempts remaining
                 if attempts >= maxAttempts {
                     throw CloudConnectorError.networkError(
                         "Upload failed after \(maxAttempts) attempts: \(error.localizedDescription)"
@@ -178,7 +136,6 @@ public class UploadClient {
                 }
             }
 
-            // Exponential backoff: 1s, 2s, 4s
             if attempts < maxAttempts {
                 let delay = baseDelay * UInt64(1 << (attempts - 1))
                 try await Task.sleep(nanoseconds: delay)
