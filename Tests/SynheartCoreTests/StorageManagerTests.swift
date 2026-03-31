@@ -34,7 +34,7 @@ final class StorageManagerTests: XCTestCase {
             appId: "app", appVersion: "1.0", deviceId: "d1", platform: "ios"
         ))
 
-        let sessions = try sm.listSessions(subjectId: "usr_1")
+        let sessions = try sm.listSessions()
         XCTAssertEqual(sessions.count, 2)
     }
 
@@ -47,7 +47,7 @@ final class StorageManagerTests: XCTestCase {
 
         try sm.updateSession("s1", state: "closed", endUtc: 2000)
 
-        let sessions = try sm.listSessions(subjectId: "usr_1")
+        let sessions = try sm.listSessions()
         XCTAssertEqual(sessions.first?.state, "closed")
         XCTAssertEqual(sessions.first?.endUtc, 2000)
     }
@@ -106,7 +106,7 @@ final class StorageManagerTests: XCTestCase {
             encAlg: "chacha20poly1305", payload: Data(), payloadSha256: "h3"
         ))
 
-        let range = try sm.getArtifactsByTimeRange(subjectId: "usr_1", type: "hsi_window", fromMs: 400, toMs: 700)
+        let range = try sm.getArtifactsByTimeRange(400, 700, type: "hsi_window")
         XCTAssertEqual(range.count, 1)
         XCTAssertEqual(range.first?.artifactId, "mid")
     }
@@ -122,7 +122,7 @@ final class StorageManagerTests: XCTestCase {
         ))
 
         XCTAssertFalse(try sm.isDeleted("art_to_delete"))
-        try sm.insertTombstone(artifactId: "art_to_delete", deletedAtMs: 999, reason: "user_request")
+        try sm.insertTombstone(artifactId: "tombstone_1", targetArtifactId: "art_to_delete", reason: "user_request", deletedAtMs: 999)
         XCTAssertTrue(try sm.isDeleted("art_to_delete"))
     }
 
@@ -135,7 +135,7 @@ final class StorageManagerTests: XCTestCase {
             summaryJson: "{\"total_windows\": 5}"
         )
 
-        let json = try sm.getSummaryJson(sessionId: "s1")
+        let json = try sm.getSummaryJson("s1")
         XCTAssertNotNil(json)
         XCTAssertTrue(json!.contains("total_windows"))
     }
@@ -157,7 +157,7 @@ final class StorageManagerTests: XCTestCase {
 
         try sm.wipeAll()
 
-        let sessions = try sm.listSessions(subjectId: "usr_1")
+        let sessions = try sm.listSessions()
         XCTAssertEqual(sessions.count, 0)
 
         let artifact = try sm.getArtifact("art_1")
@@ -181,7 +181,7 @@ final class StorageManagerTests: XCTestCase {
 
         try sm.deleteSession("s1")
 
-        let sessions = try sm.listSessions(subjectId: "usr_1")
+        let sessions = try sm.listSessions()
         XCTAssertEqual(sessions.count, 0)
 
         let artifacts = try sm.getArtifactsBySession("s1", type: "hsi_window")

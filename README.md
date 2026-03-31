@@ -241,7 +241,7 @@ let runtimeModule = RuntimeModule(
 )
 ```
 
-## Platform Ingestion
+## Lab Ingestion
 
 Send structured session and metadata payloads to the Synheart platform API.
 
@@ -251,7 +251,7 @@ Send structured session and metadata payloads to the Synheart platform API.
 let config = SynheartConfig(
     appId: "your_app_id",
     subjectId: "sub_user_123",
-    platformIngestConfig: PlatformIngestConfig(
+    labIngestConfig: LabIngestConfig(
         apiKey: "your_platform_api_key",
         autoIngest: true
     )
@@ -271,7 +271,7 @@ try await synheart.ingestMetadata()
 ### Standalone Payload Builder
 
 ```swift
-let payload = PlatformPayloadBuilder.buildSession(
+let payload = LabPayloadBuilder.buildSession(
     sessionId: "sess_123",
     // ... other params
 )
@@ -493,7 +493,7 @@ let config = SynheartConfig(
     appId: "your_app_id",
     subjectId: "user_123",
     allowUnsignedCapabilities: true,
-    platformIngestConfig: PlatformIngestConfig(
+    labIngestConfig: LabIngestConfig(
         baseUrl: "http://localhost:8083",  // Simulator can reach host localhost
         apiKey: "mock-dev-api-key-2026"
     )

@@ -1,7 +1,7 @@
 import Foundation
 
-/// Response from platform ingestion API calls.
-public struct PlatformIngestResponse {
+/// Response from lab ingestion API calls.
+public struct LabIngestResponse {
     public let success: Bool
     public let statusCode: Int
     public let body: [String: Any]?
@@ -20,9 +20,9 @@ public struct PlatformIngestResponse {
     }
 }
 
-extension PlatformIngestResponse: CustomStringConvertible {
+extension LabIngestResponse: CustomStringConvertible {
     public var description: String {
-        var base = "PlatformIngestResponse(success=\(success), statusCode=\(statusCode)"
+        var base = "LabIngestResponse(success=\(success), statusCode=\(statusCode)"
         if let errorMessage = errorMessage {
             base += ", error=\(errorMessage)"
         }

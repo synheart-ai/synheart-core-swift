@@ -1,21 +1,30 @@
 import Foundation
 
 /// REST client for consent service API
+/// Callback type for device request signing.
+/// Returns a dictionary of signed headers (X-Synheart-Signature, etc.)
+public typealias DeviceRequestSigner = (_ method: String, _ path: String, _ bodyBytes: Data) throws -> [String: String]
+
 public class ConsentAPIClient {
     private let baseUrl: String
     private let appId: String
     private let appApiKey: String
     private let session: URLSession
 
+    /// Optional device signer for adding X-Synheart-* headers to consent requests.
+    public var deviceSigner: DeviceRequestSigner?
+
     public init(
         baseUrl: String,
         appId: String,
         appApiKey: String,
+        deviceSigner: DeviceRequestSigner? = nil,
         session: URLSession = .shared
     ) {
         self.baseUrl = baseUrl
         self.appId = appId
         self.appApiKey = appApiKey
+        self.deviceSigner = deviceSigner
         self.session = session
     }
 
@@ -94,7 +103,12 @@ public class ConsentAPIClient {
         userId: String? = nil,
         region: String? = nil,
         ipAddress: String? = nil,
-        userAgent: String? = nil
+        userAgent: String? = nil,
+        grantedChannels: ConsentChannels? = nil,
+        tier: ConsentTier? = nil,
+        cloud: Bool? = nil,
+        vendorSync: Bool? = nil,
+        research: Bool? = nil
     ) async throws -> ConsentToken {
         let path = ApiEndpoints.consentTokenPath
         guard let url = URL(string: "\(baseUrl)\(path)") else {
@@ -111,12 +125,32 @@ public class ConsentAPIClient {
         if let region = region { body["region"] = region }
         if let ipAddress = ipAddress { body["ip_address"] = ipAddress }
         if let userAgent = userAgent { body["user_agent"] = userAgent }
+        if let tier = tier { body["tier"] = tier.rawValue }
+        if let cloud = cloud { body["cloud"] = cloud }
+        if let vendorSync = vendorSync { body["vendor_sync"] = vendorSync }
+        if let research = research { body["research"] = research }
+        if let grantedChannels = grantedChannels {
+            let encoder = JSONEncoder()
+            if let channelsData = try? encoder.encode(grantedChannels),
+               let channelsDict = try? JSONSerialization.jsonObject(with: channelsData) as? [String: Any] {
+                body["granted_channels"] = channelsDict
+            }
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(appApiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = bodyData
+
+        // Sign the request with device identity if available
+        if let signer = deviceSigner {
+            let deviceHeaders = try signer("POST", path, bodyData)
+            for (key, value) in deviceHeaders {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
 
         let (data, response) = try await session.data(for: request)
 

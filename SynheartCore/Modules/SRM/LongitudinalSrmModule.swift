@@ -15,6 +15,7 @@ public final class LongitudinalSrmModule {
         "sleep.summary.recorded": [
             DimensionExtractor(dimension: "sleep_need", payloadKey: "duration_seconds"),
             DimensionExtractor(dimension: "sleep_regularity", payloadKey: "midpoint_time"),
+            DimensionExtractor(dimension: "sleep_efficiency", payloadKey: "efficiency_pct"),
         ],
         "hrv.recorded": [
             DimensionExtractor(dimension: "hrv_rmssd", payloadKey: "rmssd_ms"),
@@ -24,6 +25,14 @@ public final class LongitudinalSrmModule {
         ],
         "recovery.summary.recorded": [
             DimensionExtractor(dimension: "recovery_score", payloadKey: "score"),
+            DimensionExtractor(dimension: "hrv_rmssd", payloadKey: "hrv_rmssd_ms"),
+            DimensionExtractor(dimension: "resting_hr", payloadKey: "resting_hr_bpm"),
+        ],
+        "workout.summary.recorded": [
+            DimensionExtractor(dimension: "strain_score", payloadKey: "strain_score"),
+        ],
+        "stress.summary.recorded": [
+            DimensionExtractor(dimension: "stress_score", payloadKey: "score"),
         ],
     ]
 

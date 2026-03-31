@@ -1,10 +1,10 @@
 import Foundation
 
-/// Builds platform ingestion payloads from SDK internal data.
+/// Builds lab ingestion payloads from SDK internal data.
 ///
 /// Aggregates raw wear samples, behavior events, and phone context
-/// into the structured format expected by the platform ingestion API.
-public enum PlatformPayloadBuilder {
+/// into the structured format expected by the lab ingestion API.
+public enum LabPayloadBuilder {
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()

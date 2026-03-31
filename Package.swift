@@ -29,6 +29,7 @@ let package = Package(
         // and accessed via RuntimeBridge.
         .package(path: "../synheart-behavior-swift"),
         .package(path: "../synheart-session-swift"),
+        .package(path: "../synheart-auth-swift"),
     ],
     targets: [
         .target(
@@ -38,6 +39,7 @@ let package = Package(
                 .product(name: "SynheartBehavior", package: "synheart-behavior-swift",
                          condition: .when(platforms: [.iOS, .macOS])),
                 .product(name: "SynheartSession", package: "synheart-session-swift"),
+                .product(name: "SynheartAuth", package: "synheart-auth-swift"),
             ],
             path: "SynheartCore"),
         .testTarget(

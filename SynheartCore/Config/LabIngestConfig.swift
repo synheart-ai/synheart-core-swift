@@ -1,19 +1,19 @@
 import Foundation
 
-/// Configuration for the Platform Ingest module.
+/// Configuration for the Lab Ingest module.
 ///
 /// Used to send custom session and metadata payloads to the
-/// Synheart platform ingestion service.
+/// Synheart lab ingestion service.
 ///
 /// Example:
 /// ```swift
-/// let platformIngestConfig = PlatformIngestConfig(
+/// let labIngestConfig = LabIngestConfig(
 ///     apiKey: "synheart_sk_live_...",
 ///     hmacSecret: "synheart_whsec_..."
 /// )
 /// ```
-public struct PlatformIngestConfig {
-    /// Base URL for the platform ingestion service.
+public struct LabIngestConfig {
+    /// Base URL for the lab ingestion service.
     public let baseUrl: String
 
     /// API key for authentication (X-API-Key header).
@@ -36,7 +36,7 @@ public struct PlatformIngestConfig {
     public init(
         apiKey: String? = nil,
         hmacSecret: String? = nil,
-        baseUrl: String = ApiEndpoints.defaultPlatformIngestBaseUrl,
+        baseUrl: String = ApiEndpoints.defaultLabIngestBaseUrl,
         timeout: TimeInterval = 30,
         maxRetries: Int = 3,
         autoIngest: Bool = false

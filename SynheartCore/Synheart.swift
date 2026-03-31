@@ -10,13 +10,12 @@ import SynheartSession
  *
  * Core modules:
  * - Capabilities Module (feature gating)
- * - Consent Module (permission management)
+ * - Consent Module (permission management + scoped access tokens)
  * - Wear Module (biosignal collection)
  * - Phone Module (motion/context)
  * - Behavior Module (interaction patterns)
  * - HSI Runtime (signal fusion & state computation)
- * - Auth Module (authentication)
- * - Sync Module (secure sync, replaces Cloud Connector)
+ * - Sync Module (E2EE artifact sync)
  *
  * Example usage:
  * ```swift
@@ -55,7 +54,7 @@ public class Synheart {
     private var phoneModule: PhoneModule?
     private var behaviorModule: BehaviorModule?
     private var runtimeModule: RuntimeModule?
-    private var platformIngestModule: PlatformIngestModule?
+    private var labIngestModule: LabIngestModule?
 
     // Activation manager (RFC-0005 four-authority model)
     private var _activationManager: ActivationManager?
@@ -76,7 +75,7 @@ public class Synheart {
     private var _synheartConfig: SynheartConfig?
 
     // Phase 3: Auth & Sync
-    private var _authModule: AuthModule?
+    // AuthModule removed — ConsentModule is the single auth/token path.
     private var _syncModule: SyncModule?
 
     // Session module (wraps SessionEngine from synheart-session-swift)
@@ -229,11 +228,9 @@ public class Synheart {
         SMK.delete()
         URK.delete()
 
-        // Phase 3: Clear auth/sync state
+        // Phase 3: Clear sync state
         shared._syncModule?.dispose()
         shared._syncModule = nil
-        shared._authModule?.logout()
-        shared._authModule = nil
 
         shared.artifactPipeline = nil
         shared._storagePolicy = nil
@@ -243,19 +240,17 @@ public class Synheart {
 
     /// Request account deletion — wipes local data and requests server-side deletion.
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
-        // POST server-side deletion request if authenticated
-        if let auth = shared._authModule, auth.isAuthenticated, let token = auth.accessToken {
-            let url = URL(string: "\(auth.baseUrl)/v1/delete")!
+        if let token = shared.consentModule?.getCurrentToken(), token.isValid {
+            let url = URL(string: "https://api.synheart.ai/auth/v1/delete")!
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("Bearer \(token.token)", forHTTPHeaderField: "Authorization")
             request.httpBody = try JSONSerialization.data(withJSONObject: ["confirmation": "DELETE_MY_ACCOUNT"])
 
             let (_, response) = try await URLSession.shared.data(for: request)
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
             if statusCode != 200 && statusCode != 202 {
-                // Log but continue with local wipe
                 SynheartLogger.log("[Synheart] Server account deletion request returned status \(statusCode)")
             }
         }
@@ -266,38 +261,25 @@ public class Synheart {
 
     /// Cancel a pending account deletion request.
     public static func cancelAccountDeletion() async throws -> Bool {
-        guard let auth = shared._authModule, auth.isAuthenticated, let token = auth.accessToken else {
+        guard let token = shared.consentModule?.getCurrentToken(), token.isValid else {
             return false
         }
 
-        let url = URL(string: "\(auth.baseUrl)/v1/delete/cancel")!
+        let url = URL(string: "https://api.synheart.ai/auth/v1/delete/cancel")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token.token)", forHTTPHeaderField: "Authorization")
 
         let (_, response) = try await URLSession.shared.data(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
         return statusCode == 200
     }
 
-    // MARK: - Phase 3: Auth API
-
-    /// Authenticate with a provider token.
-    public static func authenticate(provider: String, token: String) async throws -> AuthResult {
-        guard let auth = shared._authModule else { throw SynheartError.notInitialized }
-        return try await auth.authenticate(provider: provider, token: token)
-    }
-
-    /// Get current auth status.
-    public static var authStatus: AuthStatus? {
-        shared._authModule?.status
-    }
-
-    /// Log out and clear auth state.
+    /// Log out — revoke consent, dispose sync, clear URK.
     public static func logout() {
         shared._syncModule?.dispose()
-        shared._authModule?.logout()
+        try? shared.consentModule?.revokeConsent()
         URK.delete()
     }
 
@@ -411,6 +393,23 @@ public class Synheart {
         SynheartLogger.log("[Synheart] Initializing consent module...")
         consentModule = ConsentModule()
 
+        // Wire device signing into consent module so all consent-token requests
+        // are signed with device identity (X-Synheart-* headers).
+        let capturedAppId = resolvedConfig.appId
+        consentModule!.setDeviceSigner { method, path, bodyData in
+            do {
+                return try SynheartAuth.shared.signRequest(
+                    appId: capturedAppId,
+                    method: method,
+                    path: path,
+                    bodyBytes: bodyData
+                ).dictionary
+            } catch {
+                SynheartLogger.log("[Synheart] Device signing unavailable for consent: \(error)")
+                return [:]
+            }
+        }
+
         try moduleManager.registerModule(capabilityModule!)
         try moduleManager.registerModule(consentModule!)
 
@@ -454,14 +453,14 @@ public class Synheart {
             dependsOn: ["wear", "phone", "behavior", "srm"]
         )
 
-        if let platformIngestConfig = config?.platformIngestConfig {
-            SynheartLogger.log("[Synheart] Initializing Platform Ingest...")
-            platformIngestModule = PlatformIngestModule(
+        if let labIngestConfig = config?.labIngestConfig {
+            SynheartLogger.log("[Synheart] Initializing Lab Ingest...")
+            labIngestModule = LabIngestModule(
                 consentModule: consentModule!,
-                config: platformIngestConfig
+                config: labIngestConfig
             )
             try moduleManager.registerModule(
-                platformIngestModule!,
+                labIngestModule!,
                 dependsOn: ["consent"]
             )
         }
@@ -542,21 +541,38 @@ public class Synheart {
             }
         }
 
-        // Phase 3: Initialize auth and sync modules
+        // Phase 3: Initialize sync module (uses ConsentModule's token)
         let appId = resolvedConfig.appId
         if !appId.isEmpty {
-            _authModule = AuthModule(appId: appId)
-            _ = await _authModule!.restoreSession()
+            // Configure synheart-auth for device attestation + signing
+            SynheartAuth.shared.configure(baseUrl: "https://api.synheart.ai/auth")
 
-            if let sm = storageManager, sm.isOpen {
+            // Generate or load session_secret for URK derivation (local, not from server)
+            var sessionSecret: String?
+            do {
+                sessionSecret = try Synheart.loadKeychainValue(key: "synheart.session_secret")
+                if sessionSecret == nil {
+                    var bytes = [UInt8](repeating: 0, count: 32)
+                    _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+                    sessionSecret = Data(bytes).base64EncodedString()
+                    try Synheart.saveKeychainValue(key: "synheart.session_secret", value: sessionSecret!)
+                }
+            } catch {
+                SynheartLogger.log("[Synheart] session_secret init failed (non-fatal): \(error)")
+            }
+
+            // SyncModule uses ConsentModule's token — no separate AuthModule needed.
+            if let sm = storageManager, sm.isOpen, let cm = consentModule {
                 _syncModule = SyncModule(
-                    auth: _authModule!,
+                    consent: cm,
                     storage: sm,
                     smk: _smk,
-                    baseUrl: "https://api.synheart.ai"
+                    baseUrl: "https://api.synheart.ai",
+                    subjectId: resolvedConfig.subjectId,
+                    sessionSecret: sessionSecret
                 )
             }
-            SynheartLogger.log("[Synheart] Auth and sync modules initialized")
+            SynheartLogger.log("[Synheart] Sync module initialized")
         }
 
         isConfigured = true
@@ -706,8 +722,8 @@ public class Synheart {
                 SynheartLogger.log("[Synheart] Baseline snapshot creation failed: \(error)")
             }
         }
-        // Auto-ingest session data via Platform Ingest
-        if let piConfig = _synheartConfig?.platformIngestConfig, piConfig.autoIngest, let handle = _currentSessionHandle, platformIngestModule != nil {
+        // Auto-ingest session data via Lab Ingest
+        if let piConfig = _synheartConfig?.labIngestConfig, piConfig.autoIngest, let handle = _currentSessionHandle, labIngestModule != nil {
             await _autoIngestSession(handle)
         }
 
@@ -730,7 +746,7 @@ public class Synheart {
         let behaviorEvents = behaviorModule?.rawEvents(.window1h) ?? []
         let phoneDataPoints = phoneModule?.rawDataPoints(.window1h) ?? []
 
-        let payload = PlatformPayloadBuilder.buildSession(
+        let payload = LabPayloadBuilder.buildSession(
             sessionId: session.sessionId,
             deviceId: _synheartConfig?.deviceId ?? "",
             appId: _synheartConfig?.appId ?? "",
@@ -742,7 +758,7 @@ public class Synheart {
             behaviorEvents: behaviorEvents,
             phoneDataPoints: phoneDataPoints
         )
-        let _ = await platformIngestModule!.ingestSession(payload)
+        let _ = await labIngestModule!.ingestSession(payload)
     }
 
     // MARK: - Session Module Access
@@ -759,43 +775,43 @@ public class Synheart {
         shared.sessionModule?.getStatus()
     }
 
-    // MARK: - Platform Ingestion
+    // MARK: - Lab Ingestion
 
-    /// Ingest a session payload via the Platform Ingest module.
+    /// Ingest a session payload via the Lab Ingest module.
     ///
     /// Requires `behavior` consent.
     ///
-    /// - Throws: `SynheartError` if SDK not initialized or platform ingest not configured
-    public static func ingestSession(_ payload: [String: Any]) async throws -> PlatformIngestResponse {
+    /// - Throws: `SynheartError` if SDK not initialized or lab ingest not configured
+    public static func ingestSession(_ payload: [String: Any]) async throws -> LabIngestResponse {
         guard shared.isConfigured else {
             throw SynheartError.notInitialized
         }
-        guard let module = shared.platformIngestModule else {
+        guard let module = shared.labIngestModule else {
             throw SynheartError.notImplemented("Platform ingest not configured")
         }
         return await module.ingestSession(payload)
     }
 
-    /// Ingest a metadata payload via the Platform Ingest module.
+    /// Ingest a metadata payload via the Lab Ingest module.
     ///
     /// Requires `biosignals` consent.
     ///
-    /// - Throws: `SynheartError` if SDK not initialized or platform ingest not configured
-    public static func ingestMetadata(_ payload: [String: Any]) async throws -> PlatformIngestResponse {
+    /// - Throws: `SynheartError` if SDK not initialized or lab ingest not configured
+    public static func ingestMetadata(_ payload: [String: Any]) async throws -> LabIngestResponse {
         guard shared.isConfigured else {
             throw SynheartError.notInitialized
         }
-        guard let module = shared.platformIngestModule else {
+        guard let module = shared.labIngestModule else {
             throw SynheartError.notImplemented("Platform ingest not configured")
         }
         return await module.ingestMetadata(payload)
     }
 
-    /// Get the underlying PlatformIngestClient for standalone/background usage.
+    /// Get the underlying LabIngestClient for standalone/background usage.
     ///
-    /// Returns nil if platform ingest is not configured.
-    public static var platformIngestClient: PlatformIngestClient? {
-        shared.platformIngestModule?.client
+    /// Returns nil if lab ingest is not configured.
+    public static var labIngestClient: LabIngestClient? {
+        shared.labIngestModule?.client
     }
 
     /**
@@ -1080,8 +1096,7 @@ public class Synheart {
         // Phase 3
         _syncModule?.dispose()
         _syncModule = nil
-        _authModule?.logout()
-        _authModule = nil
+        // AuthModule removed — consent handles token lifecycle
 
         consentModule = nil
         capabilityModule = nil
@@ -1089,13 +1104,57 @@ public class Synheart {
         phoneModule = nil
         behaviorModule = nil
         runtimeModule = nil
-        platformIngestModule = nil
+        labIngestModule = nil
         _activationManager = nil
         previousConsent = nil
         isConfigured = false
         isRunning = false
 
         SynheartLogger.log("[Synheart] Disposed")
+    }
+
+    // MARK: - Keychain Helpers (for session_secret)
+
+    private static let keychainService = "ai.synheart.core"
+
+    static func loadKeychainValue(key: String) throws -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw NSError(domain: "Synheart.Keychain", code: Int(status))
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func saveKeychainValue(key: String, value: String) throws {
+        // Delete existing
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: key,
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        let data = Data(value.utf8)
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: key,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw NSError(domain: "Synheart.Keychain", code: Int(status))
+        }
     }
 }
 

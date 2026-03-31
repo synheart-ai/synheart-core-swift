@@ -11,10 +11,10 @@ public enum ApiEndpoints {
     // MARK: - Cloud / HSI Ingest
     public static let ingestPath = "/v1/hsi/ingest"
 
-    // MARK: - Platform Ingest (lab/raw data)
-    public static let defaultPlatformIngestBaseUrl = "https://api.synheart.ai"
-    public static let platformSessionIngestPath = "/v1/platform/session/ingest"
-    public static let platformMetadataIngestPath = "/v1/platform/metadata/ingest"
+    // MARK: - Lab Ingest (lab/raw data)
+    public static let defaultLabIngestBaseUrl = "https://api.synheart.ai"
+    public static let labSessionIngestPath = "/v1/lab/session/ingest"
+    public static let labMetadataIngestPath = "/v1/lab/metadata/ingest"
 
     // MARK: - Consent Service
     public static let defaultConsentBaseUrl = "https://api.synheart.ai"

@@ -45,7 +45,7 @@ final class ConfigValidationTests: XCTestCase {
         )
         XCTAssertThrowsError(try config.validate()) { error in
             if case SynheartCoreError.notConfigured(let msg) = error {
-                XCTAssertTrue(msg.contains("appId"))
+                XCTAssertTrue(msg?.contains("appId") == true)
             } else {
                 XCTFail("Expected notConfigured error, got \(error)")
             }
