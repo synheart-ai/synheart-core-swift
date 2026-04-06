@@ -8,20 +8,23 @@ import Foundation
 /// HRV, strain) is normalized, stored immutably, and pushed to the runtime
 /// for baseline computation.
 public final class WearableEventProcessor {
-    private let storage: StorageManager
-    private let bridge: RuntimeBridge?
+    /// Optional closure that persists a canonical wearable event as a dict.
+    public typealias EventPersister = ([String: Any]) throws -> Void
+
+    private let persistEvent: EventPersister?
+    private let bridge: CoreRuntimeBridge?
     private let srm: LongitudinalSrmModule
     private let subjectId: String
     private let deviceInstallId: String
 
     public init(
-        storage: StorageManager,
-        bridge: RuntimeBridge?,
+        bridge: CoreRuntimeBridge?,
         subjectId: String,
         deviceInstallId: String,
-        srm: LongitudinalSrmModule? = nil
+        srm: LongitudinalSrmModule? = nil,
+        persistEvent: EventPersister? = nil
     ) {
-        self.storage = storage
+        self.persistEvent = persistEvent
         self.bridge = bridge
         self.subjectId = subjectId
         self.deviceInstallId = deviceInstallId
@@ -105,15 +108,17 @@ public final class WearableEventProcessor {
         )
 
         // Store (idempotent -- INSERT OR IGNORE on event_id)
-        do {
-            try storage.insertWearableEvent(event.toMap())
-        } catch {
-            SynheartLogger.log("[WearableEventProcessor] Storage error: \(error)")
-            // Continue to SRM push even if storage fails -- runtime needs the data
+        if let persist = persistEvent {
+            do {
+                try persist(event.toMap())
+            } catch {
+                SynheartLogger.log("[WearableEventProcessor] Storage error: \(error)")
+                // Continue to SRM push even if storage fails -- runtime needs the data
+            }
         }
 
         // Push to longitudinal SRM via runtime bridge
-        srm.ingestEvent(event, storage: storage, bridge: bridge)
+        srm.ingestEvent(event, bridge: bridge)
         SynheartLogger.log(
             "[WearableEventProcessor] Processed \(provider)/\(mapping.canonicalType) "
             + "(seq=\(seq), confidence=\(String(format: "%.2f", confidence)))"

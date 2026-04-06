@@ -7,25 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **`RuntimeBridge.ingestBatch()`** — FFI binding for batch event ingestion via synheart-runtime.
-- **`RuntimeModule.batchIngestOnStop`** — Enables batch-on-stop mode; buffers all events during a session and runs a single `ingestBatch` call on stop.
-- **`PlatformPayloadBuilder`** — Builds structured platform ingestion payloads for session and metadata upload.
-- **`PlatformIngestConfig.autoIngest`** — When enabled, automatically ingests session data to the Synheart platform on stop.
+### Changed
+- Core business logic (storage, crypto, sync, consent, artifact pipeline, cloud connector, SRM)
+  migrated to synheart-core-runtime (Rust). SDK is now a thin FFI shell.
+- RuntimeBridge/RuntimeModule replaced by CoreRuntimeBridge (FFI to libsynheart_core_runtime)
+- HSI state updates delivered via native callback mechanism instead of platform-specific streams
+- Lab protocol API now routes through CoreRuntimeBridge
 
 ### Removed
-
-- **`configure()` method** — Removed legacy `configure()` entry point. The single entry point is now `Synheart.initialize(config:userId:autoStart:)`.
-- **Feature provider protocols** — Removed `WearFeatureProvider`, `PhoneFeatureProvider`, and `BehaviorFeatureProvider` protocols. Feature computation lives in synheart-runtime.
-- **Legacy config fields** — Removed `enableWear`, `enablePhone`, `enableBehavior` from `SynheartConfig`. Module activation is handled via `activate(_:)` / `deactivate(_:)`.
-- **Empty `Heads/` directory** — Removed empty directory (head logic lives in synheart-runtime).
+- StorageManager, ArtifactCrypto, SMK, URK, SyncEngine, SyncModule, ArtifactPipeline
+- RuntimeBridge, RuntimeModule (replaced by CoreRuntimeBridge)
+- CloudConnector, UploadQueue, UploadClient, HsiSchemaTransformer
+- SRM computation modules (SRMModule, SRMBuffer, SRMSnapshotStorage)
+- `configure()` method (single entry point is `Synheart.initialize(config:userId:autoStart:)`)
+- Feature provider protocols (WearFeatureProvider, PhoneFeatureProvider, BehaviorFeatureProvider)
+- Legacy config fields (enableWear, enablePhone, enableBehavior)
+- Empty `Heads/` directory
+- PlatformPayloadBuilder, PlatformIngestConfig (moved to Rust core runtime)
 
 ## [1.2.0] - 2026-02-23
 
 ### Removed
 
-- **FeatureExtractor** — Deleted empty `BehaviorFeatureExtractor` placeholder class (`SynheartCore/Modules/Behavior/FeatureExtractor.swift`). All feature computation lives in synheart-runtime per RFC-CORE-0007.
+- **FeatureExtractor** — Deleted empty `BehaviorFeatureExtractor` placeholder class (`SynheartCore/Modules/Behavior/FeatureExtractor.swift`). All feature computation lives in synheart-engine per RFC-CORE-0007.
 
 ### Changed
 
@@ -40,17 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **HSI stream consent gating** — Local `onHSIUpdate` publisher now checks `biosignals` consent before forwarding HSI frames to consumers. Previously only cloud upload was gated; now local streams respect consent too.
 - **Codable conformance for SRM types** — `SRMSnapshot`, `StratumSnapshot`, `BufferEntry`, and `MetricReference` now conform to `Codable` with snake_case `CodingKeys` matching the cross-platform JSON schema.
 - **HSI consent gate tests** — New `ConsentGateTests.swift` with 3 XCTest tests verifying HSI frames are blocked when biosignal consent is denied.
-- **synheart-runtime installed** — macOS universal dylib and static lib now bundled in `lib/` via `make install-swift`.
+- **synheart-engine installed** — macOS universal dylib and static lib now bundled in `lib/` via `make install-swift`.
 
 ## [1.1.0] - 2026-02-22
 
 ### Changed
 
-- **RuntimeBridge** (renamed from `FluxFFIProvider`) — now wraps synheart-runtime C ABI via dlsym instead of calling synheart-flux directly. synheart-runtime composes the full session → state → flux pipeline internally.
-  - `synheart_runtime_new(config_json)` replaces `flux_processor_create()`
-  - `synheart_runtime_push_rr()`, `push_hr()`, `push_accel()`, `push_behavior()` for signal ingestion
-  - `synheart_runtime_tick(now_ms)` returns HSI JSON when a window completes
-  - `synheart_runtime_free_string()` for memory management
+- **RuntimeBridge** (renamed from `FluxFFIProvider`) — now wraps synheart-engine C ABI via dlsym instead of calling synheart-flux directly. synheart-engine composes the full session → state → flux pipeline internally.
+  - `synheart_engine_new(config_json)` replaces `flux_processor_create()`
+  - `synheart_engine_push_rr()`, `push_hr()`, `push_accel()`, `push_behavior()` for signal ingestion
+  - `synheart_engine_tick(now_ms)` returns HSI JSON when a window completes
+  - `synheart_engine_free_string()` for memory management
   - Backward-compatible: `createIfAvailable()` still returns nil when native library is absent
 - **RuntimeModule** (renamed from `HSVRuntimeModule`) — orchestrates signal collection and pipeline execution via RuntimeBridge.
 - Updated stale comments across 11 source files to reference current module names.

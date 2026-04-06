@@ -1,6 +1,6 @@
 import Foundation
 
-/// Storage sub-configuration (RFC-CORE-0004).
+/// Storage sub-configuration.
 public struct StorageConfig {
     public let enabled: Bool
     public let retentionDays: Int?
@@ -11,7 +11,7 @@ public struct StorageConfig {
     }
 }
 
-/// Sync sub-configuration (RFC-CORE-0005, Phase 3).
+/// Sync sub-configuration.
 public struct SyncConfig {
     public let enabled: Bool
 
@@ -20,7 +20,7 @@ public struct SyncConfig {
     }
 }
 
-/// Privacy sub-configuration (RFC-CORE-0003).
+/// Privacy sub-configuration.
 public struct PrivacyConfig {
     public let allowResearch: Bool
 
@@ -31,7 +31,6 @@ public struct PrivacyConfig {
 
 /// Main configuration for Synheart SDK
 public struct SynheartConfig {
-    // RFC-CORE-0007 fields
     public let appId: String
     public let subjectId: String
     public let mode: SynheartMode

@@ -187,7 +187,6 @@ public struct PhoneContextConsent: Codable {
         case deviceMotion = "device_motion"
         case deviceContext = "device_context"
         case systemState = "system_state"
-        // Legacy keys for backward-compat decoding
         case legacyMotion = "motion"
         case legacyScreenState = "screenState"
     }
@@ -202,17 +201,14 @@ public struct PhoneContextConsent: Codable {
         self.systemState = systemState
     }
 
-    /// Backward-compatible alias for `deviceMotion`
     @available(*, deprecated, renamed: "deviceMotion")
     public var motion: Bool { deviceMotion }
 
-    /// Backward-compatible alias for `systemState`
     @available(*, deprecated, renamed: "systemState")
     public var screenState: Bool { systemState }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // Try new key first, fall back to legacy key
         if let val = try? container.decode(Bool.self, forKey: .deviceMotion) {
             deviceMotion = val
         } else {
@@ -249,7 +245,6 @@ public struct BehaviorConsent: Codable {
         case digitalActivity = "digital_activity"
         case notificationPatterns = "notification_patterns"
         case appContext = "app_context"
-        // Legacy key for backward-compat decoding
         case legacyEnabled = "enabled"
     }
 
@@ -274,7 +269,6 @@ public struct BehaviorConsent: Codable {
             notificationPatterns = (try? container.decode(Bool.self, forKey: .notificationPatterns)) ?? false
             appContext = (try? container.decode(Bool.self, forKey: .appContext)) ?? false
         } else if let legacyEnabled = try? container.decode(Bool.self, forKey: .legacyEnabled) {
-            // Legacy: map old `enabled` to `digitalActivity`
             digitalActivity = legacyEnabled
             notificationPatterns = false
             appContext = false

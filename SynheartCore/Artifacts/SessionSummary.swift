@@ -87,8 +87,6 @@ public struct InsightMetrics: Codable {
 }
 
 /// A compact session summary for UI display and fast queries.
-///
-/// See RFC-CORE-0006 Section 6.3.
 public struct SessionSummaryArtifact: Codable {
     public let header: ArtifactHeader
     public let session: SessionInfo
@@ -108,32 +106,6 @@ public struct SessionSummaryArtifact: Codable {
         self.coverage = coverage
         self.aggregates = aggregates
         self.insightMetrics = insightMetrics
-    }
-
-    public static func create(
-        subjectId: String,
-        sessionId: String,
-        startMs: Int64,
-        endMs: Int64,
-        mode: String,
-        totalWindows: Int,
-        aggregates: SessionAggregates,
-        insightMetrics: InsightMetrics = InsightMetrics()
-    ) -> SessionSummaryArtifact {
-        let header = ArtifactHeader(
-            type: "session_summary",
-            subjectId: subjectId,
-            sessionId: sessionId,
-            timeRange: TimeRange(startMs: startMs, endMs: endMs),
-            schema: SchemaRef(name: "session_summary", version: "1")
-        )
-        return SessionSummaryArtifact(
-            header: header,
-            session: SessionInfo(sessionId: sessionId, startMs: startMs, endMs: endMs, mode: mode),
-            coverage: CoverageInfo(totalWindows: totalWindows),
-            aggregates: aggregates,
-            insightMetrics: insightMetrics
-        )
     }
 
     enum CodingKeys: String, CodingKey {

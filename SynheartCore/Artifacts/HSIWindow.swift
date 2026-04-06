@@ -43,8 +43,6 @@ public struct WindowData: Codable {
 }
 
 /// 30-second HSI computation window.
-///
-/// See RFC-CORE-0006 Section 6.2.
 public struct HSIWindowArtifact: Codable {
     public let header: ArtifactHeader
     public let window: WindowData

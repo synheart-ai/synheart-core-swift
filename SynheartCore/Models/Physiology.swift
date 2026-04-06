@@ -3,7 +3,7 @@ import Foundation
 /// A single HSV axis reading: optional score with associated confidence.
 ///
 /// Mirrors Rust `HsvAxisValue { score: Option<f32>, confidence: f32 }` from
-/// synheart-runtime. Score is nil when the signal is unavailable;
+/// synheart-engine. Score is nil when the signal is unavailable;
 /// confidence reflects measurement quality independent of the score value.
 public struct HsvAxisValue: Codable {
     /// Normalized score in [0.0, 1.0], or nil if signal unavailable.
@@ -27,7 +27,7 @@ public struct HsvAxisValue: Codable {
 /// Physiology domain of the Human State Vector.
 ///
 /// Contains all wearable-derived physiological readings, each paired with
-/// a confidence score. Mirrors Rust `PhysiologyState` from synheart-runtime.
+/// a confidence score. Mirrors Rust `PhysiologyState` from synheart-engine.
 ///
 /// Populated by wearable adapters (WHOOP, Garmin, etc.) via the biosignal
 /// pipeline. Emotion and Focus heads in external SDKs (synheart-emotion,

@@ -72,8 +72,6 @@ public struct BaselineData: Codable {
 }
 
 /// A compact representation of the user's baseline state.
-///
-/// See RFC-CORE-0006 Section 6.1.
 public struct BaselineSnapshotArtifact: Codable {
     public let header: ArtifactHeader
     public let baseline: BaselineData
@@ -120,14 +118,4 @@ public struct BaselineSnapshotArtifact: Codable {
         }
     }
 
-    public static func create(subjectId: String, baseline: BaselineData, wearableReference: [String: Any]? = nil) -> BaselineSnapshotArtifact {
-        let header = ArtifactHeader(
-            type: "baseline_snapshot",
-            subjectId: subjectId,
-            sessionId: nil,
-            timeRange: TimeRange(startMs: baseline.coverage.startMs, endMs: baseline.coverage.endMs),
-            schema: SchemaRef(name: "baseline_snapshot", version: "1")
-        )
-        return BaselineSnapshotArtifact(header: header, baseline: baseline, wearableReference: wearableReference)
-    }
 }

@@ -136,30 +136,21 @@ open class BaseSynheartModule: SynheartModule {
         }
     }
 
-    // MARK: - Protected methods for subclasses
+    // MARK: - Subclass Hooks
 
-    /// Called during initialization - override in subclass
-    open func onInitialize() async throws {
-        // Override in subclass
-    }
+    /// Called during initialization. Override in subclass.
+    open func onInitialize() async throws {}
 
-    /// Called when starting the module - override in subclass
-    open func onStart() async throws {
-        // Override in subclass
-    }
+    /// Called when starting the module. Override in subclass.
+    open func onStart() async throws {}
 
-    /// Called when stopping the module - override in subclass
-    open func onStop() async throws {
-        // Override in subclass
-    }
+    /// Called when stopping the module. Override in subclass.
+    open func onStop() async throws {}
 
-    /// Called during disposal - override in subclass
-    open func onDispose() async throws {
-        // Override in subclass
-    }
+    /// Called during disposal. Override in subclass.
+    open func onDispose() async throws {}
 }
 
-// Swift doesn't have a "protected" keyword, so we use this workaround
 extension BaseSynheartModule {
     func setStatus(_ newStatus: ModuleStatus) {
         _status = newStatus
