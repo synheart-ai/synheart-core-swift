@@ -17,13 +17,11 @@ Swift App
     |
 synheart-core-swift (this SDK)
     |-- Wear/Phone/Behavior modules (platform sensor collection)
-    |-- CoreRuntimeBridge (dlsym to C ABI)
-    |-- SynheartCoreShim (Swift-friendly wrapper)
+    |-- CoreRuntimeBridge (loads the runtime native binary)
     |
-libsynheart_core_runtime.{dylib,a}
-    |-- synheart-engine (HSI computation)
+synheart-core-runtime native binary
+    |-- HSI computation
     |-- Storage, Crypto, Sync, Auth, Consent, Capabilities
-    |-- 67 C ABI functions
 ```
 
 ## Repositories
@@ -42,10 +40,10 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 - **Wear Module** → Biosignals (HR, HRV, sleep, motion)
 - **Phone Module** → Motion + context signals
 - **Behavior Module** → Digital interaction patterns
-- **HSI Runtime** → Signal fusion + state computation (via synheart-engine)
+- **HSI Runtime** → Signal fusion + state computation (via the runtime native binary)
 - **Consent Module** → User permission management
 - **Capabilities Module** → Feature gating (core/extended/research)
-- **Sync Module** → Secure artifact sync (replaces Cloud Connector)
+- **Cloud Connector** → Secure HSI snapshot uploads
 
 **Key principle:**
 > One SDK, many modules, unified human-state model
@@ -70,22 +68,21 @@ The Core SDK strictly separates:
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state computation (via synheart-engine)
-7. **Sync Module** - Secure artifact sync (replaces Cloud Connector)
+6. **HSI Runtime** - Signal fusion and state computation (via the runtime native binary)
+7. **Cloud Connector** - Secure HSI snapshot uploads
 
 ### Data Flow
 
 ```
 Wear, Phone, Behavior Modules (raw samples)
     ↓
-RuntimeModule → RuntimeBridge → synheart-engine (via dlsym)
-    ↓                              ↓
-    ↓                   session → state → HSI JSON
-    ↓                              ↓
-    ←──── HumanStateVector ←───────┘
+CoreRuntimeBridge → runtime native binary
+    ↓                       ↓
+    ↓             session → state → HSI 1.3 JSON
+    ↓                       ↓
+    ←──── HSI JSON ←────────┘
     ↓
-Optional: Focus Module → Focus Estimates
-Optional: Emotion Module → Emotion Estimates
+Synheart.onHSIUpdate (raw JSON) / Synheart.onStateUpdate (typed)
 ```
 
 ## Installation
@@ -96,7 +93,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "1.0.0")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "1.2.0")
 ]
 ```
 
@@ -104,7 +101,7 @@ dependencies: [
 
 ### Basic Setup
 
-The Core SDK publishes the Human State Vector (`HSV`) as the core state representation, with optional interpretation streams for Focus and Emotion:
+The Core SDK publishes **HSI 1.3 JSON** as its public output. Apps subscribe via `Synheart.onHSIUpdate` (raw JSON) or `Synheart.onStateUpdate` (typed `HSIState`). There are no separate Focus / Emotion streams.
 
 ```swift
 import SynheartCore
@@ -146,16 +143,13 @@ try await Synheart.dispose()
 
 ### Module-Based Architecture
 
-The SDK also provides a modular architecture for windowed feature collection:
+The SDK exposes individual modules for hosts that need finer-grained lifecycle control. Most apps use the `Synheart.initialize` entry point above and don't need to wire modules by hand.
 
 ```swift
 import SynheartCore
 
-// Initialize modules
 let capabilities = CapabilityModule()
-// In production, use loadFromToken(token, secret: secret)
-// For development only:
-capabilities.loadDefaults()
+capabilities.loadDefaults() // Development only — use loadFromToken in production
 
 let consent = ConsentModule()
 
@@ -163,40 +157,16 @@ let wearModule = WearModule(capabilities: capabilities, consent: consent)
 let phoneModule = PhoneModule(capabilities: capabilities, consent: consent)
 let behaviorModule = BehaviorModule(capabilities: capabilities, consent: consent)
 
-// Initialize modules (this loads consent from storage)
 try await capabilities.initialize()
-try await consent.initialize() // Loads consent from storage
-try await consent.grantAll() // Or update specific consents as needed
+try await consent.initialize()
+try await consent.grantAll()
 try await wearModule.initialize()
 try await phoneModule.initialize()
 try await behaviorModule.initialize()
 
-// Create RuntimeBridge (wraps synheart-engine)
-let bridge = RuntimeBridge.createIfAvailable()
-
-// Create Runtime Module
-let runtime = RuntimeModule(
-    bridge: bridge,
-    wearSamplePublisher: wearModule.rawSamplePublisher,
-    behaviorEventPublisher: behaviorModule.eventPublisher
-)
-
-// Initialize and start runtime
-try await runtime.initialize()
-try await runtime.start()
-
-// Start data collection modules
 try await wearModule.start()
 try await phoneModule.start()
 try await behaviorModule.start()
-
-// Subscribe to final HSV
-var cancellables = Set<AnyCancellable>()
-runtime.hsiStream
-    .sink { hsiJson in
-        // Handle HSI JSON frames from synheart-engine
-    }
-    .store(in: &cancellables)
 ```
 
 ### Accessing Current State
@@ -248,49 +218,29 @@ do {
 
 ## Batch Ingest Mode
 
-By default, the runtime module streams data in real-time. **Batch ingest mode** buffers all events during a session and runs a single `ingestBatch` call on stop.
+By default the runtime streams data in real time. **Batch ingest mode** buffers all events during a session and runs a single ingest call when the session stops:
 
 ```swift
-let runtimeModule = RuntimeModule(
-    bridge: bridge,
-    batchIngestOnStop: true  // Enable batch mode
+let config = SynheartConfig(
+    appId: "com.example.app",
+    subjectId: "anon_user_123",
+    batchIngestOnStop: true
 )
 ```
 
 ## Lab Ingestion
 
-Send structured session and metadata payloads to the Synheart platform API.
-
-### Auto-Ingest
+Lab session and metadata payloads are produced by the `Synheart.lab*` API and uploaded automatically when `research` consent is granted and `cloudConfig` is wired up.
 
 ```swift
-let config = SynheartConfig(
-    appId: "your_app_id",
-    subjectId: "sub_user_123",
-    labIngestConfig: LabIngestConfig(
-        apiKey: "your_platform_api_key",
-        autoIngest: true
-    )
-)
-```
+let now = { Int64(Date().timeIntervalSince1970 * 1000) }
 
-### Manual Ingestion
+let sessionId = try Synheart.labStart(protocolJson: protocolJson, startedAtMs: now())
+let windowId = try Synheart.labOpenWindow(windowType: "baseline", startedAtMs: now())
+// ... collect data ...
+try Synheart.labCloseWindow(windowId: windowId, endedAtMs: now())
 
-```swift
-// Ingest current session data
-try await synheart.ingestSession()
-
-// Ingest app/user metadata
-try await synheart.ingestMetadata()
-```
-
-### Standalone Payload Builder
-
-```swift
-let payload = LabPayloadBuilder.buildSession(
-    sessionId: "sess_123",
-    // ... other params
-)
+let payload = try Synheart.labFinalize(endedAtMs: now())  // returns JSON; auto-enqueued for upload
 ```
 
 ## Architecture Details
@@ -299,11 +249,9 @@ let payload = LabPayloadBuilder.buildSession(
 
 A module-based system for data collection and processing:
 
-- **RuntimeModule**: Orchestrates window-based processing (30s, 5m, 1h, 24h windows)
 - **WearModule**: Collects biosignal features from wearables
 - **PhoneModule**: Collects phone context features (motion, app switches, screen time)
 - **BehaviorModule**: Extracts behavioral patterns (typing, scrolling, interactions)
-- **ModuleManager**: Manages module lifecycle and dependencies
 - **CapabilityModule**: Handles feature flags and capability levels
 - **ConsentModule**: Manages user consent for data collection
 
@@ -311,16 +259,7 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentat
 
 ## Data Models
 
-### HumanStateVector (HSV)
-
-The main data structure (`SynheartCore/Models/Hsv.swift`) containing:
-
-- **Biometric signals**: Heart rate, HRV, RMSSD, SDNN
-- **Behavior**: Typing rate, scrolling rate, app switch rate (via `BehaviorState`)
-- **Context**: Conversation timing, device state, user patterns (via `ContextState`)
-- **Emotion**: Stress, calm, engagement, activation, valence (via `EmotionState`)
-- **Focus**: Score, cognitive load, clarity, distraction (via `FocusState`)
-- **Metadata**: Device info, session ID, timestamp, embeddings (via `MetaState`)
+The runtime emits **HSI 1.3 JSON** as its public output. Apps subscribe via `Synheart.onHSIUpdate` (raw JSON) or `Synheart.onStateUpdate` (typed `HSIState`). Internal types (`Hsv` and friends) are not part of the public SDK API.
 
 ### Window Features (`SynheartCore/Modules/Interfaces/FeatureProviders.swift`)
 
@@ -364,27 +303,17 @@ For the modular architecture, features are collected in time windows:
 
 ```
 SynheartCore/
-├── Core/                    # Core architecture components
-│   ├── StateEngine.swift   # Main orchestration engine
-│   ├── IngestionService.swift
-│   ├── SignalProcessor.swift
-│   ├── FusionEngine.swift
-│   └── [Adapters]          # HealthKit, CoreMotion, Behavior, Context
-├── Models/                  # Data models
-│   ├── Hsv.swift           # HumanStateVector
-│   ├── Emotion.swift
-│   ├── Focus.swift
-│   ├── Behavior.swift
-│   ├── Context.swift
-│   └── MetaState.swift
-├── Modules/                 # Modular architecture
+├── Config/                  # SynheartConfig, CloudConfig, etc.
+├── CoreRuntime/             # Bridge to the runtime native binary
+├── Models/                  # Internal data models (HSI 1.3 typed projection)
+├── Modules/
 │   ├── Base/               # Module base classes and manager
-│   ├── Runtime/            # Runtime orchestration
 │   ├── Wear/               # Wearable data collection
 │   ├── Phone/              # Phone context collection
 │   ├── Behavior/            # Behavior event collection
 │   ├── Capabilities/       # Feature flags and capabilities
 │   ├── Consent/            # Consent management
+│   ├── Cloud/              # Cloud connector
 │   ├── SRM/                # Self-Reference Model (baseline persistence)
 │   └── Interfaces/         # Module contracts and data types
 └── Synheart.swift          # Public SDK facade / main entry point

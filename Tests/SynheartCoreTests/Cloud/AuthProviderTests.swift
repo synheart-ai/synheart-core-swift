@@ -29,51 +29,18 @@ class MockAuthProvider: AuthProvider {
 
 final class AuthProviderTests: XCTestCase {
 
-    func testCloudConfigRequiresHmacOrAuthProvider() {
-        // Valid: hmacSecret only
-        let config1 = CloudConfig(
-            tenantId: "test",
-            hmacSecret: "secret",
-            subjectId: "user"
-        )
-        XCTAssertNotNil(config1)
-
-        // Valid: authProvider only
-        let config2 = CloudConfig(
-            tenantId: "test",
-            authProvider: MockAuthProvider(),
-            subjectId: "user"
-        )
-        XCTAssertNotNil(config2)
-
-        // Valid: both
-        let config3 = CloudConfig(
-            tenantId: "test",
-            hmacSecret: "secret",
-            authProvider: MockAuthProvider(),
-            subjectId: "user"
-        )
-        XCTAssertNotNil(config3)
+    func testCloudConfigDefaultsAuthProviderToNil() {
+        let config = CloudConfig(subjectId: "user")
+        XCTAssertNil(config.authProvider)
     }
 
     func testCloudConfigStoresAuthProvider() {
         let provider = MockAuthProvider()
         let config = CloudConfig(
-            tenantId: "test",
             authProvider: provider,
             subjectId: "user"
         )
         XCTAssertNotNil(config.authProvider)
-        XCTAssertNil(config.hmacSecret)
-    }
-
-    func testCloudConfigHmacSecretIsNullable() {
-        let config = CloudConfig(
-            tenantId: "test",
-            authProvider: MockAuthProvider(),
-            subjectId: "user"
-        )
-        XCTAssertNil(config.hmacSecret)
     }
 
     func testMockAuthProviderSignRequest() throws {

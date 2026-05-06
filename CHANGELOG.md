@@ -7,9 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed (BREAKING) — 2026-05-05
+- **`CloudConfig.tenantId`** — dead field. The cloud resolves `(org_id, tenant_id, project_id)` from `app_id` server-side; the SDK never sent it on the wire. Drop the `tenantId:` argument from your `CloudConfig(...)` calls.
+- **`CloudConfig.hmacSecret`** — dead field. Request signing is performed by the runtime's hardware-backed ECDSA key, not by HMAC.
+- The `precondition(hmacSecret != nil || authProvider != nil, ...)` block is gone; `authProvider` is now optional, pass it only to override the runtime's default signer.
+- **`CloudConnectorError.invalidTenant`** case — never raised on the SDK→ingest path.
+
+### Changed — 2026-05-05
+- `CloudConnectorError.invalidSignature` description string `"HMAC signature validation failed"` → `"request signature validation failed"`. The signing path is ECDSA, not HMAC.
+
+### Changed (docs) — 2026-05-05
+- README: removed fictional `RuntimeBridge.createIfAvailable()`, `RuntimeModule(bridge:, ...)`, `runtime.hsiStream`, `synheart.ingestSession()` / `ingestMetadata()`, `LabPayloadBuilder.buildSession(...)`, `EmotionState` / `FocusState` data-model references, "Sync Module" entry.
+- README: SwiftPM example version `from: "1.0.0"` → `from: "1.2.0"`.
+- README: Project Structure tree corrected — removed `Models/Emotion.swift`, `Models/Focus.swift`, `Core/StateEngine.swift` and other files that don't exist; reflects the actual `Config/`, `CoreRuntime/`, `Modules/Cloud/` layout.
+- README: low-level / internal-language wording ("dlsym", "C ABI", "67 C ABI functions", `libsynheart_core_runtime.{dylib,a}`) removed from user-facing copy.
+
 ### Changed
 - Core business logic (storage, crypto, sync, consent, artifact pipeline, cloud connector, SRM)
-  migrated to synheart-core-runtime (Rust). SDK is now a thin FFI shell.
+  migrated to synheart-core-runtime (native binary). SDK is now a thin native-bridge shell.
 - RuntimeBridge/RuntimeModule replaced by CoreRuntimeBridge (FFI to libsynheart_core_runtime)
 - HSI state updates delivered via native callback mechanism instead of platform-specific streams
 - Lab protocol API now routes through CoreRuntimeBridge
