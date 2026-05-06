@@ -4,9 +4,9 @@
 [![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-iOS/macOS/watchOS platform SDK for Synheart. This is a thin wrapper around **[synheart-core-runtime](https://github.com/synheart-ai/synheart-core-runtime)** — the shared implementation that owns all business logic (storage, crypto, sync, consent, capabilities, artifact pipeline, session orchestration, and cloud integration).
+iOS/macOS/watchOS platform SDK for Synheart. This is a thin wrapper around the Synheart runtime — a native binary that owns the on-device business logic and is loaded by this SDK at startup.
 
-Human state inference is computed on-device by `synheart-engine` (deterministic signal processing pipeline), which runs inside `synheart-core-runtime`. This SDK communicates with the runtime via `dlsym` / static linking (`libsynheart_core_runtime`).
+Human state inference is computed on-device by a deterministic signal-processing pipeline that runs inside the runtime. This SDK communicates with the runtime via `dlsym` / static linking (`libsynheart_core_runtime`).
 
 This SDK handles platform-specific concerns only: sensor collection (HealthKit, WatchConnectivity), Secure Enclave key management, Keychain storage, Combine reactive streams, and SwiftUI integration.
 
@@ -19,7 +19,7 @@ synheart-core-swift (this SDK)
     |-- Wear/Phone/Behavior modules (platform sensor collection)
     |-- CoreRuntimeBridge (loads the runtime native binary)
     |
-synheart-core-runtime native binary
+Synheart runtime native binary
     |-- HSI computation
     |-- Storage, Crypto, Sync, Auth, Consent, Capabilities
 ```
@@ -28,7 +28,6 @@ synheart-core-runtime native binary
 
 | Repository | Purpose |
 |------------|---------|
-| **[synheart-core-runtime](https://github.com/synheart-ai/synheart-core-runtime)** | Shared implementation (all business logic) |
 | **[synheart-core-flutter](https://github.com/synheart-ai/synheart-core-flutter)** | Flutter/Dart platform SDK |
 | **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin platform SDK |
 | **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift platform SDK (this repository) |
@@ -475,8 +474,14 @@ baseUrl: "http://192.168.1.100:8083"  // your machine's LAN IP
 
 ### Default credentials
 
-- **API Key:** `mock-dev-api-key-2026`
-- **HMAC Secret:** `mock-dev-hmac-secret-2026`
+Production cloud ingest is signed with **ECDSA P-256** via
+`X-Synheart-Proof` (compact JWS) plus a `X-Consent-Token` JWT — see
+[`synheart-auth`](https://github.com/synheart-ai/synheart-auth) and
+RFC-AUTH-MOBILE-0001. The `synheart local` server below ships
+development-only mock keys for offline iteration.
+
+- **API Key:** `mock-dev-api-key-2026` (mock platform only)
+- **Mock dev secret:** `mock-dev-hmac-secret-2026` (local testing only — production is ECDSA, not a shared secret)
 
 Ingested payloads are persisted as JSON files in the local server's data directory.
 
