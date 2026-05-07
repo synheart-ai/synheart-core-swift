@@ -120,7 +120,7 @@ class SessionModule {
 
     /// Forward pre-computed HRV metrics from the native runtime into the session engine.
     ///
-    /// HRV metrics (SDNN, RMSSD, pNN50) come from session-runtime which applies
+    /// HRV metrics (SDNN, RMSSD, pNN50) come from the Synheart Runtime, which applies
     /// artifact filtering — the session SDK only computes mean HR locally.
     func ingestHsiMetrics(_ hsiMetrics: [String: Any]) {
         engine.ingestHsiMetrics(hsiMetrics)

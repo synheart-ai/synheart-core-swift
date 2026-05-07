@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Multi-source priority resolver — Swift bindings (Loot #3).
+// Multi-source priority resolver — Swift bindings.
 //
 // Mirrors `synheart-core-flutter/lib/src/priority/synheart_priority.dart`
 // in API shape. When `synheart-core-runtime 5.4.0+` is loaded, all

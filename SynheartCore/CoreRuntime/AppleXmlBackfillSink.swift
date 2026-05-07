@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Apple Health XML backfill sink — Swift bindings (Loot #5).
+// Apple Health XML backfill sink — Swift bindings.
 //
 // Mirror of `synheart-core-flutter/lib/src/backfill/apple_xml_backfill_sink.dart`.
 // Bridges the `AppleXmlIngestSink` protocol from `synheart-wear-swift`'s

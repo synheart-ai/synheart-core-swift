@@ -40,7 +40,7 @@
 // follow-on sit. This file exists so:
 //
 //   1. The Swift package builds (and tests run).
-//   2. The new Loot #3 / #4 / #5 wrappers in CoreRuntime/ aren't
+//   2. The new new CoreRuntime/ wrappers aren't
 //      blocked by unrelated breakage.
 //   3. Anyone reading a stub knows it's a placeholder, not a real
 //      implementation, because of the @available(*, deprecated)

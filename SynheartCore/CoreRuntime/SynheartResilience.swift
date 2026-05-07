@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// HRV-CV resilience score — Swift bindings (Loot #4).
+// HRV-CV resilience score — Swift bindings.
 //
 // Stateless wrapper around `synheart_core_resilience_compute_v1`.
 // Mirror of `synheart-core-flutter/lib/src/resilience/synheart_resilience.dart`.
