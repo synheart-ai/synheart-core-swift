@@ -86,6 +86,39 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
         SynheartLogger.log("[ConsentModule] Consent explicitly denied by user")
     }
 
+    // MARK: - Compat shims (post native-runtime migration)
+
+    /// Returns the current auth token, if any. The pre-migration
+    /// SDK held an in-process token here; the runtime owns it now.
+    /// Returns `nil` until the SDK shell is wired to the runtime
+    /// auth FFI (separate sit). Marked deprecated to flag the gap.
+    @available(*, deprecated, message: "Stub — wire to runtime auth FFI.")
+    public func getCurrentToken() -> AuthTokenStub? {
+        return nil
+    }
+
+    /// Revoke all consent. The pre-migration SDK called the auth
+    /// service directly; the runtime now owns this. Wires to
+    /// `revokeAll()` so the in-process snapshot stays consistent
+    /// with the user's intent until the runtime revoke FFI lands.
+    public func revokeConsent() throws {
+        Task { try? await self.revokeAll() }
+    }
+
+    /// Install a request-signing closure used by the auth-aware
+    /// HTTP layer. The pre-migration SDK plumbed this through
+    /// `synheart-auth-swift`; restore that wiring in a follow-on sit.
+    @available(*, deprecated, message: "Stub — wire to synheart-auth-swift signer.")
+    public func setDeviceSigner(
+        _ signer: @escaping (String, String, Data?) throws -> [String: String]
+    ) {
+        // Hold the closure so future code can invoke it; for now
+        // it's intentionally not called by anything in the SDK.
+        _deviceSigner = signer
+    }
+
+    private var _deviceSigner: ((String, String, Data?) throws -> [String: String])?
+
     // MARK: - Platform-specific: Keychain device ID
 
     func getOrGenerateDeviceId() async throws -> String {

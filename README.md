@@ -1,6 +1,6 @@
 # Synheart Core SDK - SWIFT
 
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-0.0.4-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
@@ -92,7 +92,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "1.2.0")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.0.4")
 ]
 ```
 
