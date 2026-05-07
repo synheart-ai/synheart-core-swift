@@ -19,8 +19,6 @@ public struct TombstoneData: Codable {
 }
 
 /// Propagates deletion across devices/apps.
-///
-/// See RFC-CORE-0006 Section 6.4.
 public struct TombstoneArtifact: Codable {
     public let header: ArtifactHeader
     public let tombstone: TombstoneData
@@ -30,26 +28,4 @@ public struct TombstoneArtifact: Codable {
         self.tombstone = tombstone
     }
 
-    public static func create(
-        subjectId: String,
-        targetArtifactId: String,
-        reason: String
-    ) -> TombstoneArtifact {
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let header = ArtifactHeader(
-            type: "tombstone",
-            subjectId: subjectId,
-            sessionId: nil,
-            timeRange: TimeRange(startMs: now, endMs: now),
-            schema: SchemaRef(name: "tombstone", version: "1")
-        )
-        return TombstoneArtifact(
-            header: header,
-            tombstone: TombstoneData(
-                targetArtifactId: targetArtifactId,
-                reason: reason,
-                deletedAtMs: now
-            )
-        )
-    }
 }

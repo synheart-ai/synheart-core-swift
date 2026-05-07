@@ -2,8 +2,6 @@ import Foundation
 import CryptoKit
 
 /// A canonical wearable event from a health data provider.
-///
-/// See RFC Section 8.1 for the full schema specification.
 public struct CanonicalWearableEvent {
     public let eventId: String
     public let subjectId: String

@@ -27,7 +27,7 @@ public struct HSIAxes: Codable {
     }
 }
 
-/// Typed HSI state emitted by `Synheart.onStateUpdate` (RFC-CORE-0007 §3).
+/// Typed HSI state emitted by `Synheart.onStateUpdate`.
 public struct HSIState {
     public let subjectId: String
     public let timestampMs: Int64

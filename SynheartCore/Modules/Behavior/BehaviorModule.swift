@@ -4,7 +4,6 @@ import Combine
 /// Behavior Module
 ///
 /// Captures user-device interaction patterns.
-/// RFC-CORE-0007 compliant: no feature computation in Core.
 public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
     private let eventStream = BehaviorEventStream()
     private let aggregator = WindowAggregator()

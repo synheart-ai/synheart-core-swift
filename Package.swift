@@ -2,7 +2,7 @@
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 //
 // Package: SynheartCore
-// Version: 1.2.0
+// Version: 0.0.4
 // License: Apache-2.0
 // Description: Synheart Core SDK for iOS — Unified HSI-compatible data collection,
 //              on-device state computation, and module orchestration.
@@ -25,7 +25,7 @@ let package = Package(
     dependencies: [
         .package(path: "../synheart-wear-swift"),
         // synheart-emotion-swift and synheart-focus-swift removed —
-        // emotion and focus are now computed by synheart-runtime
+        // emotion and focus are now computed by the native runtime
         // and accessed via RuntimeBridge.
         .package(path: "../synheart-behavior-swift"),
         .package(path: "../synheart-session-swift"),

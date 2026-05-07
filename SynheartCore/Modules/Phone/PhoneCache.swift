@@ -2,8 +2,6 @@ import Foundation
 
 /// Cache for phone raw data points
 ///
-/// RFC-CORE-0007 compliant: buffers raw data only.
-/// Feature computation is delegated to synheart-runtime.
 class PhoneCache {
     private var windowData: [WindowType: [PhoneDataPoint]] = [:]
 

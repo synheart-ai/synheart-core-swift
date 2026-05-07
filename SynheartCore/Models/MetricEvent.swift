@@ -1,6 +1,6 @@
 import Foundation
 
-/// An app-level metric event recorded during a session (RFC-CORE-0007 §4).
+/// An app-level metric event recorded during a session.
 public struct MetricEvent {
     public let name: String
     public let timestampMs: Int64

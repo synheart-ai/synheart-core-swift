@@ -26,8 +26,6 @@ public struct SchemaRef: Codable {
 }
 
 /// Common header for all Synheart artifacts.
-///
-/// See RFC-CORE-0006 Section 4.
 public struct ArtifactHeader: Codable {
     public let artifactVersion: String
     public let type: String
@@ -42,6 +40,7 @@ public struct ArtifactHeader: Codable {
     public init(
         artifactVersion: String = "1",
         type: String,
+        artifactId: String = "",
         subjectId: String,
         sessionId: String? = nil,
         timeRange: TimeRange,
@@ -51,21 +50,13 @@ public struct ArtifactHeader: Codable {
     ) {
         self.artifactVersion = artifactVersion
         self.type = type
+        self.artifactId = artifactId
         self.subjectId = subjectId
         self.sessionId = sessionId
         self.timeRange = timeRange
         self.seq = seq
         self.schema = schema
         self.createdAtMs = createdAtMs ?? Int64(Date().timeIntervalSince1970 * 1000)
-        self.artifactId = computeArtifactId(
-            type: type,
-            subjectId: subjectId,
-            sessionId: sessionId,
-            startMs: timeRange.startMs,
-            endMs: timeRange.endMs,
-            schemaName: schema.name,
-            schemaVersion: schema.version
-        )
     }
 
     enum CodingKeys: String, CodingKey {

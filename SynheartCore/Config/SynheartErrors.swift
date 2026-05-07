@@ -1,8 +1,6 @@
 import Foundation
 
 /// Deterministic error codes for Synheart Core.
-///
-/// See RFC-CORE-0007 Section 14.
 public enum SynheartCoreError: Error, CustomStringConvertible {
     case notConfigured(String? = nil)
     case invalidMode(String? = nil)

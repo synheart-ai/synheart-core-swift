@@ -4,7 +4,6 @@ import Combine
 /// Phone Module
 ///
 /// Captures device-level motion and context signals.
-/// RFC-CORE-0007 compliant: no feature computation in Core.
 public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
     private let motionCollector = MotionCollector()
     private let screenTracker = ScreenStateTracker()

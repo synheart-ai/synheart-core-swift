@@ -1,6 +1,6 @@
 import Foundation
 
-/// Storage sub-configuration (RFC-CORE-0004).
+/// Storage sub-configuration.
 public struct StorageConfig {
     public let enabled: Bool
     public let retentionDays: Int?
@@ -11,7 +11,7 @@ public struct StorageConfig {
     }
 }
 
-/// Sync sub-configuration (RFC-CORE-0005, Phase 3).
+/// Sync sub-configuration.
 public struct SyncConfig {
     public let enabled: Bool
 
@@ -20,7 +20,7 @@ public struct SyncConfig {
     }
 }
 
-/// Privacy sub-configuration (RFC-CORE-0003).
+/// Privacy sub-configuration.
 public struct PrivacyConfig {
     public let allowResearch: Bool
 
@@ -31,7 +31,6 @@ public struct PrivacyConfig {
 
 /// Main configuration for Synheart SDK
 public struct SynheartConfig {
-    // RFC-CORE-0007 fields
     public let appId: String
     public let subjectId: String
     public let mode: SynheartMode
@@ -129,8 +128,6 @@ public struct SynheartConfig {
 /// Example:
 /// ```swift
 /// let cloudConfig = CloudConfig(
-///     tenantId: "your_tenant_id",
-///     hmacSecret: "your_hmac_secret",
 ///     subjectId: "pseudonymous_user_123",
 ///     instanceId: UUID().uuidString
 /// )
@@ -139,14 +136,9 @@ public struct CloudConfig {
     /// Base URL for Synheart Platform (default: production)
     public let baseUrl: String
 
-    /// Tenant ID (from app registration)
-    public let tenantId: String
-
-    /// HMAC secret for signing requests (nil when authProvider is used)
-    public let hmacSecret: String?
-
-    /// Custom auth provider for request signing (e.g., ECDSA device-identity).
-    /// When set, takes precedence over the HMAC path.
+    /// Auth provider for request signing. The runtime signs every ingest
+    /// request with the device's hardware-backed ECDSA P-256 key; this is
+    /// an override hook for hosts that need to stub it (e.g. in tests).
     public let authProvider: AuthProvider?
 
     /// Subject ID (pseudonymous user identifier)
@@ -174,8 +166,6 @@ public struct CloudConfig {
     public let enableBacklog: Bool
 
     public init(
-        tenantId: String,
-        hmacSecret: String? = nil,
         authProvider: AuthProvider? = nil,
         subjectId: String,
         instanceId: String = UUID().uuidString,
@@ -187,12 +177,6 @@ public struct CloudConfig {
         maxRetries: Int = 3,
         enableBacklog: Bool = true
     ) {
-        precondition(
-            hmacSecret != nil || authProvider != nil,
-            "CloudConfig requires either hmacSecret or authProvider"
-        )
-        self.tenantId = tenantId
-        self.hmacSecret = hmacSecret
         self.authProvider = authProvider
         self.subjectId = subjectId
         self.instanceId = instanceId

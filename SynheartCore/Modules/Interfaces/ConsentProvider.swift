@@ -11,31 +11,18 @@ public enum ConsentTier: String, Codable {
     case research
 }
 
-/// Types of consent
-public enum ConsentType {
-    /// Consent for biosignal collection
-    case biosignals
-
-    /// Consent for behavioral data collection
-    case behavior
-
-    /// Consent for phone context data collection
-    case phoneContext
-
-    /// Consent for cloud uploads
-    case cloudUpload
-
-    /// Consent for Syni personalization
-    case syni
-
-    /// Consent for focus estimation
-    case focusEstimation
-
-    /// Consent for emotion estimation
-    case emotionEstimation
-
-    /// Consent for vendor-side sync (wearable cloud → Synheart cloud)
-    case vendorSync
+/// Types of consent. The raw values are the canonical wire names
+/// passed to the runtime FFI (see `synheart_core_grant_consent` /
+/// `_revoke_consent`); changing them requires a migration.
+public enum ConsentType: String {
+    case biosignals = "biosignals"
+    case behavior = "behavior"
+    case phoneContext = "phone_context"
+    case cloudUpload = "cloud_upload"
+    case syni = "syni"
+    case focusEstimation = "focus_estimation"
+    case emotionEstimation = "emotion_estimation"
+    case vendorSync = "vendor_sync"
 }
 
 /// Snapshot of user consent at a point in time

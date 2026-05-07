@@ -2,13 +2,10 @@ import Foundation
 
 /// Internal manager that tracks which features the developer has activated.
 ///
-/// Part of the four-authority activation model (RFC-0005 Section 6):
+/// Part of the four-authority activation model:
 /// ```
 /// FeatureOperational = Activation AND Consent AND Capability AND SessionActive
 /// ```
-///
-/// This class manages the **Activation** authority — the developer's explicit
-/// intent to use a feature.
 final class ActivationManager {
     private var activated: Set<SynheartFeature> = []
 

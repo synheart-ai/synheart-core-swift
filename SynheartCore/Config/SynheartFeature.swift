@@ -1,6 +1,6 @@
 import Foundation
 
-/// RFC-0005 Section 6: Synheart feature identifiers for the four-authority activation model.
+/// Synheart feature identifiers for the four-authority activation model.
 ///
 /// A feature is **operational** when all four conditions hold:
 /// ```

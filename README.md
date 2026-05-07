@@ -1,23 +1,36 @@
 # Synheart Core SDK - SWIFT
 
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-0.0.4-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-**Synheart Core SDK** is the single, unified integration point for developers who want to collect HSI-compatible data, process human state on-device, and integrate with Syni. Human state inference is computed by the on-device synheart-runtime engine.
+iOS/macOS/watchOS platform SDK for Synheart. This is a thin wrapper around the Synheart runtime — a native binary that owns the on-device business logic and is loaded by this SDK at startup.
 
-> **📦 SDK Implementations**: This is the iOS/Swift implementation. For documentation and other platforms, see the repositories below.
+Human state inference is computed on-device by a deterministic signal-processing pipeline that runs inside the runtime. This SDK communicates with the runtime via `dlsym` / static linking (`libsynheart_core_runtime`).
 
-## 📦 Repository Structure
+This SDK handles platform-specific concerns only: sensor collection (HealthKit, WatchConnectivity), Secure Enclave key management, Keychain storage, Combine reactive streams, and SwiftUI integration.
 
-The Synheart Core SDK is organized across multiple repositories:
+## Architecture
+
+```
+Swift App
+    |
+synheart-core-swift (this SDK)
+    |-- Wear/Phone/Behavior modules (platform sensor collection)
+    |-- CoreRuntimeBridge (loads the runtime native binary)
+    |
+Synheart runtime native binary
+    |-- HSI computation
+    |-- Storage, Crypto, Sync, Auth, Consent, Capabilities
+```
+
+## Repositories
 
 | Repository | Purpose |
 |------------|---------|
-| **[synheart-core](https://github.com/synheart-ai/synheart-core)** | Main repository (source of truth for documentation) |
-| **[synheart-core-dart](https://github.com/synheart-ai/synheart-core-dart)** | Flutter/Dart implementation |
-| **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin implementation |
-| **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift implementation (this repository) |
+| **[synheart-core-flutter](https://github.com/synheart-ai/synheart-core-flutter)** | Flutter/Dart platform SDK |
+| **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin platform SDK |
+| **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift platform SDK (this repository) |
 
 ## Overview
 
@@ -26,10 +39,10 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 - **Wear Module** → Biosignals (HR, HRV, sleep, motion)
 - **Phone Module** → Motion + context signals
 - **Behavior Module** → Digital interaction patterns
-- **HSI Runtime** → Signal fusion + state computation (via synheart-runtime Rust engine)
+- **HSI Runtime** → Signal fusion + state computation (via the runtime native binary)
 - **Consent Module** → User permission management
 - **Capabilities Module** → Feature gating (core/extended/research)
-- **Sync Module** → Secure artifact sync (replaces Cloud Connector)
+- **Cloud Connector** → Secure HSI snapshot uploads
 
 **Key principle:**
 > One SDK, many modules, unified human-state model
@@ -38,12 +51,12 @@ The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
 
 ### Core Principle
 
-> **All inference is computed by synheart-runtime (Rust).**
+> **All inference is computed by synheart-engine.**
 >
 > **SDKs coordinate data collection and distribution.**
 
 The Core SDK strictly separates:
-- **Computation** — synheart-runtime (Rust) computes HSV
+- **Computation** — synheart-engine computes HSV
 - **Collection** — Core SDK modules (Wear, Phone, Behavior, Consent, Capability)
 - **Distribution** — HSI JSON export, cloud upload, raw HSV diagnostics
 
@@ -54,22 +67,21 @@ The Core SDK strictly separates:
 3. **Wear Module** - Biosignal collection from wearables
 4. **Phone Module** - Device motion and context signals
 5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state computation (via synheart-runtime)
-7. **Sync Module** - Secure artifact sync (replaces Cloud Connector)
+6. **HSI Runtime** - Signal fusion and state computation (via the runtime native binary)
+7. **Cloud Connector** - Secure HSI snapshot uploads
 
 ### Data Flow
 
 ```
 Wear, Phone, Behavior Modules (raw samples)
     ↓
-RuntimeModule → RuntimeBridge → synheart-runtime (Rust via dlsym)
-    ↓                              ↓
-    ↓                   session → state → HSI JSON
-    ↓                              ↓
-    ←──── HumanStateVector ←───────┘
+CoreRuntimeBridge → runtime native binary
+    ↓                       ↓
+    ↓             session → state → HSI 1.3 JSON
+    ↓                       ↓
+    ←──── HSI JSON ←────────┘
     ↓
-Optional: Focus Module → Focus Estimates
-Optional: Emotion Module → Emotion Estimates
+Synheart.onHSIUpdate (raw JSON) / Synheart.onStateUpdate (typed)
 ```
 
 ## Installation
@@ -80,7 +92,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "1.0.0")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.0.4")
 ]
 ```
 
@@ -88,7 +100,7 @@ dependencies: [
 
 ### Basic Setup
 
-The Core SDK publishes the Human State Vector (`HSV`) as the core state representation, with optional interpretation streams for Focus and Emotion:
+The Core SDK publishes **HSI 1.3 JSON** as its public output. Apps subscribe via `Synheart.onHSIUpdate` (raw JSON) or `Synheart.onStateUpdate` (typed `HSIState`). There are no separate Focus / Emotion streams.
 
 ```swift
 import SynheartCore
@@ -130,16 +142,13 @@ try await Synheart.dispose()
 
 ### Module-Based Architecture
 
-The SDK also provides a modular architecture for windowed feature collection:
+The SDK exposes individual modules for hosts that need finer-grained lifecycle control. Most apps use the `Synheart.initialize` entry point above and don't need to wire modules by hand.
 
 ```swift
 import SynheartCore
 
-// Initialize modules
 let capabilities = CapabilityModule()
-// In production, use loadFromToken(token, secret: secret)
-// For development only:
-capabilities.loadDefaults()
+capabilities.loadDefaults() // Development only — use loadFromToken in production
 
 let consent = ConsentModule()
 
@@ -147,40 +156,16 @@ let wearModule = WearModule(capabilities: capabilities, consent: consent)
 let phoneModule = PhoneModule(capabilities: capabilities, consent: consent)
 let behaviorModule = BehaviorModule(capabilities: capabilities, consent: consent)
 
-// Initialize modules (this loads consent from storage)
 try await capabilities.initialize()
-try await consent.initialize() // Loads consent from storage
-try await consent.grantAll() // Or update specific consents as needed
+try await consent.initialize()
+try await consent.grantAll()
 try await wearModule.initialize()
 try await phoneModule.initialize()
 try await behaviorModule.initialize()
 
-// Create RuntimeBridge (wraps synheart-runtime Rust engine)
-let bridge = RuntimeBridge.createIfAvailable()
-
-// Create Runtime Module
-let runtime = RuntimeModule(
-    bridge: bridge,
-    wearSamplePublisher: wearModule.rawSamplePublisher,
-    behaviorEventPublisher: behaviorModule.eventPublisher
-)
-
-// Initialize and start runtime
-try await runtime.initialize()
-try await runtime.start()
-
-// Start data collection modules
 try await wearModule.start()
 try await phoneModule.start()
 try await behaviorModule.start()
-
-// Subscribe to final HSV
-var cancellables = Set<AnyCancellable>()
-runtime.hsiStream
-    .sink { hsiJson in
-        // Handle HSI JSON frames from synheart-runtime
-    }
-    .store(in: &cancellables)
 ```
 
 ### Accessing Current State
@@ -232,49 +217,29 @@ do {
 
 ## Batch Ingest Mode
 
-By default, the runtime module streams data in real-time. **Batch ingest mode** buffers all events during a session and runs a single `ingestBatch` call on stop.
+By default the runtime streams data in real time. **Batch ingest mode** buffers all events during a session and runs a single ingest call when the session stops:
 
 ```swift
-let runtimeModule = RuntimeModule(
-    bridge: bridge,
-    batchIngestOnStop: true  // Enable batch mode
+let config = SynheartConfig(
+    appId: "com.example.app",
+    subjectId: "anon_user_123",
+    batchIngestOnStop: true
 )
 ```
 
 ## Lab Ingestion
 
-Send structured session and metadata payloads to the Synheart platform API.
-
-### Auto-Ingest
+Lab session and metadata payloads are produced by the `Synheart.lab*` API and uploaded automatically when `research` consent is granted and `cloudConfig` is wired up.
 
 ```swift
-let config = SynheartConfig(
-    appId: "your_app_id",
-    subjectId: "sub_user_123",
-    labIngestConfig: LabIngestConfig(
-        apiKey: "your_platform_api_key",
-        autoIngest: true
-    )
-)
-```
+let now = { Int64(Date().timeIntervalSince1970 * 1000) }
 
-### Manual Ingestion
+let sessionId = try Synheart.labStart(protocolJson: protocolJson, startedAtMs: now())
+let windowId = try Synheart.labOpenWindow(windowType: "baseline", startedAtMs: now())
+// ... collect data ...
+try Synheart.labCloseWindow(windowId: windowId, endedAtMs: now())
 
-```swift
-// Ingest current session data
-try await synheart.ingestSession()
-
-// Ingest app/user metadata
-try await synheart.ingestMetadata()
-```
-
-### Standalone Payload Builder
-
-```swift
-let payload = LabPayloadBuilder.buildSession(
-    sessionId: "sess_123",
-    // ... other params
-)
+let payload = try Synheart.labFinalize(endedAtMs: now())  // returns JSON; auto-enqueued for upload
 ```
 
 ## Architecture Details
@@ -283,11 +248,9 @@ let payload = LabPayloadBuilder.buildSession(
 
 A module-based system for data collection and processing:
 
-- **RuntimeModule**: Orchestrates window-based processing (30s, 5m, 1h, 24h windows)
 - **WearModule**: Collects biosignal features from wearables
 - **PhoneModule**: Collects phone context features (motion, app switches, screen time)
 - **BehaviorModule**: Extracts behavioral patterns (typing, scrolling, interactions)
-- **ModuleManager**: Manages module lifecycle and dependencies
 - **CapabilityModule**: Handles feature flags and capability levels
 - **ConsentModule**: Manages user consent for data collection
 
@@ -295,16 +258,7 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentat
 
 ## Data Models
 
-### HumanStateVector (HSV)
-
-The main data structure (`SynheartCore/Models/Hsv.swift`) containing:
-
-- **Biometric signals**: Heart rate, HRV, RMSSD, SDNN
-- **Behavior**: Typing rate, scrolling rate, app switch rate (via `BehaviorState`)
-- **Context**: Conversation timing, device state, user patterns (via `ContextState`)
-- **Emotion**: Stress, calm, engagement, activation, valence (via `EmotionState`)
-- **Focus**: Score, cognitive load, clarity, distraction (via `FocusState`)
-- **Metadata**: Device info, session ID, timestamp, embeddings (via `MetaState`)
+The runtime emits **HSI 1.3 JSON** as its public output. Apps subscribe via `Synheart.onHSIUpdate` (raw JSON) or `Synheart.onStateUpdate` (typed `HSIState`). Internal types (`Hsv` and friends) are not part of the public SDK API.
 
 ### Window Features (`SynheartCore/Modules/Interfaces/FeatureProviders.swift`)
 
@@ -336,7 +290,7 @@ For the modular architecture, features are collected in time windows:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `onHSIUpdate` | `AnyPublisher<String, Never>` | HSI JSON frames from synheart-runtime |
+| `onHSIUpdate` | `AnyPublisher<String, Never>` | HSI JSON frames from synheart-engine |
 | `onStateUpdate` | `AnyPublisher<HSIState, Never>` | Typed HSI state updates |
 | `currentState` | `String?` | Latest HSI JSON frame |
 | `currentHSIState` | `HSIState?` | Latest typed HSI state |
@@ -348,27 +302,17 @@ For the modular architecture, features are collected in time windows:
 
 ```
 SynheartCore/
-├── Core/                    # Core architecture components
-│   ├── StateEngine.swift   # Main orchestration engine
-│   ├── IngestionService.swift
-│   ├── SignalProcessor.swift
-│   ├── FusionEngine.swift
-│   └── [Adapters]          # HealthKit, CoreMotion, Behavior, Context
-├── Models/                  # Data models
-│   ├── Hsv.swift           # HumanStateVector
-│   ├── Emotion.swift
-│   ├── Focus.swift
-│   ├── Behavior.swift
-│   ├── Context.swift
-│   └── MetaState.swift
-├── Modules/                 # Modular architecture
+├── Config/                  # SynheartConfig, CloudConfig, etc.
+├── CoreRuntime/             # Bridge to the runtime native binary
+├── Models/                  # Internal data models (HSI 1.3 typed projection)
+├── Modules/
 │   ├── Base/               # Module base classes and manager
-│   ├── Runtime/            # Runtime orchestration
 │   ├── Wear/               # Wearable data collection
 │   ├── Phone/              # Phone context collection
 │   ├── Behavior/            # Behavior event collection
 │   ├── Capabilities/       # Feature flags and capabilities
 │   ├── Consent/            # Consent management
+│   ├── Cloud/              # Cloud connector
 │   ├── SRM/                # Self-Reference Model (baseline persistence)
 │   └── Interfaces/         # Module contracts and data types
 └── Synheart.swift          # Public SDK facade / main entry point
@@ -446,7 +390,7 @@ try await Synheart.startSession()
 // Subscribe and verify
 Synheart.onHSIUpdate
     .sink { hsiJson in
-        // Verify HSI JSON from synheart-runtime
+        // Verify HSI JSON from synheart-engine
         print("HSI: \(hsiJson)")
     }
     .store(in: &cancellables)
@@ -456,7 +400,7 @@ Synheart.onHSIUpdate
 
 This iOS implementation is part of a multi-platform SDK:
 
-- **Flutter:** `synheart-core-dart` (Dart/Flutter implementation)
+- **Flutter:** `synheart-core-flutter` (Dart/Flutter implementation)
 - **iOS:** `synheart-core-swift` (this repository)
 - **Android:** `synheart-core-kotlin` (Kotlin implementation)
 
@@ -530,8 +474,14 @@ baseUrl: "http://192.168.1.100:8083"  // your machine's LAN IP
 
 ### Default credentials
 
-- **API Key:** `mock-dev-api-key-2026`
-- **HMAC Secret:** `mock-dev-hmac-secret-2026`
+Production cloud ingest is signed with **ECDSA P-256** via
+`X-Synheart-Proof` (compact JWS) plus a `X-Consent-Token` JWT — see
+[`synheart-auth`](https://github.com/synheart-ai/synheart-auth) and
+RFC-AUTH-MOBILE-0001. The `synheart local` server below ships
+development-only mock keys for offline iteration.
+
+- **API Key:** `mock-dev-api-key-2026` (mock platform only)
+- **Mock dev secret:** `mock-dev-hmac-secret-2026` (local testing only — production is ECDSA, not a shared secret)
 
 Ingested payloads are persisted as JSON files in the local server's data directory.
 

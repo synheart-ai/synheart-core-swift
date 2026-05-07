@@ -14,7 +14,7 @@ public enum HsvQualityFlag: String, Codable {
 
 /// Aggregated quality assessment for the Human State Vector.
 ///
-/// Mirrors Rust `StateQuality` from synheart-runtime.
+/// Mirrors the runtime's `StateQuality`.
 /// Summarizes the reliability and completeness of the fused state.
 /// Downstream consumers can use `overallConfidence`
 /// and `degraded` to decide whether to export or gate readings.

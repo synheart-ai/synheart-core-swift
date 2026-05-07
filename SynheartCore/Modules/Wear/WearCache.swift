@@ -2,8 +2,7 @@ import Foundation
 
 /// Cache for wear raw samples
 ///
-/// RFC-CORE-0007 compliant: buffers raw data only.
-/// Feature computation is delegated to synheart-runtime.
+/// Feature computation is delegated to synheart-engine.
 class WearCache {
     private var windowSamples: [WindowType: [WearSample]] = [:]
 

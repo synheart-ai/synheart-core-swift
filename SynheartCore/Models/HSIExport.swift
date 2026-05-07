@@ -2,12 +2,12 @@ import Foundation
 
 // MARK: - HSI Snapshot
 
-/// HSI Snapshot — versioned JSON snapshot produced by synheart-runtime.
+/// HSI Snapshot — versioned JSON snapshot produced by synheart-engine.
 ///
 /// This is the serializable, transport-safe, cloud-ingestable representation
-/// of human state. HSI generation is handled exclusively by synheart-runtime
+/// of human state. HSI generation is handled exclusively by synheart-engine
 /// the Core SDK receives the finished
-/// JSON string via `RuntimeBridge.tick()` and wraps it here for type safety.
+/// JSON string via `CoreRuntimeBridge` and wraps it here for type safety.
 public struct HSISnapshot {
     /// The complete HSI payload as a JSON-compatible dictionary.
     public let payload: [String: Any]

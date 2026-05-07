@@ -4,7 +4,6 @@ import Combine
 /// Wear Module
 ///
 /// Collects and buffers raw biosignals from wearables.
-/// RFC-CORE-0007 compliant: no feature computation in Core.
 public class WearModule: BaseSynheartModule, RawWearDataProvider {
     private let sources: [WearSourceHandler]
     private let cache = WearCache()

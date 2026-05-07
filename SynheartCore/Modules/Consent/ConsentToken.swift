@@ -51,8 +51,8 @@ public struct ConsentToken: Codable {
     /// Create from JSON API response
     ///
     /// Supports multiple API response formats:
-    /// 1. RFC format: { "token": "...", "expires_at": "2026-01-10T19:00:00Z", "profile_id": "...", "scopes": [...] }
-    /// 2. Actual API format: { "access_token": "...", "expires_in": 86400, "consent_profile_id": "...", "token_type": "Bearer" }
+    /// 1. Standard: `{ "token": "...", "expires_at": "...", "profile_id": "...", "scopes": [...] }`
+    /// 2. OAuth-style: `{ "access_token": "...", "expires_in": 86400, "consent_profile_id": "...", "token_type": "Bearer" }`
     public static func fromAPIResponse(_ json: [String: Any]) throws -> ConsentToken {
         // Extract token (required field)
         guard let tokenValue = json["token"] as? String ?? json["access_token"] as? String else {
