@@ -795,6 +795,40 @@ public class Synheart {
         ]
     }
 
+    // MARK: - Per-Module Collection Control
+
+    /// Start wear (biosignal) collection. Mirrors Flutter's `startWearCollection({interval})`.
+    ///
+    /// - Parameter interval: Sample interval. Currently not honored — the
+    ///   module uses `SynheartConfig.wearConfig.sampleRateHz` instead. Kept
+    ///   in the signature for Flutter-API parity.
+    public static func startWearCollection(interval: TimeInterval? = nil) async throws {
+        _ = interval
+        try await shared.wearModule?.start()
+    }
+
+    public static func stopWearCollection() async throws {
+        try await shared.wearModule?.stop()
+    }
+
+    /// Start behavior (interaction) collection. Mirrors Flutter's `startBehaviorCollection()`.
+    public static func startBehaviorCollection() async throws {
+        try await shared.behaviorModule?.start()
+    }
+
+    public static func stopBehaviorCollection() async throws {
+        try await shared.behaviorModule?.stop()
+    }
+
+    /// Start phone (motion / context) collection. Mirrors Flutter's `startPhoneCollection()`.
+    public static func startPhoneCollection() async throws {
+        try await shared.phoneModule?.start()
+    }
+
+    public static func stopPhoneCollection() async throws {
+        try await shared.phoneModule?.stop()
+    }
+
     // MARK: - Diagnostics & Upload State
 
     /// Full native runtime diagnostics as a parsed dictionary, or `nil` if the
