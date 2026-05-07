@@ -1,9 +1,9 @@
 import Foundation
 
-/// Bridges wearable events to the Rust longitudinal SRM engine via CoreRuntimeBridge.
+/// Bridges wearable events to the native longitudinal SRM engine via CoreRuntimeBridge.
 ///
 /// Extracts daily dimension values from canonical wearable events and pushes them
-/// to the Rust LongitudinalSrmEngine via C ABI. Triggers recompute after ingestion.
+/// to the native LongitudinalSrmEngine via C ABI. Triggers recompute after ingestion.
 public final class LongitudinalSrmModule {
 
     private struct DimensionExtractor {
@@ -38,7 +38,7 @@ public final class LongitudinalSrmModule {
 
     public init() {}
 
-    /// Ingest a canonical wearable event: extract daily values and push to Rust via bridge.
+    /// Ingest a canonical wearable event: extract daily values and push to the runtime via bridge.
     public func ingestEvent(_ event: CanonicalWearableEvent, bridge: CoreRuntimeBridge?) {
         guard let extractors = LongitudinalSrmModule.eventDimensionMap[event.type],
               let bridge = bridge else { return }
@@ -70,7 +70,7 @@ public final class LongitudinalSrmModule {
         bridge.triggerWearableRecompute(triggerType: 0, asOfDay: todayDayIndex)
     }
 
-    /// Get the current wearable reference JSON from the Rust engine.
+    /// Get the current wearable reference JSON from the native engine.
     public func getWearableReference(bridge: CoreRuntimeBridge?) -> String? {
         return bridge?.getWearableReference()
     }

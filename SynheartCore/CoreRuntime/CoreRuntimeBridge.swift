@@ -1,9 +1,9 @@
 import Foundation
 
-/// Bridge to `libsynheart_core_runtime` (Rust) via C ABI / dlsym.
+/// Bridge to `libsynheart_core_runtime` via C ABI / dlsym.
 ///
 /// This replaces the Swift-native storage, crypto, sync, consent, and pipeline
-/// modules with a single Rust shared library that manages all of those concerns.
+/// modules with a single native shared library that manages all of those concerns.
 ///
 /// Library loading:
 /// - macOS: `dlopen("libsynheart_core_runtime.dylib")`

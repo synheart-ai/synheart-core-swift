@@ -2,7 +2,7 @@ import Foundation
 import Combine
 import Security
 
-/// Consent Module — thin wrapper delegating core logic to Rust via CoreRuntimeBridge.
+/// Consent Module — thin wrapper delegating core logic to the native runtime via CoreRuntimeBridge.
 ///
 /// Platform-specific concerns (Keychain device ID, Combine publishers, UI hooks) stay here.
 public class ConsentModule: BaseSynheartModule, ConsentProvider {

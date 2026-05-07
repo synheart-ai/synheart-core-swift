@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Feature provider protocols (WearFeatureProvider, PhoneFeatureProvider, BehaviorFeatureProvider)
 - Legacy config fields (enableWear, enablePhone, enableBehavior)
 - Empty `Heads/` directory
-- PlatformPayloadBuilder, PlatformIngestConfig (moved to Rust core runtime)
+- PlatformPayloadBuilder, PlatformIngestConfig (moved to the native runtime)
 
 ## [1.2.0] - 2026-02-23
 
@@ -80,7 +80,7 @@ First stable release supporting HSI 1.x.
 
 ### Added
 
-- **Flux FFI Integration** — Live pipeline from Core SDK to synheart-flux (Rust) via C FFI
+- **Flux FFI Integration** — Live pipeline from Core SDK to synheart-flux via C FFI
   - `FluxFFIProvider` — concrete `FluxProvider` calling `flux_processor_process_window()` via `@_silgen_name`
   - Serializes raw `WearSample`, `PhoneDataPoint`, `BehaviorEvent` into WindowInput JSON
   - Maps returned Flux HSV JSON into Core `HumanStateVector` (physiology, quality, provenance, embedding)
@@ -89,7 +89,7 @@ First stable release supporting HSI 1.x.
   - Graceful degradation: `createIfAvailable()` returns nil when native library is absent
   - Memory-safe: all `flux_free_string()` calls paired with FFI allocations
 
-- **synheart-flux 0.4.0 Alignment** — HSV types updated to match Rust HSV specification
+- **synheart-flux 0.4.0 Alignment** — HSV types updated to match the canonical HSV specification
   - `HsvAxisValue` — score + confidence pair for per-axis readings (replaces hardcoded 0.8 confidence)
   - `PhysiologyState` — wearable-derived physiology domain with 11 axes (sleep efficiency, recovery, HRV deviation, etc.)
   - `StateQuality` — aggregated quality assessment (overall confidence, modality count, degraded flag, quality flags)

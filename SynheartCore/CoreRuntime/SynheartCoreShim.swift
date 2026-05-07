@@ -6,7 +6,7 @@ import Combine
 ///
 /// Platform-specific modules (WearModule, PhoneModule, BehaviorModule, SessionModule)
 /// remain in their existing files -- this class only delegates the "core services"
-/// layer to Rust.
+/// layer to the native runtime.
 ///
 /// Usage:
 /// ```swift
@@ -20,10 +20,10 @@ public final class SynheartCoreShim {
     /// The underlying FFI bridge. Nil only if the runtime library is not linked.
     public let bridge: CoreRuntimeBridge?
 
-    /// Whether the Rust core runtime was loaded successfully.
+    /// Whether the native runtime was loaded successfully.
     public var isAvailable: Bool { bridge != nil }
 
-    /// Stream of HSI state updates (parsed from the Rust runtime).
+    /// Stream of HSI state updates (parsed from the native runtime).
     public let onStateUpdate: AnyPublisher<HSIState, Never>
 
     private let hsiSubject = PassthroughSubject<HSIState, Never>()

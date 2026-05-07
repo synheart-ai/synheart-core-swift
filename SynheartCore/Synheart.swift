@@ -5,7 +5,7 @@ import SynheartSession
 /**
  * Synheart Core SDK - Main Entry Point
  *
- * Orchestrates all core modules and the Rust core runtime bridge.
+ * Orchestrates all core modules and the native core runtime bridge.
  *
  * Core modules:
  * - Capabilities Module (feature gating)
@@ -13,7 +13,7 @@ import SynheartSession
  * - Wear Module (biosignal collection)
  * - Phone Module (motion/context)
  * - Behavior Module (interaction patterns)
- * - Core Runtime Bridge (Rust FFI -- storage, crypto, sync, artifacts, HSI)
+ * - Core Runtime Bridge (native FFI -- storage, crypto, sync, artifacts, HSI)
  *
  * Example usage:
  * ```swift
