@@ -205,6 +205,11 @@ public class Synheart {
         shared.isRunning = false
     }
 
+    /// Wipe all local data. Alias of `wipeLocalData()` matching the Flutter SDK.
+    public static func deleteLocalData() async throws {
+        try await wipeLocalData()
+    }
+
     /// Request account deletion -- wipes local data and requests server-side deletion.
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
         if let token = shared.consentModule?.getCurrentToken(), token.isValid {
@@ -447,12 +452,19 @@ public class Synheart {
      *
      * Must be called after initialize(). No data collection occurs until
      * this method is called.
+     *
+     * - Parameter durationSec: Session duration in seconds. `nil` uses the
+     *   default 24h (86400). Mirrors the Flutter SDK's optional duration.
+     * - Returns: The newly created `SessionHandle`, or `nil` if a session was
+     *   already running.
      */
-    public static func startSession() async throws {
-        try await shared._startSession()
+    @discardableResult
+    public static func startSession(durationSec: Int? = nil) async throws -> SessionHandle? {
+        try await shared._startSession(durationSec: durationSec)
+        return shared._currentSessionHandle
     }
 
-    private func _startSession() async throws {
+    private func _startSession(durationSec: Int? = nil) async throws {
         guard isConfigured else {
             throw SynheartError.notInitialized
         }
@@ -468,7 +480,8 @@ public class Synheart {
 
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let sessionId = _currentSessionHandle?.sessionId ?? "core_\(nowMs)"
-        let durationSec = 86400
+        let resolvedDuration = durationSec ?? 86400
+        let durationSec = resolvedDuration
 
         let config = SessionConfig(
             sessionId: sessionId,
@@ -768,6 +781,18 @@ public class Synheart {
         case .cloud:        return cap.capability(.cloud) != .none
         case .syni:         return true
         }
+    }
+
+    // MARK: - Module Status
+
+    /// Per-module readiness flags. Mirrors the Flutter SDK's `getModuleStatuses()`.
+    /// Keys: `"wear"`, `"behavior"`, `"phoneContext"`.
+    public static func getModuleStatuses() -> [String: Bool] {
+        return [
+            "wear": shared.wearModule?.status == .running,
+            "behavior": shared.behaviorModule?.status == .running,
+            "phoneContext": shared.phoneModule?.status == .running,
+        ]
     }
 
     // MARK: - Diagnostics & Upload State
