@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Core business logic (storage, crypto, sync, consent, artifact pipeline, cloud connector, SRM)
-  migrated to synheart-core-runtime (native binary). SDK is now a thin native-bridge shell.
+  migrated to the native runtime. SDK is now a thin native-bridge shell.
 - RuntimeBridge/RuntimeModule replaced by CoreRuntimeBridge (FFI to libsynheart_core_runtime)
 - HSI state updates delivered via native callback mechanism instead of platform-specific streams
 - Lab protocol API now routes through CoreRuntimeBridge
