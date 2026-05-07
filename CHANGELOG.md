@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed all TODO/FIXME comments across the SDK (Synheart.swift, CapabilityModule.swift).
 - Replaced stale TODO comments in FocusHead and EmotionHead reevaluation branches with concise `// FocusHead: HSI JSON parser pending.` / `// EmotionHead: HSI JSON parser pending.` notes.
 - Updated placeholder comments in `FocusModelProtocol.swift` and `EmotionModelProtocol.swift` to clarify stub status.
-- **README.md** — Updated version badge, fixed HSV→HSI terminology, updated code examples to use `activate()` API and `AnyPublisher<String, Never>` types, removed Syni Hooks and "(planned)" labels, updated platform integration sections.
+- **README.md** — Updated version badge, fixed HSV→HSI terminology, updated code examples to use `activate()` API and `AnyPublisher<String, Never>` types, removed "(planned)" labels, updated platform integration sections.
 
 ### Added
 
