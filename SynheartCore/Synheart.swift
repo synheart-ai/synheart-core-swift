@@ -210,6 +210,26 @@ public class Synheart {
         try await wipeLocalData()
     }
 
+    /// Request server-side account deletion only. Local data is preserved.
+    /// Use `wipeLocalData()` / `deleteLocalData()` to clear local state, or
+    /// `requestAccountDeletion()` to do both.
+    ///
+    /// Mirrors the Flutter SDK's `deleteCloudData()`.
+    public static func deleteCloudData() async throws {
+        guard let token = shared.consentModule?.getCurrentToken(), token.isValid else { return }
+        let url = URL(string: "https://api.synheart.ai/auth/v1/delete")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token.token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["confirmation": "DELETE_MY_ACCOUNT"])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        if statusCode != 200 && statusCode != 202 {
+            SynheartLogger.log("[Synheart] deleteCloudData returned status \(statusCode)")
+        }
+    }
+
     /// Request account deletion -- wipes local data and requests server-side deletion.
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
         if let token = shared.consentModule?.getCurrentToken(), token.isValid {
