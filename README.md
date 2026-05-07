@@ -220,32 +220,6 @@ do {
 | `SynheartError.capabilityTokenRequired` | No token provided and `allowUnsignedCapabilities` is false |
 | `SynheartError.notImplemented(String)` | Feature not yet available |
 
-## Batch Ingest Mode
-
-By default the runtime streams data in real time. **Batch ingest mode** buffers all events during a session and runs a single ingest call when the session stops:
-
-```swift
-let config = SynheartConfig(
-    appId: "com.example.app",
-    subjectId: "anon_user_123",
-    batchIngestOnStop: true
-)
-```
-
-## Lab Ingestion
-
-Lab session and metadata payloads are produced by the `Synheart.lab*` API and uploaded automatically when `research` consent is granted and `cloudConfig` is wired up.
-
-```swift
-let now = { Int64(Date().timeIntervalSince1970 * 1000) }
-
-let sessionId = try Synheart.labStart(protocolJson: protocolJson, startedAtMs: now())
-let windowId = try Synheart.labOpenWindow(windowType: "baseline", startedAtMs: now())
-// ... collect data ...
-try Synheart.labCloseWindow(windowId: windowId, endedAtMs: now())
-
-let payload = try Synheart.labFinalize(endedAtMs: now())  // returns JSON; auto-enqueued for upload
-```
 
 ## Architecture Details
 
