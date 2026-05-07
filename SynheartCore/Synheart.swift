@@ -112,6 +112,16 @@ public class Synheart {
         let _ = cr.recordMetric(event)
     }
 
+    /// Record a batch of metric events for the current session.
+    ///
+    /// Mirrors the Flutter SDK's `recordMetrics(List<MetricEvent>)`.
+    public static func recordMetrics(_ events: [MetricEvent]) throws {
+        guard let cr = shared.coreRuntime, cr.isAvailable else { return }
+        for event in events {
+            let _ = cr.recordMetric(event)
+        }
+    }
+
     // MARK: - Local Query API
 
     /// List stored sessions with optional filters.
@@ -142,7 +152,18 @@ public class Synheart {
 
     /// Get decrypted HSI window artifacts for a session.
     public static func getHSIWindows(_ sessionId: String, range: WindowRange? = nil) throws -> [[String: Any]] {
-        return []
+        guard let bridge = shared.coreRuntime?.bridge else { return [] }
+        let json = bridge.getHsiWindows(
+            sessionId: sessionId,
+            startMs: Int64(range?.startMs ?? 0),
+            endMs: Int64(range?.endMs ?? 0),
+            limit: Int32(range?.limit ?? 0)
+        )
+        guard let json,
+              let data = json.data(using: .utf8),
+              let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
+        else { return [] }
+        return arr
     }
 
     // MARK: - Storage & Retention
@@ -156,7 +177,11 @@ public class Synheart {
     }
 
     /// Set retention policy. Deletes sessions older than the given number of days.
+    /// Pass `nil` to disable retention (keep indefinitely).
     public static func setRetentionDays(_ days: Int?) throws {
+        guard let bridge = shared.coreRuntime?.bridge else { return }
+        // Native runtime treats 0 as "no retention limit".
+        let _ = bridge.setRetentionDays(days: Int32(days ?? 0))
     }
 
     // MARK: - Deletion API
@@ -227,6 +252,7 @@ public class Synheart {
 
     /// Enable or disable sync.
     public static func setSyncEnabled(_ enabled: Bool) async throws {
+        shared.coreRuntime?.bridge?.setSyncEnabled(enabled: enabled)
     }
 
     /// Execute a sync cycle (push + pull).
