@@ -94,6 +94,10 @@ public final class CoreRuntimeBridge {
     private typealias TriggerWearRecompFn = @convention(c) (OpaquePointer?, Int32, Int32) -> Void
     private typealias GetWearRefFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
 
+    // Ambient capture
+    private typealias SetAmbientCaptureFn = @convention(c) (OpaquePointer?, Int32) -> Void
+    private typealias GetAmbientCaptureFn = @convention(c) (OpaquePointer?) -> Int32
+
     // MARK: - Resolved function pointers (42)
 
     private static let lib: UnsafeMutableRawPointer? = {
@@ -129,6 +133,10 @@ public final class CoreRuntimeBridge {
     private static let _pushBehavior:  PushBehaviorFn?    = sym("synheart_core_push_behavior")
     private static let _pushSleep:     PushSleepStagesFn? = sym("synheart_core_push_sleep_stages")
     private static let _ingestBatch:   IngestBatchFn?     = sym("synheart_core_ingest_batch")
+
+    // Ambient capture
+    private static let _setAmbient:    SetAmbientCaptureFn? = sym("synheart_core_set_ambient_capture")
+    private static let _getAmbient:    GetAmbientCaptureFn? = sym("synheart_core_get_ambient_capture")
 
     // Consent
     private static let _grantConsent:  GrantConsentFn?    = sym("synheart_core_grant_consent")
@@ -279,6 +287,19 @@ public final class CoreRuntimeBridge {
     public func ingestBatch(batchJson: String, nowMs: Int64) -> String? {
         let ptr = batchJson.withCString { Self._ingestBatch?(handle, $0, nowMs) }
         return consumeCString(ptr)
+    }
+
+    // MARK: - Ambient Capture
+
+    /// Enable/disable ambient capture mode (HSI windows forwarded
+    /// regardless of session state).
+    public func setAmbientCapture(_ enabled: Bool) {
+        Self._setAmbient?(handle, enabled ? 1 : 0)
+    }
+
+    /// Read the ambient-capture flag.
+    public func getAmbientCapture() -> Bool {
+        return (Self._getAmbient?(handle) ?? 0) != 0
     }
 
     // MARK: - Consent

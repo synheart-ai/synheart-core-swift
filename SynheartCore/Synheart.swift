@@ -111,6 +111,55 @@ public class Synheart {
         let _ = cr.recordMetric(event)
     }
 
+    /// Record a batch of metric events for the current session.
+    /// Loops over the singular path; useful for hosts that capture bursts.
+    public static func recordMetrics(_ events: [MetricEvent]) throws {
+        for event in events {
+            try recordMetric(event)
+        }
+    }
+
+    // MARK: - Wear Module — Vendor Events
+
+    /// Process a vendor event from RAMEN into the SRM pipeline.
+    ///
+    /// The event is normalized to a `CanonicalWearableEvent`, stored, and
+    /// pushed to the runtime for longitudinal baseline computation.
+    ///
+    /// - Returns: The canonical event the vendor payload was mapped to, or
+    ///   `nil` if dropped (consent denied, no processor, mapping miss).
+    @discardableResult
+    public static func processVendorEvent(
+        provider: String,
+        eventType: String,
+        payload: [String: Any],
+        eventId: String,
+        seq: Int
+    ) -> CanonicalWearableEvent? {
+        return shared.wearModule?.processVendorEvent(
+            provider: provider,
+            eventType: eventType,
+            payload: payload,
+            eventId: eventId,
+            seq: seq
+        )
+    }
+
+    // MARK: - Ambient Capture
+
+    /// When enabled, the runtime forwards every closed HSI window to the
+    /// host's HSI callback regardless of session state. When disabled
+    /// (default), windows are forwarded only while a session is active.
+    public static func setAmbientCapture(_ enabled: Bool) {
+        shared.coreRuntime?.setAmbientCapture(enabled)
+    }
+
+    /// Returns the current ambient-capture flag (`false` if the runtime
+    /// is unavailable or the call hasn't been made).
+    public static func getAmbientCapture() -> Bool {
+        return shared.coreRuntime?.getAmbientCapture() ?? false
+    }
+
     // MARK: - Local Query API
 
     /// List stored sessions with optional filters.

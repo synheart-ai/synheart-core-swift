@@ -111,6 +111,16 @@ public final class SynheartCoreShim {
         return state
     }
 
+    // MARK: - Ambient Capture
+
+    public func setAmbientCapture(_ enabled: Bool) {
+        bridge?.setAmbientCapture(enabled)
+    }
+
+    public func getAmbientCapture() -> Bool {
+        bridge?.getAmbientCapture() ?? false
+    }
+
     // MARK: - Consent
 
     @discardableResult
