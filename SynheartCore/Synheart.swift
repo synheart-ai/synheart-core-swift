@@ -201,9 +201,9 @@ public class Synheart {
     }
 
     /// Cancel a pending account deletion request.
-    public static func cancelAccountDeletion() async throws -> Bool {
+    public static func cancelAccountDeletion() async throws -> DeletionRequestResult {
         guard let token = shared.consentModule?.getCurrentToken(), token.isValid else {
-            return false
+            return DeletionRequestResult(status: "error", message: "No valid auth token; cannot cancel deletion.")
         }
 
         let url = URL(string: "https://api.synheart.ai/auth/v1/delete/cancel")!
@@ -214,7 +214,10 @@ public class Synheart {
 
         let (_, response) = try await URLSession.shared.data(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-        return statusCode == 200
+        if statusCode == 200 {
+            return DeletionRequestResult(status: "cancelled", message: "Account deletion cancelled.")
+        }
+        return DeletionRequestResult(status: "error", message: "Server returned status \(statusCode).")
     }
 
     /// Log out -- revoke consent.

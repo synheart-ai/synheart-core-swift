@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `precondition(hmacSecret != nil || authProvider != nil, ...)` block is gone; `authProvider` is now optional, pass it only to override the runtime's default signer.
 - **`CloudConnectorError.invalidTenant`** case — never raised on the SDK→ingest path.
 
+### Changed (BREAKING) — 2026-05-07
+- **`Synheart.cancelAccountDeletion()`** now returns `DeletionRequestResult` instead of `Bool`, mirroring `requestAccountDeletion()` and the Dart/Kotlin counterparts. Same operation, structured return: `status` is `"cancelled"` on success or `"error"` on failure, with a human-readable `message`. Update call sites that read the old `Bool` return.
+
 ### Changed — 2026-05-05
 - `CloudConnectorError.invalidSignature` description string `"HMAC signature validation failed"` → `"request signature validation failed"`. The signing path is ECDSA, not HMAC.
 
