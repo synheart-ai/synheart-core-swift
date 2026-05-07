@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SynheartAuth
 import SynheartSession
 
 /**
@@ -741,6 +742,80 @@ public class Synheart {
         case .cloud:        return cap.capability(.cloud) != .none
         case .syni:         return true
         }
+    }
+
+    // MARK: - Diagnostics & Upload State
+
+    /// Full native runtime diagnostics as a parsed dictionary, or `nil` if the
+    /// runtime is unavailable.
+    ///
+    /// Mirrors the Flutter SDK's `runtimeDiagnostics()` — same payload shape.
+    public static func runtimeDiagnostics() -> [String: Any]? {
+        guard let json = shared.coreRuntime?.bridge?.diagnostics(),
+              let data = json.data(using: .utf8),
+              let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return nil }
+        return parsed
+    }
+
+    /// Whether lab metadata is available for the current session.
+    public static var isLabMetadataAvailable: Bool {
+        shared.coreRuntime?.bridge?.isLabAvailable() ?? false
+    }
+
+    /// Number of HSI snapshots queued locally awaiting cloud upload.
+    public static var uploadQueueLength: Int {
+        shared.coreRuntime?.bridge?.uploadQueueLength() ?? 0
+    }
+
+    /// Last error code emitted by the native runtime; 0 if no error.
+    public static var lastErrorCode: Int {
+        shared.coreRuntime?.bridge?.lastErrorCode() ?? 0
+    }
+
+    /// Whether the native runtime library is loaded and responsive.
+    public static var isRuntimeAvailable: Bool {
+        shared.coreRuntime?.bridge?.isRuntimeAvailable() ?? false
+    }
+
+    /// Whether the network is currently reachable per the runtime.
+    public static var isNetworkReachable: Bool {
+        shared.coreRuntime?.bridge?.isNetworkReachable() ?? false
+    }
+
+    /// Force-flush any pending uploads. Returns the runtime's response JSON,
+    /// or `nil` if the runtime is unavailable.
+    @discardableResult
+    public static func flushUploads() -> String? {
+        shared.coreRuntime?.bridge?.flushUploads()
+    }
+
+    /// Raw JSON describing the most recent upload attempt, or `nil`.
+    public static var uploadMetadata: String? {
+        shared.coreRuntime?.bridge?.uploadMetadata()
+    }
+
+    /// Timestamp of the most recent successful cloud ingest, or `nil`.
+    public static var lastIngestSuccessAtMs: Int64? {
+        (parsedUploadMetadata()?["lastIngestSuccessAtMs"] as? NSNumber)?.int64Value
+    }
+
+    /// ID of the most recent upload batch, or `nil`.
+    public static var lastUploadBatchId: String? {
+        parsedUploadMetadata()?["lastUploadBatchId"] as? String
+    }
+
+    /// Error message from the most recent failed upload, or `nil`.
+    public static var lastUploadError: String? {
+        parsedUploadMetadata()?["lastUploadError"] as? String
+    }
+
+    private static func parsedUploadMetadata() -> [String: Any]? {
+        guard let json = shared.coreRuntime?.bridge?.uploadMetadata(),
+              let data = json.data(using: .utf8),
+              let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return nil }
+        return parsed
     }
 
     // MARK: - Stop & Dispose
