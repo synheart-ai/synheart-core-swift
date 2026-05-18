@@ -50,13 +50,50 @@ final class SyniModuleTests: XCTestCase {
         XCTAssertFalse(module.isGateOpen)
     }
 
+    // MARK: - Reactive state is not gated
+
+    func testCurrentStateObservableWithoutConsent() {
+        let module = SyniModule(consent: FakeConsent())
+        XCTAssertEqual(module.currentState, .notInstalled)
+        XCTAssertFalse(module.isInstalled)
+        XCTAssertFalse(module.hasCloud)
+    }
+
+    func testInstallStatePublisherObservableWithoutConsent() {
+        let module = SyniModule(consent: FakeConsent())
+        _ = module.installState  // confirm property is reachable
+    }
+
     // MARK: - Gate enforcement
 
-    func testGenerateAsyncThrowsWhenConsentDenied() async {
+    func testChatThrowsConsentDeniedWhenDenied() async {
         let module = SyniModule(consent: FakeConsent())
         do {
-            _ = try await module.generateAsync(
-                request: SyniRequest(personaId: "test", input: SyniInput(text: "hello"))
+            _ = try await module.chat("hi")
+            XCTFail("expected SyniConsentDeniedError")
+        } catch is SyniConsentDeniedError {
+            // expected
+        } catch {
+            XCTFail("expected SyniConsentDeniedError, got \(error)")
+        }
+    }
+
+    func testChatStreamThrowsConsentDeniedWhenDenied() {
+        let module = SyniModule(consent: FakeConsent())
+        XCTAssertThrowsError(try module.chatStream("hi")) { error in
+            XCTAssertTrue(error is SyniConsentDeniedError)
+        }
+    }
+
+    func testInstallThrowsConsentDeniedWhenDenied() async {
+        let module = SyniModule(consent: FakeConsent())
+        // SyniPersona/Model construction requires real values; use cloud
+        // config-less defaults — the consent check fires before the
+        // installer is touched, so these never get evaluated.
+        do {
+            try await module.install(
+                persona: SyniSpecPersona.dummyPersona(),
+                model: SyniModels.qwen25_15bInstructQ4
             )
             XCTFail("expected SyniConsentDeniedError")
         } catch is SyniConsentDeniedError {
@@ -66,46 +103,26 @@ final class SyniModuleTests: XCTestCase {
         }
     }
 
-    func testGenerateCallbackEmitsConsentDeniedFailure() {
+    // MARK: - Bypass
+
+    func testUnsafeAgentReturnsSameReference() {
         let module = SyniModule(consent: FakeConsent())
-        let exp = expectation(description: "callback fires")
-        module.generate(
-            request: SyniRequest(personaId: "test", input: SyniInput(text: "hello"))
-        ) { result in
-            switch result {
-            case .success: XCTFail("expected failure")
-            case .failure(let error):
-                XCTAssertTrue(error is SyniConsentDeniedError,
-                              "expected SyniConsentDeniedError, got \(error)")
-            }
-            exp.fulfill()
-        }
-        wait(for: [exp], timeout: 1)
+        XCTAssertTrue(module.unsafeAgent === module.unsafeAgent)
     }
+}
 
-    func testAvailablePersonasThrowsWhenConsentDenied() {
-        XCTAssertThrowsError(try SyniModule(consent: FakeConsent()).availablePersonas()) { error in
-            XCTAssertTrue(error is SyniConsentDeniedError)
-        }
-    }
+// MARK: - Test fixture helpers
 
-    func testModelsThrowsWhenConsentDenied() {
-        XCTAssertThrowsError(try SyniModule(consent: FakeConsent()).models()) { error in
-            XCTAssertTrue(error is SyniConsentDeniedError)
-        }
-    }
-
-    // MARK: - Bypass + non-gated reads
-
-    func testIsReadyDoesNotRequireTheGate() {
-        // Without an initialized Syni in unit tests, this returns
-        // false; the assertion is just that it returns rather than
-        // throwing SyniConsentDeniedError.
-        _ = SyniModule(consent: FakeConsent()).isReady
-    }
-
-    func testUnsafeSyniIsNilBeforeInitialize() {
-        XCTAssertNil(SyniModule(consent: FakeConsent()).unsafeSyni)
+private extension SyniSpecPersona {
+    /// Cheap stand-in persona for gate-only tests. Gate check fires
+    /// before this is ever inspected, so the field values are arbitrary.
+    static func dummyPersona() -> SyniPersona {
+        return SyniPersona(
+            id: "test.persona.v1",
+            displayName: "Test",
+            systemPrompt: "test",
+            responseSchemaId: "chat"
+        )
     }
 }
 #endif

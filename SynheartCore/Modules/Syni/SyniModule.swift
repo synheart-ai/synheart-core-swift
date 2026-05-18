@@ -2,15 +2,18 @@
 //
 // Synheart-side gate around the Syni on-device agent SDK.
 //
-// Unlike Flutter's `package:syni` (which exposes a `SyniAgent` class
-// with `chat()` / `chatStream()`), the native `SyniSwift` SDK is a
-// different orchestration shape: a `Syni` class with a `.shared`
-// singleton that owns `generate(request:completion:)` /
-// `generateAsync(request:)`. This module wraps the singleton with a
-// `ConsentType.syni` gate so consumers can't accidentally bypass the
-// consent check by calling `Syni.shared` directly.
+// Mirrors the Flutter shape: `SyniAgent` actor + install lifecycle
+// state machine + typed `chat()` / `chatStream()` returning
+// `SyniChatResponse` and `SyniChatEvent` respectively. The underlying
+// `SyniSwift.SyniAgent` is wrapped with a `consent.syni` gate so
+// consumers can't accidentally bypass the consent check.
+//
+// API note: matches the post-alignment SyniSwift package (0.0.2+,
+// `chore/align-public-api-to-flutter-shape` and later). The earlier
+// `Syni` singleton shape is gone.
 
 #if canImport(SyniSwift)
+import Combine
 import Foundation
 import SyniSwift
 
@@ -22,101 +25,98 @@ public struct SyniConsentDeniedError: Error, Sendable {
     }
 }
 
-/// Synheart-side facade around the `Syni` on-device agent SDK.
+/// Synheart-side facade around the `SyniAgent` on-device agent SDK.
 ///
 /// ```swift
-/// let module = SyniModule(consent: Synheart.consentModule!)
-/// try module.initialize(config: SyniConfig(...))
-/// let response = try await module.generateAsync(request: request)
+/// let module = SyniModule(consent: consentModule, cloudConfig: cfg)
+/// try await module.install(persona: persona, model: model)
+/// let resp = try await module.chat("hi")
 /// ```
 ///
-/// Every call routing through this module first checks consent. The
-/// gate is consent-only today; capability-token gating is the caller's
-/// responsibility (use `Synheart.isFeatureOperational`).
+/// Every method that touches the agent first checks consent; throws
+/// `SyniConsentDeniedError` when denied. The reactive `installState` /
+/// `currentState` / `hasCloud` / `isInstalled` reads are not gated —
+/// they're cheap state observations consumers may legitimately need
+/// before deciding to ask for consent.
 public final class SyniModule: @unchecked Sendable {
 
     private let consent: ConsentProvider
 
-    public init(consent: ConsentProvider) {
-        self.consent = consent
-    }
+    /// Direct access to the underlying agent. Bypasses the consent
+    /// gate — use only when you've performed the check yourself
+    /// (e.g. during initialization, before consent has been granted,
+    /// in internal tooling).
+    public let unsafeAgent: SyniAgent
 
-    /// Direct access to the underlying singleton. Bypasses the consent
-    /// gate — use only when you've performed the check yourself (e.g.
-    /// during initialization, before consent has been granted, in
-    /// internal tooling). Nil when `Syni.initialize(config:)` hasn't
-    /// been called yet.
-    public var unsafeSyni: Syni? { Syni.shared }
+    public init(
+        consent: ConsentProvider,
+        installer: SyniInstaller? = nil,
+        cloudConfig: SyniCloudConfig? = nil
+    ) {
+        self.consent = consent
+        self.unsafeAgent = SyniAgent(installer: installer, cloudConfig: cloudConfig)
+    }
 
     /// True if the user has granted SYNI consent on the current snapshot.
     public var isGateOpen: Bool { consent.current().syni }
 
-    /// True if the underlying `Syni` singleton has been initialized
-    /// AND is ready to serve generations. Mirrors `Syni.isReady`.
-    /// Does not require the gate to be open.
-    public var isReady: Bool { Syni.isReady }
+    // MARK: - Reactive state (not gated)
 
-    /// Initialize the underlying Syni SDK with `config`. Requires
-    /// SYNI consent to be granted; throws `SyniConsentDeniedError`
-    /// otherwise. Re-initialization is handled by the underlying SDK.
-    public func initialize(config: SyniConfig) throws {
+    public var installState: AnyPublisher<SyniInstallState, Never> { unsafeAgent.installState }
+    public var currentState: SyniInstallState { unsafeAgent.currentState }
+    public var isInstalled: Bool { unsafeAgent.isInstalled }
+    public var hasCloud: Bool { unsafeAgent.hasCloud }
+
+    // MARK: - Lifecycle
+
+    /// Install `persona` with `model`. Gated; async/throws.
+    public func install(persona: SyniPersona, model: SyniModelSpec) async throws {
         try requireGate()
-        try Syni.initialize(config: config)
+        try await unsafeAgent.install(persona: persona, model: model)
     }
 
-    /// Generate a response (callback variant). Gated.
-    public func generate(
-        request: SyniRequest,
-        completion: @escaping (Result<SyniResponse, Error>) -> Void
-    ) {
-        do {
-            try requireGate()
-        } catch {
-            completion(.failure(error))
-            return
-        }
-        guard let syni = Syni.shared else {
-            completion(.failure(SyniError.notInitialized))
-            return
-        }
-        syni.generate(request: request) { result in
-            switch result {
-            case .success(let r): completion(.success(r))
-            case .failure(let e): completion(.failure(e))
-            }
-        }
-    }
-
-    /// Generate a response (async/throws variant). Gated.
-    public func generateAsync(request: SyniRequest) async throws -> SyniResponse {
+    /// Restore an existing install if the on-disk state matches
+    /// `persona` + `model`. Gated; returns true on successful restore.
+    public func restoreInstallIfReady(persona: SyniPersona, model: SyniModelSpec) async throws -> Bool {
         try requireGate()
-        guard let syni = Syni.shared else {
-            throw SyniError.notInitialized
-        }
-        return try await syni.generateAsync(request: request)
+        return await unsafeAgent.restoreInstallIfReady(persona: persona, model: model)
     }
 
-    /// Model manager (downloads / lookup / delete). Gated.
-    public func models() throws -> ModelManager {
+    /// Uninstall the current persona + model. Gated.
+    public func uninstall() async throws {
         try requireGate()
-        guard let syni = Syni.shared else {
-            throw SyniError.notInitialized
-        }
-        return syni.models
+        await unsafeAgent.uninstall()
     }
 
-    /// IDs of registered personas. Gated. Returns `[]` if Syni hasn't
-    /// been initialized yet.
-    public func availablePersonas() throws -> [String] {
+    /// Release resources held by the underlying runtime. Not gated.
+    public func dispose() async {
+        await unsafeAgent.dispose()
+    }
+
+    // MARK: - Chat
+
+    /// Single-turn chat. Returns the assembled `SyniChatResponse`. Gated.
+    public func chat(
+        _ message: String,
+        hsiContext: [String: Any]? = nil,
+        seed: UInt64 = 0,
+        mode: SyniExecutionMode = .localFirst
+    ) async throws -> SyniChatResponse {
         try requireGate()
-        return Syni.shared?.availablePersonas ?? []
+        return try await unsafeAgent.chat(message, hsiContext: hsiContext, seed: seed, mode: mode)
     }
 
-    /// Reset the underlying Syni SDK (releases all resources;
-    /// primarily for testing). Not gated — letting consent revocation
-    /// drive a reset is the expected path.
-    public func reset() {
-        Syni.reset()
+    /// Streaming chat. Emits `SyniChatEvent` (`.delta` / `.final`).
+    /// Gate is checked at call time; revoking consent mid-stream does
+    /// NOT cancel the in-flight generation.
+    public func chatStream(
+        _ message: String,
+        hsiContext: [String: Any]? = nil,
+        seed: UInt64 = 0,
+        mode: SyniExecutionMode = .localFirst
+    ) throws -> AsyncThrowingStream<SyniChatEvent, Error> {
+        try requireGate()
+        return unsafeAgent.chatStream(message, hsiContext: hsiContext, seed: seed, mode: mode)
     }
 
     private func requireGate() throws {
