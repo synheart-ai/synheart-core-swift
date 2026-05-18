@@ -15,13 +15,11 @@ public enum WindowType {
     case window24h
 }
 
-/// Sleep stage information
-public enum SleepStage {
-    case awake
-    case light
-    case deep
-    case rem
-}
+// Legacy 4-case SleepStage removed — superseded by the richer
+// SleepStage enum in Models/SleepScore.swift (adds `.unknown`,
+// adopts String raw values matching the runtime wire format).
+// Matches Flutter's `hide SleepStage` on the feature-provider
+// export.
 
 // MARK: - Wear Module
 
