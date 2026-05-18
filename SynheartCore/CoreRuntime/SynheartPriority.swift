@@ -67,41 +67,14 @@ public let kPriorityUnranked: Int = Int(Int32.max)
 /// so callers don't have to think about concurrency.
 public final class SynheartPriority {
 
-    // MARK: - C function aliases
-
-    private typealias SetProviderFn = @convention(c) (
-        UnsafePointer<CChar>?, Int32
-    ) -> Int32
-    private typealias SetMetricOverrideFn = @convention(c) (
-        UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32, Int32
-    ) -> Int32
-    private typealias EffectiveRankFn = @convention(c) (
-        UnsafePointer<CChar>?, UnsafePointer<CChar>?
-    ) -> Int32
-    private typealias ResolveFn = @convention(c) (
-        UnsafePointer<CChar>?, UnsafePointer<CChar>?
-    ) -> UnsafeMutablePointer<CChar>?
-    private typealias FreeStringFn = @convention(c) (
-        UnsafeMutablePointer<CChar>?
-    ) -> Void
-
-    private static func sym<T>(_ name: String) -> T? {
-        let lib = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
-        guard let p = dlsym(lib, name) else { return nil }
-        return unsafeBitCast(p, to: T.self)
-    }
-
-    private static let _setProvider:        SetProviderFn?       = sym("synheart_core_priority_set_provider")
-    private static let _setMetricOverride:  SetMetricOverrideFn? = sym("synheart_core_priority_set_metric_override")
-    private static let _effectiveRank:      EffectiveRankFn?     = sym("synheart_core_priority_effective_rank")
-    private static let _resolve:            ResolveFn?           = sym("synheart_core_priority_resolve")
-    private static let _freeString:         FreeStringFn?        = sym("synheart_core_free_string")
+    // Symbol resolution lives in CoreRuntimeBridge so the FFI surface
+    // stays in one place — mirrors Kotlin's CoreRuntimeNative pattern.
 
     // MARK: - Mode
 
     /// Force in-memory mode for tests by passing `forceInMemory: true`.
     public init(forceInMemory: Bool = false) {
-        self.useNative = !forceInMemory && Self._setProvider != nil
+        self.useNative = !forceInMemory && CoreRuntimeBridge._prioritySetProvider != nil
     }
 
     private let useNative: Bool
@@ -121,7 +94,7 @@ public final class SynheartPriority {
 
         if useNative {
             let rc = provider.withCString { p in
-                Self._setProvider?(p, Int32(rank)) ?? -1
+                CoreRuntimeBridge._prioritySetProvider?(p, Int32(rank)) ?? -1
             }
             if rc != 0 { throw PriorityError.runtimeRejected(code: Int(rc)) }
             return
@@ -141,7 +114,7 @@ public final class SynheartPriority {
         if useNative {
             let rc = metric.wireName.withCString { m in
                 provider.withCString { p in
-                    Self._setMetricOverride?(
+                    CoreRuntimeBridge._prioritySetMetricOverride?(
                         m, p, rank == nil ? 0 : 1, Int32(rank ?? 0)
                     ) ?? -1
                 }
@@ -165,7 +138,7 @@ public final class SynheartPriority {
         if useNative {
             return metric.wireName.withCString { m in
                 provider.withCString { p in
-                    Int(Self._effectiveRank?(m, p) ?? Int32(kPriorityUnranked))
+                    Int(CoreRuntimeBridge._priorityEffectiveRank?(m, p) ?? Int32(kPriorityUnranked))
                 }
             }
         }
@@ -191,12 +164,10 @@ public final class SynheartPriority {
             else { return nil }
             let cstr = metric.wireName.withCString { m -> UnsafeMutablePointer<CChar>? in
                 jsonStr.withCString { j in
-                    Self._resolve?(m, j)
+                    CoreRuntimeBridge._priorityResolve?(m, j)
                 }
             }
-            guard let cstr = cstr else { return nil }
-            defer { Self._freeString?(cstr) }
-            let raw = String(cString: cstr)
+            guard let raw = CoreRuntimeBridge.consumeCString(cstr) else { return nil }
             return parseResolveJson(raw)
         }
         return resolveInMemory(metric, samplesByProvider: samplesByProvider)

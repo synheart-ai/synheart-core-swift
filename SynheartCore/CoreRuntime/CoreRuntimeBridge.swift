@@ -94,6 +94,15 @@ public final class CoreRuntimeBridge {
     private typealias TriggerWearRecompFn = @convention(c) (OpaquePointer?, Int32, Int32) -> Void
     private typealias GetWearRefFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
 
+    // Priority + Resilience — handle-less FFI (pure functions). Cached
+    // here so SynheartPriority + SynheartResilience don't each need
+    // their own dlsym machinery. They reach in via `internal` access.
+    internal typealias PrioritySetProviderFn       = @convention(c) (UnsafePointer<CChar>?, Int32) -> Int32
+    internal typealias PrioritySetMetricOverrideFn = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32, Int32) -> Int32
+    internal typealias PriorityEffectiveRankFn     = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int32
+    internal typealias PriorityResolveFn           = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+    internal typealias ResilienceComputeV1Fn       = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+
     // Ambient capture
     private typealias SetAmbientCaptureFn = @convention(c) (OpaquePointer?, Int32) -> Void
     private typealias GetAmbientCaptureFn = @convention(c) (OpaquePointer?) -> Int32
@@ -195,6 +204,13 @@ public final class CoreRuntimeBridge {
     private static let _triggerWearRe: TriggerWearRecompFn? = sym("synheart_core_trigger_wearable_recompute")
     private static let _getWearRef:    GetWearRefFn?        = sym("synheart_core_get_wearable_reference")
 
+    // Priority + Resilience (handle-less, read by per-module utilities)
+    internal static let _prioritySetProvider:       PrioritySetProviderFn?       = sym("synheart_core_priority_set_provider")
+    internal static let _prioritySetMetricOverride: PrioritySetMetricOverrideFn? = sym("synheart_core_priority_set_metric_override")
+    internal static let _priorityEffectiveRank:     PriorityEffectiveRankFn?     = sym("synheart_core_priority_effective_rank")
+    internal static let _priorityResolve:           PriorityResolveFn?           = sym("synheart_core_priority_resolve")
+    internal static let _resilienceComputeV1:       ResilienceComputeV1Fn?       = sym("synheart_core_resilience_compute_v1")
+
     // MARK: - Availability check
 
     /// Whether the core runtime library is linked and the `synheart_core_new` symbol is resolved.
@@ -226,9 +242,15 @@ public final class CoreRuntimeBridge {
     /// Convert a C string pointer to a Swift String, freeing the C string afterward.
     /// Returns nil if the pointer is null.
     private func consumeCString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
+        return Self.consumeCString(ptr)
+    }
+
+    /// Static variant — used by per-module utilities (Priority, Resilience)
+    /// that own no handle and still need to consume runtime-allocated strings.
+    internal static func consumeCString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
         guard let ptr = ptr else { return nil }
         let result = String(cString: ptr)
-        Self._freeString?(ptr)
+        _freeString?(ptr)
         return result
     }
 
