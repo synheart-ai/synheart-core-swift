@@ -68,18 +68,21 @@ final class BaselinesTests: XCTestCase {
         XCTAssertNil(snap.recentMedian)
     }
 
-    func testIsStableMirrorsReferenceStatusCaseInsensitively() {
-        let stable = BaselinesSnapshot(reference: reference(status: "Stable"),
-                                       latestSleepScore: nil, capturedAtMs: 0)
-        XCTAssertTrue(stable.isStable)
-        let warming = BaselinesSnapshot(reference: reference(status: "Warming"),
+    func testIsReadyMirrorsReferenceStatusCaseInsensitively() {
+        let ready = BaselinesSnapshot(reference: reference(status: "READY"),
+                                      latestSleepScore: nil, capturedAtMs: 0)
+        XCTAssertTrue(ready.isReady)
+        let warming = BaselinesSnapshot(reference: reference(status: "WARMING"),
                                         latestSleepScore: nil, capturedAtMs: 0)
-        XCTAssertFalse(warming.isStable)
+        XCTAssertFalse(warming.isReady)
+        let stale = BaselinesSnapshot(reference: reference(status: "STALE"),
+                                      latestSleepScore: nil, capturedAtMs: 0)
+        XCTAssertFalse(stale.isReady)
     }
 
     func testRecentMedianFromRingWinsOverReference() {
         let snap = BaselinesSnapshot(
-            reference: reference(status: "Stable", recentMedian: 99),
+            reference: reference(status: "READY", recentMedian: 99),
             latestSleepScore: nil,
             recentSleepScores: [70, 80, 60],
             capturedAtMs: 0
@@ -90,7 +93,7 @@ final class BaselinesTests: XCTestCase {
 
     func testRecentMedianFallsBackToReferenceWhenRingEmpty() {
         let snap = BaselinesSnapshot(
-            reference: reference(status: "Stable", recentMedian: 78),
+            reference: reference(status: "READY", recentMedian: 78),
             latestSleepScore: nil,
             capturedAtMs: 0
         )
@@ -128,10 +131,10 @@ final class BaselinesTests: XCTestCase {
 
     func testCacheReferenceAndRecoveryLandOnSameSnapshot() {
         let b = Baselines()
-        b.cacheReference(reference(status: "Stable"))
+        b.cacheReference(reference(status: "READY"))
         b.cacheRecoveryScore(recoveryScore(60))
         let snap = b.current()
-        XCTAssertEqual(snap.reference?.status, "Stable")
+        XCTAssertEqual(snap.reference?.status, "READY")
         XCTAssertEqual(snap.latestRecoveryScore?.score, 60)
         XCTAssertNil(snap.latestSleepScore)
     }
@@ -148,7 +151,7 @@ final class BaselinesTests: XCTestCase {
         let b = Baselines()
         b.cacheSleepScore(sleepScore(70), source: "garmin")
         b.cacheRecoveryScore(recoveryScore())
-        b.cacheReference(reference(status: "Stable"))
+        b.cacheReference(reference(status: "READY"))
         b.reset()
         let snap = b.current()
         XCTAssertNil(snap.latestSleepScore)

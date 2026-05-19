@@ -64,9 +64,9 @@ public struct BaselinesSnapshot: Sendable {
         return reference == nil && latestSleepScore == nil && recentSleepScores.isEmpty
     }
 
-    /// True when the reference is present and reports `Stable` status.
-    public var isStable: Bool {
-        return (reference?.status ?? "").lowercased() == "stable"
+    /// True when the reference is present and reports `READY` status — all five primary SRM dimensions are mature enough for personalized scoring.
+    public var isReady: Bool {
+        return (reference?.status ?? "").lowercased() == "ready"
     }
 
     /// Number of prior nights behind the live score, when available.
