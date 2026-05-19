@@ -151,28 +151,12 @@ public final class SynheartResilience {
 
     // MARK: C aliases
 
-    private typealias ComputeFn = @convention(c) (
-        UnsafePointer<CChar>?,
-        UnsafePointer<CChar>?,
-        UnsafePointer<CChar>?
-    ) -> UnsafeMutablePointer<CChar>?
+    // Symbol resolution lives in CoreRuntimeBridge so the FFI surface
+    // stays in one place — mirrors Kotlin's CoreRuntimeNative pattern.
 
-    private typealias FreeStringFn = @convention(c) (
-        UnsafeMutablePointer<CChar>?
-    ) -> Void
-
-    private static func sym<T>(_ name: String) -> T? {
-        let lib = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
-        guard let p = dlsym(lib, name) else { return nil }
-        return unsafeBitCast(p, to: T.self)
-    }
-
-    private static let _compute:    ComputeFn?    = sym("synheart_core_resilience_compute_v1")
-    private static let _freeString: FreeStringFn? = sym("synheart_core_free_string")
-
-    /// `forceUnavailable: true` skips the dlsym lookup — used by tests.
+    /// `forceUnavailable: true` skips the symbol check — used by tests.
     public init(forceUnavailable: Bool = false) {
-        self.useNative = !forceUnavailable && Self._compute != nil
+        self.useNative = !forceUnavailable && CoreRuntimeBridge._resilienceComputeV1 != nil
     }
 
     private let useNative: Bool
@@ -200,17 +184,15 @@ public final class SynheartResilience {
         let resultPtr: UnsafeMutablePointer<CChar>? = samplesJson.withCString { s in
             windowsJson.withCString { w in
                 configJson.withCString { c in
-                    Self._compute?(s, w, c)
+                    CoreRuntimeBridge._resilienceComputeV1?(s, w, c)
                 }
             }
         }
-        guard let cstr = resultPtr else {
+        guard let raw = CoreRuntimeBridge.consumeCString(resultPtr) else {
             throw ResilienceError.computeFailed(
                 message: "runtime returned NULL — likely malformed input"
             )
         }
-        defer { Self._freeString?(cstr) }
-        let raw = String(cString: cstr)
         guard
             let data = raw.data(using: .utf8),
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
