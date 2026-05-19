@@ -593,6 +593,52 @@ public final class CoreRuntimeBridge {
         consumeCString(Self._labFinalize?(handle, endedAtMs))
     }
 
+    // MARK: - Breathing (RFC-Breathing-001)
+
+    // RR samples pushed via `pushRr` already feed the detector. These
+    // configure the target / window / population and read back JSON
+    // verdicts. JSON shape mirrors `synheart_breathing_runtime::ComplianceResult`.
+
+    private typealias BreathSetTargetBpmFn  = @convention(c) (OpaquePointer?, Double) -> Void
+    private typealias BreathSetWindowSecsFn = @convention(c) (OpaquePointer?, Int32)  -> Void
+    private typealias BreathSetPopulationFn = @convention(c) (OpaquePointer?, Int32)  -> Void
+    private typealias BreathEvaluateFn      = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias BreathResetFn         = @convention(c) (OpaquePointer?) -> Void
+
+    private static let _breathSetTargetBpm:  BreathSetTargetBpmFn?  = sym("synheart_core_breathing_set_target_bpm")
+    private static let _breathSetWindowSecs: BreathSetWindowSecsFn? = sym("synheart_core_breathing_set_window_secs")
+    private static let _breathSetPopulation: BreathSetPopulationFn? = sym("synheart_core_breathing_set_population")
+    private static let _breathEvaluate:      BreathEvaluateFn?      = sym("synheart_core_breathing_evaluate")
+    private static let _breathReset:         BreathResetFn?         = sym("synheart_core_breathing_reset")
+
+    /// Set the target breathing rate in breaths per minute (e.g. 6.0 for resonance).
+    public func breathingSetTargetBpm(_ bpm: Double) {
+        Self._breathSetTargetBpm?(handle, bpm)
+    }
+
+    /// Set the rolling-window length in seconds. Native side clamps to `[30, 120]`.
+    public func breathingSetWindowSecs(_ secs: Int) {
+        Self._breathSetWindowSecs?(handle, Int32(secs))
+    }
+
+    /// Set the population threshold profile.
+    /// `0 = Beginner`, `1 = Experienced`, `2 = Clinical`.
+    public func breathingSetPopulation(_ profile: Int) {
+        Self._breathSetPopulation?(handle, Int32(profile))
+    }
+
+    /// Evaluate breathing compliance over the current RR window. Returns a
+    /// JSON `ComplianceResult` string or nil when there isn't enough Tier-1
+    /// data yet.
+    public func breathingEvaluateJson() -> String? {
+        return consumeCString(Self._breathEvaluate?(handle))
+    }
+
+    /// Clear the breathing detector's RR ring buffer.
+    public func breathingReset() {
+        Self._breathReset?(handle)
+    }
+
     // MARK: - HSI State Callback
 
     private typealias SetHsiCallbackFn = @convention(c) (
