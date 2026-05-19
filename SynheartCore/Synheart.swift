@@ -1,6 +1,6 @@
 import Foundation
 import Combine
-import SynheartSession
+@_exported import SynheartSession // re-exports SessionEvent, SessionConfig, etc.
 
 /**
  * Synheart Core SDK - Main Entry Point
