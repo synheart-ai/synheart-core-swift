@@ -67,13 +67,74 @@ The Core SDK strictly separates:
 
 ### Core Modules
 
-1. **Capabilities Module** - Feature gating (core/extended/research)
-2. **Consent Module** - User permission management
-3. **Wear Module** - Biosignal collection from wearables
-4. **Phone Module** - Device motion and context signals
-5. **Behavior Module** - User-device interaction patterns
-6. **HSI Runtime** - Signal fusion and state computation (via the runtime native binary)
-7. **Cloud Connector** - Secure HSI snapshot uploads
+1. **Capabilities Module** — Feature gating (core/extended/research)
+2. **Consent Module** — User permission management
+3. **Wear Module** — Biosignal collection from wearables
+4. **Phone Module** — Device motion and context signals
+5. **Behavior Module** — User-device interaction patterns
+6. **HSI Runtime** — Signal fusion and state computation (via the runtime native binary)
+7. **Cloud Connector** — Secure HSI snapshot uploads
+
+### Optional Modules
+
+These ship in the same target and are wired through the runtime, but only become useful once you've granted the relevant consent / capabilities. Each is a thin Swift facade around an existing FFI surface.
+
+| Module | Purpose | Entry point |
+|---|---|---|
+| **Baselines** | Reactive snapshot of the user's wearable-baseline state — `AnyPublisher<BaselinesSnapshot, Never>` with `latestSleepScore` / `latestRecoveryScore` / `latestReadinessScore` / `reference` / 7-night Path-B ring. | `Baselines.shared` |
+| **Breathing** | RFC-Breathing-001 4-pillar compliance detector. RR samples from `pushRr` feed it automatically; module configures target BPM / population / window. | `BreathingModule(bridge:)` |
+| **Syni** | Consent-gated facade around the [`SyniSwift`](https://github.com/synheart-ai/syni-swift) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `consent.syni` check. | `SyniModule(consent:)` |
+| **HealthKit backfill** | Cold-start SRM seeding from HealthKit sleep + overnight HR/HRV history. Pushes `sleep_need` / `deep_sleep_min` / `rem_sleep_min` / `hrv_rmssd` / `resting_hr` per wake-day. | `HealthKitRuntimeSink(reader:, pushDaily:, triggerRecompute:)` |
+| **Scoring models** | Typed input + result types for the runtime's Sleep / Recovery / Readiness scorers (RFC-SLEEP-SCORE-PIPELINE-0001 / RFC-RECOVERY-SCORE-0001 / RFC-READINESS-SCORE-0001) plus a self-report `SleepQuestionnaireAnswers`. | `Models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.swift` |
+| **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with Flutter + Kotlin siblings. | `Modules/Cloud/UploadModels.swift` |
+
+Examples:
+
+```swift
+// Baselines — react to every score / reference update
+Baselines.shared.updates
+    .sink { snap in
+        if let s = snap.latestSleepScore { render(s.score) }
+        if let r = snap.latestRecoveryScore { render(r.score) }
+    }
+    .store(in: &cancellables)
+
+// Breathing — configure once, evaluate per UI frame
+let breathing = BreathingModule(bridge: coreRuntime)
+breathing.setTargetBpm(6.0)
+breathing.setPopulation(.beginner)
+switch breathing.evaluate() {
+case let .compliant(metrics):
+    showCompliant(metrics)
+case let .notCompliant(_, reason):
+    showCoaching(BreathingGuidanceCopy.copyFor(reason))
+case let .insufficient(reason):
+    showWarming(reason)
+}
+
+// HealthKit backfill — call on first launch after authorization
+let reader = HealthKitHistoryReader() // from synheart-wear-swift
+let sink = HealthKitRuntimeSink(
+    reader: reader,
+    pushDaily: { dim, day, value, conf, fid in
+        coreRuntime.pushWearableDailyValue(
+            dimension: dim, dayIndex: day, value: value,
+            confidence: conf, fidelity: fid
+        )
+    },
+    triggerRecompute: { coreRuntime.triggerWearableRecompute(triggerType: 0, asOfDay: 0) }
+)
+let result = try await sink.backfill(daysBack: 365)
+print("seeded \(result.daysIngested) days, \(result.dimensionsPushed) dimensions")
+
+// Syni — consent-gated agent
+let syni = SyniModule(consent: consentModule)
+try await syni.install(
+    persona: try await SyniSpecPersona.load("focus.coach.v1"),
+    model: SyniModels.qwen25_15bInstructQ4
+)
+let reply = try await syni.chat("how should I focus right now?")
+```
 
 ### Data Flow
 
