@@ -164,6 +164,24 @@ public final class SynheartCoreShim {
         return parseJsonDict(json)
     }
 
+    /// Enrol the device in a research study by redeeming an access + study code.
+    public func enrolResearchStudy(accessCode: String, studyCode: String) -> [String: Any]? {
+        guard let json = bridge?.enrolResearchStudy(accessCode: accessCode, studyCode: studyCode) else { return nil }
+        return parseJsonDict(json)
+    }
+
+    /// Preview an access + study code pair without redeeming the code.
+    public func validateResearchStudyCodes(accessCode: String, studyCode: String) -> [String: Any]? {
+        guard let json = bridge?.validateResearchStudyCodes(accessCode: accessCode, studyCode: studyCode) else { return nil }
+        return parseJsonDict(json)
+    }
+
+    /// Withdraw from the device's active research study for this app.
+    public func withdrawResearchStudy() -> [String: Any]? {
+        guard let json = bridge?.withdrawResearchStudy() else { return nil }
+        return parseJsonDict(json)
+    }
+
     /// Get decrypted HSI windows for a session.
     public func getHSIWindows(_ sessionId: String, range: WindowRange? = nil) -> [[String: Any]] {
         let startMs = range?.startMs ?? 0

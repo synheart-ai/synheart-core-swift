@@ -52,6 +52,10 @@ public final class CoreRuntimeBridge {
     private typealias HasConsentFn        = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
     private typealias CurrentConsentFn    = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
 
+    // Research study
+    private typealias ResearchStudyFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+    private typealias WithdrawStudyFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+
     // Capabilities
     private typealias LoadCapTokenFn      = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int32
 
@@ -158,6 +162,11 @@ public final class CoreRuntimeBridge {
     private static let _revokeConsent: RevokeConsentFn?   = sym("synheart_core_revoke_consent")
     private static let _hasConsent:    HasConsentFn?      = sym("synheart_core_has_consent")
     private static let _curConsent:    CurrentConsentFn?   = sym("synheart_core_current_consent")
+
+    // Research study
+    private static let _enrolStudy:    ResearchStudyFn?   = sym("synheart_core_enrol_study")
+    private static let _validateStudy: ResearchStudyFn?   = sym("synheart_core_validate_study_codes")
+    private static let _withdrawStudy: WithdrawStudyFn?   = sym("synheart_core_withdraw_study")
 
     // Capabilities
     private static let _loadCapToken:  LoadCapTokenFn?    = sym("synheart_core_load_capability_token")
@@ -353,6 +362,34 @@ public final class CoreRuntimeBridge {
     /// Get the full consent snapshot as JSON.
     public func currentConsent() -> String? {
         consumeCString(Self._curConsent?(handle))
+    }
+
+    // MARK: - Research study
+
+    /// Enrol the device in a research study by redeeming an access + study code.
+    /// Returns the service response JSON (enrolment on success, or an `error`),
+    /// or nil if the runtime doesn't expose the symbol.
+    public func enrolResearchStudy(accessCode: String, studyCode: String) -> String? {
+        accessCode.withCString { ac in
+            studyCode.withCString { sc in
+                consumeCString(Self._enrolStudy?(handle, ac, sc))
+            }
+        }
+    }
+
+    /// Preview an access + study code pair without redeeming the code.
+    public func validateResearchStudyCodes(accessCode: String, studyCode: String) -> String? {
+        accessCode.withCString { ac in
+            studyCode.withCString { sc in
+                consumeCString(Self._validateStudy?(handle, ac, sc))
+            }
+        }
+    }
+
+    /// Withdraw from the device's active research study for this app. No codes —
+    /// the participant + app come from the device's signed credential. Idempotent.
+    public func withdrawResearchStudy() -> String? {
+        consumeCString(Self._withdrawStudy?(handle))
     }
 
     // MARK: - Capabilities
