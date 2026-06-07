@@ -188,6 +188,30 @@ public class Synheart {
         return cr.getSessionSummary(sessionId)
     }
 
+    // MARK: - Research Studies
+
+    /// Enrol the device in a research study by redeeming an access + study code.
+    /// Enrolment rides the device's signed cloud credential — no tokens are
+    /// handled by the caller. Returns the service response (enrolment on success,
+    /// or an `error` key), or nil if the runtime is unavailable.
+    public static func enrolResearchStudy(accessCode: String, studyCode: String) throws -> [String: Any]? {
+        guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
+        return cr.enrolResearchStudy(accessCode: accessCode, studyCode: studyCode)
+    }
+
+    /// Preview an access + study code pair without redeeming the code.
+    public static func validateResearchStudyCodes(accessCode: String, studyCode: String) throws -> [String: Any]? {
+        guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
+        return cr.validateResearchStudyCodes(accessCode: accessCode, studyCode: studyCode)
+    }
+
+    /// Withdraw from the device's active research study for this app. No codes —
+    /// the participant + app come from the device's signed credential. Idempotent.
+    public static func withdrawResearchStudy() throws -> [String: Any]? {
+        guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
+        return cr.withdrawResearchStudy()
+    }
+
     /// Get decrypted HSI window artifacts for a session.
     public static func getHSIWindows(_ sessionId: String, range: WindowRange? = nil) throws -> [[String: Any]] {
         return []
