@@ -10,7 +10,7 @@ import Foundation
 /// - Linux: `dlopen("libsynheart_core_runtime.so")`
 /// - iOS:   `RTLD_DEFAULT` (statically linked into the app binary)
 ///
-/// All 42 `synheart_core_*` C symbols are resolved at load time.
+/// The `synheart_core_*` C symbols are resolved at load time.
 /// Complex types are exchanged as JSON strings; all returned C strings
 /// must be freed with `synheart_core_free_string`.
 public final class CoreRuntimeBridge {
@@ -25,7 +25,7 @@ public final class CoreRuntimeBridge {
     /// cleared, or when this bridge deinits.
     private var hsiCallbackBox: Unmanaged<AnyObject>?
 
-    // MARK: - C function type aliases (42 functions)
+    // MARK: - C function type aliases
 
     // Lifecycle
     private typealias NewFn               = @convention(c) (UnsafePointer<CChar>?) -> OpaquePointer?
@@ -117,7 +117,7 @@ public final class CoreRuntimeBridge {
     private typealias SetAmbientCaptureFn = @convention(c) (OpaquePointer?, Int32) -> Void
     private typealias GetAmbientCaptureFn = @convention(c) (OpaquePointer?) -> Int32
 
-    // MARK: - Resolved function pointers (42)
+    // MARK: - Resolved function pointers
 
     private static let lib: UnsafeMutableRawPointer? = {
         #if os(macOS)
