@@ -55,6 +55,7 @@ public final class CoreRuntimeBridge {
     // Research study
     private typealias ResearchStudyFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
     private typealias WithdrawStudyFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias RequestStudyDeletionFn = @convention(c) (OpaquePointer?, Bool) -> UnsafeMutablePointer<CChar>?
 
     // Capabilities
     private typealias LoadCapTokenFn      = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int32
@@ -167,6 +168,7 @@ public final class CoreRuntimeBridge {
     private static let _enrolStudy:    ResearchStudyFn?   = sym("synheart_core_enrol_study")
     private static let _validateStudy: ResearchStudyFn?   = sym("synheart_core_validate_study_codes")
     private static let _withdrawStudy: WithdrawStudyFn?   = sym("synheart_core_withdraw_study")
+    private static let _requestStudyDeletion: RequestStudyDeletionFn? = sym("synheart_core_request_study_data_deletion")
 
     // Capabilities
     private static let _loadCapToken:  LoadCapTokenFn?    = sym("synheart_core_load_capability_token")
@@ -390,6 +392,16 @@ public final class CoreRuntimeBridge {
     /// the participant + app come from the device's signed credential. Idempotent.
     public func withdrawResearchStudy() -> String? {
         consumeCString(Self._withdrawStudy?(handle))
+    }
+
+    /// Request erasure of the data the participant contributed to their study for
+    /// this app — the deletion the consent copy promises alongside withdrawal. No
+    /// identifiers are passed; the participant + app come from the device's signed
+    /// credential. When `dryRun` is true the response is an inventory preview and
+    /// nothing is deleted; a real request is accepted asynchronously and carries a
+    /// `request_id`. Idempotent. Returns nil if the runtime doesn't expose the symbol.
+    public func requestStudyDataDeletion(dryRun: Bool = false) -> String? {
+        consumeCString(Self._requestStudyDeletion?(handle, dryRun))
     }
 
     // MARK: - Capabilities

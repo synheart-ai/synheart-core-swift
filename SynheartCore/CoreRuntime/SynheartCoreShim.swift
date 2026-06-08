@@ -182,6 +182,14 @@ public final class SynheartCoreShim {
         return parseJsonDict(json)
     }
 
+    /// Request erasure of the data the participant contributed to their study.
+    /// `dryRun` returns an inventory preview without deleting; a real request is
+    /// accepted asynchronously and carries a `request_id`.
+    public func requestStudyDataDeletion(dryRun: Bool = false) -> [String: Any]? {
+        guard let json = bridge?.requestStudyDataDeletion(dryRun: dryRun) else { return nil }
+        return parseJsonDict(json)
+    }
+
     /// Get decrypted HSI windows for a session.
     public func getHSIWindows(_ sessionId: String, range: WindowRange? = nil) -> [[String: Any]] {
         let startMs = range?.startMs ?? 0

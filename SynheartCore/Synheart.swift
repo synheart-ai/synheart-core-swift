@@ -212,6 +212,17 @@ public class Synheart {
         return cr.withdrawResearchStudy()
     }
 
+    /// Request erasure of the data the participant contributed to their study for
+    /// this app — the deletion the consent copy promises alongside withdrawal. No
+    /// identifiers are passed; the participant + app come from the device's signed
+    /// credential. When `dryRun` is true the response is an inventory preview and
+    /// nothing is deleted; a real request is accepted asynchronously and carries a
+    /// `request_id`. Idempotent. Returns nil if the runtime is unavailable.
+    public static func requestStudyDataDeletion(dryRun: Bool = false) throws -> [String: Any]? {
+        guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
+        return cr.requestStudyDataDeletion(dryRun: dryRun)
+    }
+
     /// Get decrypted HSI window artifacts for a session.
     public static func getHSIWindows(_ sessionId: String, range: WindowRange? = nil) throws -> [[String: Any]] {
         return []
