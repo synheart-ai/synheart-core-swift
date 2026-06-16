@@ -3,7 +3,7 @@ import CryptoKit
 import Combine
 
 /// Transport-independent, opt-in phone-side consumer of the watch→phone edge
-/// wire contract (`docs/EDGE-WIRE-CONTRACT.md` in `synheart-edge`).
+/// wire contract (EDGE-WIRE-CONTRACT.md in the synheart-edge repo).
 ///
 /// This is the canonical phone-side counterpart to the watch producer
 /// (`synheart-core-swift-edge` / `PhoneRelay`). Every app used to re-implement

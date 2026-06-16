@@ -4,7 +4,7 @@ import Combine
 
 /// Pure, transport-independent tests for ``EdgeIngest`` — no `WatchConnectivity`
 /// import, so they run under `swift test` on macOS. They assert the parsed keys
-/// match the wire contract (`docs/EDGE-WIRE-CONTRACT.md`, sections cited per test).
+/// match the wire contract (EDGE-WIRE-CONTRACT.md in the synheart-edge repo, sections cited per test).
 final class EdgeIngestTests: XCTestCase {
 
     /// Collecting delegate to assert callback semantics.
