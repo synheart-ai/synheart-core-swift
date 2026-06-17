@@ -11,19 +11,25 @@ public struct HSIAxisValue: Codable {
     }
 }
 
-/// The four canonical HSI axes.
+/// The canonical HSI axes surfaced to hosts.
 public struct HSIAxes: Codable {
     public let focus: HSIAxisValue?
     public let arousal: HSIAxisValue?
     public let capacity: HSIAxisValue?
     public let sleep: HSIAxisValue?
+    /// Multimodal stress reading (motion-gated autonomic primary fused with a
+    /// behavioral corroborator). New in engine v0.10.0; nil on the legacy/1.2
+    /// path that never carried it.
+    public let stress: HSIAxisValue?
 
     public init(focus: HSIAxisValue? = nil, arousal: HSIAxisValue? = nil,
-                capacity: HSIAxisValue? = nil, sleep: HSIAxisValue? = nil) {
+                capacity: HSIAxisValue? = nil, sleep: HSIAxisValue? = nil,
+                stress: HSIAxisValue? = nil) {
         self.focus = focus
         self.arousal = arousal
         self.capacity = capacity
         self.sleep = sleep
+        self.stress = stress
     }
 }
 
@@ -76,7 +82,8 @@ public struct HSIState {
             focus: parseAxis("focus"),
             arousal: parseAxis("arousal"),
             capacity: parseAxis("capacity"),
-            sleep: parseAxis("sleep")
+            sleep: parseAxis("sleep"),
+            stress: parseAxis("stress")
         )
     }
 }
