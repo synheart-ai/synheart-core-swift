@@ -5,7 +5,7 @@ final class HSIStateTests: XCTestCase {
 
     func testParsesNestedHSIJson() {
         let json = """
-        {"subject_id":"usr_123","timestamp_ms":1700000000000,"hsi":{"focus":{"value":0.8,"confidence":0.9},"arousal":{"value":0.5,"confidence":0.7},"capacity":{"value":0.6,"confidence":0.8},"sleep":{"value":0.3,"confidence":0.95}}}
+        {"subject_id":"usr_123","timestamp_ms":1700000000000,"hsi":{"focus":{"value":0.8,"confidence":0.9},"arousal":{"value":0.5,"confidence":0.7},"capacity":{"value":0.6,"confidence":0.8},"sleep":{"value":0.3,"confidence":0.95},"stress":{"value":0.38,"confidence":0.55}}}
         """
         let state = HSIState.fromJson(json)
         XCTAssertEqual(state.subjectId, "usr_123")
@@ -15,6 +15,8 @@ final class HSIStateTests: XCTestCase {
         XCTAssertEqual(state.hsi.arousal?.value, 0.5)
         XCTAssertEqual(state.hsi.capacity?.value, 0.6)
         XCTAssertEqual(state.hsi.sleep?.value, 0.3)
+        XCTAssertEqual(state.hsi.stress?.value, 0.38)
+        XCTAssertEqual(state.hsi.stress?.confidence, 0.55)
         XCTAssertEqual(state.rawJson, json)
     }
 
@@ -28,6 +30,7 @@ final class HSIStateTests: XCTestCase {
         XCTAssertEqual(state.hsi.arousal?.value, 0.4)
         XCTAssertNil(state.hsi.capacity)
         XCTAssertNil(state.hsi.sleep)
+        XCTAssertNil(state.hsi.stress)
     }
 
     func testHandlesMalformedJson() {
