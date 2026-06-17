@@ -1,6 +1,6 @@
 # Synheart Core SDK - SWIFT
 
-[![Version](https://img.shields.io/badge/version-0.0.5-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-0.0.7-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
@@ -158,7 +158,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.0.5")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.0.7")
 ]
 ```
 
@@ -435,6 +435,84 @@ Synheart.onHSIUpdate
     }
     .store(in: &cancellables)
 ```
+
+## Edge ingest (watch → phone)
+
+`EdgeIngest` is the canonical phone-side consumer of the Synheart **edge wire
+contract** (watch → phone). It is the counterpart to the watch producer
+(`synheart-core-swift-edge` / `PhoneRelay`) and exists so apps stop
+re-implementing watch→phone ingest: parse, hash-verify
+(`payload_hash_sha256`), HSI-version validate (§0), dedupe by `artifact_id`,
+and ACK all live here once. The core holds **no** `WatchConnectivity` import,
+so it compiles and unit-tests on any platform (`swift test` runs on macOS). See
+[EDGE-WIRE-CONTRACT.md](https://github.com/synheart-ai/synheart-edge/blob/main/docs/EDGE-WIRE-CONTRACT.md)
+for the canonical message shapes.
+
+```swift
+import Combine
+import SynheartCore
+
+// 1. Construct (optionally with a Delegate).
+let ingest = EdgeIngest()
+
+// 2. Observe the broadcast `events` publisher (parity with Kotlin's
+//    `SharedFlow` and Dart's `Stream<EdgeEvent>`).
+let cancellable = ingest.events.sink { event in
+    switch event {
+    case .hr(let s):        // …
+    case .bio(let s):       // …
+    case .artifact(let a):  render(a.payloadJson)  // verified + non-duplicate
+    case .sessionEvent(let type, let body): break
+    }
+}
+
+// 3. Feed decoded bodies in; then drain + send the artifact_ack.
+let outcome = ingest.ingest(body)           // [String: Any] from the adapter
+if let ack = ingest.drainAck() {            // { "command":"artifact_ack", … }
+    session.sendMessage(ack, replyHandler: nil)  // → Wire Contract §4/§5
+}
+```
+
+**Three notification mechanisms — pick what fits.** `EdgeIngest` surfaces every
+parsed body three ways, all firing in lock-step, so you wire only what you need:
+
+- **`delegate` (`EdgeIngest.Delegate`)** — classic protocol callbacks
+  (`edgeIngestDidReceiveHrSample`, `…DidAcceptArtifact`, etc.). Use when you have
+  a single, long-lived owner object (e.g. a coordinator) that wants push
+  callbacks. All methods are optional.
+- **`events: AnyPublisher<EdgeEvent, Never>`** — a Combine publisher. Use for
+  reactive/SwiftUI pipelines or when multiple subscribers need the stream.
+- **`@discardableResult Outcome` return from `ingest(_:)`** — a synchronous,
+  per-body result (`.artifactAccepted` / `.artifactDuplicate` /
+  `.artifactHashMismatch` / `.artifactDeadLettered` / `.sessionEvent` /
+  `.dropped(reason:)`). Use in the
+  transport adapter or tests when you want to branch on the result of a single
+  body without holding state.
+
+For parity awareness: the Kotlin SDK additionally exposes `Listener` hooks
+`onUnsupportedHsiVersion(...)` / `onHashMismatch(...)`; Swift folds those signals
+into the `Outcome` return value (`.artifactHashMismatch`) and logging.
+
+**Delivery hardening.** Because the watch outbox is delete-on-ACK, ingest is
+hardened against two failure modes:
+
+- **Duplicate re-ack.** A duplicate `artifact_id` (already accepted) is **not**
+  re-surfaced — `ingest(_:)` returns `.artifactDuplicate(artifactId:)` — but it
+  **is** re-queued for ACK. A lost ACK would otherwise make the watch resend
+  forever; re-acking duplicates clears the outbox. The dedupe set is a bounded
+  LRU (capacity `EdgeIngest.seenLruCapacity`), so memory stays flat.
+- **Poison-pill dead-letter.** A deterministically-corrupt artifact whose
+  `payload_hash_sha256` keeps mismatching is detected per `artifact_id`: after
+  `EdgeIngest.poisonPillThreshold` (3) mismatches it is **dead-lettered** —
+  `ingest(_:)` returns `.artifactDeadLettered(artifactId:)`, the optional
+  delegate hook `edgeIngestDidDeadLetterArtifact(artifactId:expected:actual:attempts:)`
+  fires, and the id is ack-to-discarded so it stops blocking the outbox. The
+  first/normal mismatch still returns `.artifactHashMismatch` without acking.
+
+**Opt-in transport adapter.** `EdgeIngestSessionAdapter` is a thin, opt-in
+`WCSession` adapter that routes incoming bodies into an `EdgeIngest` core by the
+body `type` and sends the produced `artifact_ack` back. Nothing in the SDK wires
+it in by default.
 
 ## Related Repositories
 

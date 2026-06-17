@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`EdgeIngest`** — canonical phone-side consumer of the Synheart edge wire
+  contract (watch → phone; see
+  [EDGE-WIRE-CONTRACT.md](https://github.com/synheart-ai/synheart-edge/blob/main/docs/EDGE-WIRE-CONTRACT.md)).
+  Holds no `WatchConnectivity` import, so it compiles and unit-tests on macOS.
+  Parses `hr_sample` / `bio_sample` / `hsi_artifact` / session events and, for
+  artifacts, dedupes by `artifact_id`, verifies `payload_hash_sha256` ==
+  sha256(`payload_json`), validates the inner `hsi_version` against the supported
+  set, and produces the `artifact_ack` body. Public surface:
+  - Sealed `EdgeEvent` family (`.hr | .bio | .artifact | .sessionEvent`) plus
+    the typed payloads (`HrSample`, `BioSample`, `Artifact`, `Accel`).
+  - Reactive `events: AnyPublisher<EdgeEvent, Never>` broadcast publisher,
+    emitting in lock-step with the `Delegate` callbacks (parity with the Kotlin
+    `SharedFlow` and Dart `Stream<EdgeEvent>`).
+  - `Delegate` protocol callbacks and the `@discardableResult Outcome` return
+    from `ingest(_:)` (which folds the Kotlin-only `onUnsupportedHsiVersion` /
+    `onHashMismatch` signals into `.artifactHashMismatch` + logging), plus the
+    optional poison-pill / dead-letter delegate hook
+    `edgeIngestDidDeadLetterArtifact(artifactId:expected:actual:attempts:)`.
+  - ACK helpers `drainAck()` / `makeAckBody(artifactIds:)`.
+  - Delivery hardening (the watch outbox is delete-on-ACK):
+    - **Duplicate re-ack** — a duplicate `artifact_id` is not re-surfaced
+      (`Outcome.artifactDuplicate`) but is re-queued for ACK, so a lost ACK no
+      longer makes the watch resend forever.
+    - **Bounded dedupe set** — the seen-artifact set is a bounded LRU
+      (`seenLruCapacity`), keeping memory flat over a long-lived process.
+    - **Poison-pill dead-letter** — an artifact that fails hash verification
+      `poisonPillThreshold` (3) times for the same id is dead-lettered
+      (`Outcome.artifactDeadLettered`, the new delegate hook, and
+      ack-to-discard) so a deterministically-corrupt artifact stops blocking the
+      outbox.
+- **`EdgeIngestSessionAdapter`** — opt-in `WCSession` adapter that routes bodies
+  into `EdgeIngest` by the body `type` and sends the `artifact_ack` back. Not
+  wired in by default.
+
 ## [0.0.7] - 2026-06-07
 
 ### Added
