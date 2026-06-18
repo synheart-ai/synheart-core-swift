@@ -439,14 +439,12 @@ Synheart.onHSIUpdate
 ## Edge ingest (watch → phone)
 
 `EdgeIngest` is the canonical phone-side consumer of the Synheart **edge wire
-contract** (watch → phone). It is the counterpart to the watch producer
-(`synheart-core-swift-edge` / `PhoneRelay`) and exists so apps stop
-re-implementing watch→phone ingest: parse, hash-verify
+contract** (watch → phone). It is the counterpart to the watch producer and
+exists so apps stop re-implementing watch→phone ingest: parse, hash-verify
 (`payload_hash_sha256`), HSI-version validate (§0), dedupe by `artifact_id`,
 and ACK all live here once. The core holds **no** `WatchConnectivity` import,
-so it compiles and unit-tests on any platform (`swift test` runs on macOS). See
-[EDGE-WIRE-CONTRACT.md](https://github.com/synheart-ai/synheart-edge/blob/main/docs/EDGE-WIRE-CONTRACT.md)
-for the canonical message shapes.
+so it compiles and unit-tests on any platform (`swift test` runs on macOS). The
+canonical message shapes are defined by the Synheart edge wire contract.
 
 ```swift
 import Combine
