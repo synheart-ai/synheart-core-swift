@@ -1,8 +1,8 @@
-# Synheart Core SDK - SWIFT
+# Synheart Core SDK — Swift
 
 [![Version](https://img.shields.io/badge/version-0.0.7-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
-[![Swift](https://img.shields.io/badge/swift-%3E%3D5.9-orange.svg)](https://swift.org)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![Swift](https://img.shields.io/badge/Swift-5.9%2B-FA7343.svg)](https://swift.org)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 > **Source-available.** This repository is open for reading, auditing, and
 > filing issues. We do **not** accept pull requests — see
