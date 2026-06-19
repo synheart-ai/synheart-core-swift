@@ -2,7 +2,7 @@ import Foundation
 import Combine
 
 /// Thin entry point that replaces `Synheart.swift`'s internal storage / crypto /
-/// sync / consent / pipeline logic with FFI calls to `synheart-core-runtime`.
+/// sync / consent / pipeline logic with FFI calls to the Synheart native runtime.
 ///
 /// Platform-specific modules (WearModule, PhoneModule, BehaviorModule, SessionModule)
 /// remain in their existing files -- this class only delegates the "core services"

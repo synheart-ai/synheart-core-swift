@@ -3,7 +3,7 @@
 // Multi-source priority resolver — Swift bindings.
 //
 // Mirrors `synheart-core-flutter/lib/src/priority/synheart_priority.dart`
-// in API shape. When `synheart-core-runtime 5.4.0+` is loaded, all
+// in API shape. When the Synheart native runtime (5.4.0+) is loaded, all
 // calls route through the FFI symbols. Older runtimes (or unit tests
 // running headless) fall back to a pure-Swift in-memory store with
 // the same semantics so consumer apps can still develop without a

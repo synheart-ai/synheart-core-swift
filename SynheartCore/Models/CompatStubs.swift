@@ -21,10 +21,9 @@
 //
 //   When the Swift SDK gains parity, this entire file is deleted.
 //
-// Canonical implementation lives in the Rust runtime:
+// Canonical implementation lives in the Synheart native runtime:
 //
-//   - sync types & flows:
-//       synheart-core-runtime/crates/core-runtime/src/sync/
+//   - sync types & flows live in the Synheart native runtime.
 //
 // Do not extend the symbols here; extend them in the runtime and
 // expose runtime-backed Swift wrappers in `CoreRuntime/`.
