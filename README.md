@@ -294,8 +294,6 @@ A module-based system for data collection and processing:
 - **CapabilityModule**: Handles feature flags and capability levels
 - **ConsentModule**: Manages user consent for data collection
 
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
-
 ## Data Models
 
 The runtime emits **HSI 1.3 JSON** as its public output. Apps subscribe via `Synheart.onHSIUpdate` (raw JSON) or `Synheart.onStateUpdate` (typed `HSIState`). Internal types (`Hsv` and friends) are not part of the public SDK API.
@@ -595,16 +593,12 @@ baseUrl: "http://192.168.1.100:8083"  // your machine's LAN IP
 ### Default credentials
 
 Production cloud ingest is device-signed and consent-gated. The `synheart local`
-server below ships development-only mock keys for offline iteration.
+server ships development-only mock keys for offline iteration.
 
 - **API Key:** `mock-dev-api-key-2026` (mock platform only)
 - **Mock dev secret:** `mock-dev-hmac-secret-2026` (local testing only)
 
 Ingested payloads are persisted as JSON files in the local server's data directory.
-
-## Documentation
-
-- **[Architecture](docs/ARCHITECTURE.md)** - Detailed architecture documentation
 
 ## 📄 License
 
