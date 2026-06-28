@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
+  `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
+  consent token scoped to the current subject (configure-cloud on init,
+  mint-on-grant, init self-heal) so uploads are attributed to that subject.
+
+### Changed
+- Account deletion (`requestAccountDeletion` / `cancelAccountDeletion`) now goes
+  through the native runtime's device-signed request instead of an in-process
+  bearer token. Request signing is backed by `synheart-auth-swift`.
+
+### Removed
+- **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` aliases —
+  use `deviceMotion` / `systemState`.
+- Internal migration stubs (stub `SynheartAuth` / `SignedHeadersStub` /
+  `AuthTokenStub`, `ConsentModule.getCurrentToken`). These are replaced by
+  `synheart-auth-swift` and runtime-backed equivalents; `SyncResult`,
+  `SyncStatus`, `SessionRecord`, and `CapabilityException` are now real public
+  types (no longer deprecated stubs).
+
 ## [0.0.8] - 2026-06-17
 
 ### Added

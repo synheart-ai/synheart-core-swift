@@ -201,12 +201,6 @@ public struct PhoneContextConsent: Codable {
         self.systemState = systemState
     }
 
-    @available(*, deprecated, renamed: "deviceMotion")
-    public var motion: Bool { deviceMotion }
-
-    @available(*, deprecated, renamed: "systemState")
-    public var screenState: Bool { systemState }
-
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if let val = try? container.decode(Bool.self, forKey: .deviceMotion) {

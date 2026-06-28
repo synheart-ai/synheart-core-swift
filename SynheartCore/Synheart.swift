@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SynheartAuth
 @_exported import SynheartSession // re-exports SessionEvent, SessionConfig, etc.
 
 /**
@@ -278,45 +279,27 @@ public class Synheart {
         shared.isRunning = false
     }
 
-    /// Request account deletion -- wipes local data and requests server-side deletion.
+    /// Request account deletion -- requests server-side deletion (device-signed
+    /// by the runtime) and wipes local data.
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
-        if let token = shared.consentModule?.getCurrentToken(), token.isValid {
-            let url = URL(string: "https://api.synheart.ai/auth/v1/delete")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("Bearer \(token.token)", forHTTPHeaderField: "Authorization")
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["confirmation": "DELETE_MY_ACCOUNT"])
-
-            let (_, response) = try await URLSession.shared.data(for: request)
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            if statusCode != 200 && statusCode != 202 {
-                SynheartLogger.log("[Synheart] Server account deletion request returned status \(statusCode)")
-            }
-        }
-
+        // The runtime owns the device-signed account-deletion request.
+        let serverResult = shared.coreRuntime?.requestAccountDeletion()
         try await wipeLocalData()
+        if let serverResult = serverResult, serverResult.status == "accepted" {
+            return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion requested.")
+        }
         return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion pending.")
     }
 
-    /// Cancel a pending account deletion request.
+    /// Cancel a pending account deletion request (device-signed by the runtime).
     public static func cancelAccountDeletion() async throws -> DeletionRequestResult {
-        guard let token = shared.consentModule?.getCurrentToken(), token.isValid else {
-            return DeletionRequestResult(status: "error", message: "No valid auth token; cannot cancel deletion.")
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            return DeletionRequestResult(status: "error", message: "Runtime unavailable; cannot cancel deletion.")
         }
-
-        let url = URL(string: "https://api.synheart.ai/auth/v1/delete/cancel")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token.token)", forHTTPHeaderField: "Authorization")
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-        if statusCode == 200 {
+        if cr.cancelAccountDeletion() {
             return DeletionRequestResult(status: "cancelled", message: "Account deletion cancelled.")
         }
-        return DeletionRequestResult(status: "error", message: "Server returned status \(statusCode).")
+        return DeletionRequestResult(status: "error", message: "Cancel request failed.")
     }
 
     /// Log out -- revoke consent.
