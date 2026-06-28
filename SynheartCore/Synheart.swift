@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SynheartAuth
 @_exported import SynheartSession // re-exports SessionEvent, SessionConfig, etc.
 
 /**
@@ -61,7 +62,22 @@ public class Synheart {
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
     private var cancellables = Set<AnyCancellable>()
 
+    /// Subject the most recently issued cloud consent token was minted for.
+    /// Used to detect a stale (different-subject) token after an account re-key.
+    private var currentTokenSubject: String?
+
     private init() {}
+
+    /// The subject id this SDK instance is configured for — the value uploads
+    /// are attributed under and the consent token is minted for. Nil when not
+    /// configured.
+    var subjectId: String? { _synheartConfig?.subjectId ?? userId }
+
+    /// Parse a JSON object string into a dictionary, or nil.
+    private func parseDict(_ json: String) -> [String: Any]? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
 
     // MARK: - Public State
 
@@ -263,45 +279,27 @@ public class Synheart {
         shared.isRunning = false
     }
 
-    /// Request account deletion -- wipes local data and requests server-side deletion.
+    /// Request account deletion -- requests server-side deletion (device-signed
+    /// by the runtime) and wipes local data.
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
-        if let token = shared.consentModule?.getCurrentToken(), token.isValid {
-            let url = URL(string: "https://api.synheart.ai/auth/v1/delete")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("Bearer \(token.token)", forHTTPHeaderField: "Authorization")
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["confirmation": "DELETE_MY_ACCOUNT"])
-
-            let (_, response) = try await URLSession.shared.data(for: request)
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            if statusCode != 200 && statusCode != 202 {
-                SynheartLogger.log("[Synheart] Server account deletion request returned status \(statusCode)")
-            }
-        }
-
+        // The runtime owns the device-signed account-deletion request.
+        let serverResult = shared.coreRuntime?.requestAccountDeletion()
         try await wipeLocalData()
+        if let serverResult = serverResult, serverResult.status == "accepted" {
+            return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion requested.")
+        }
         return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion pending.")
     }
 
-    /// Cancel a pending account deletion request.
+    /// Cancel a pending account deletion request (device-signed by the runtime).
     public static func cancelAccountDeletion() async throws -> DeletionRequestResult {
-        guard let token = shared.consentModule?.getCurrentToken(), token.isValid else {
-            return DeletionRequestResult(status: "error", message: "No valid auth token; cannot cancel deletion.")
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            return DeletionRequestResult(status: "error", message: "Runtime unavailable; cannot cancel deletion.")
         }
-
-        let url = URL(string: "https://api.synheart.ai/auth/v1/delete/cancel")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token.token)", forHTTPHeaderField: "Authorization")
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-        if statusCode == 200 {
+        if cr.cancelAccountDeletion() {
             return DeletionRequestResult(status: "cancelled", message: "Account deletion cancelled.")
         }
-        return DeletionRequestResult(status: "error", message: "Server returned status \(statusCode).")
+        return DeletionRequestResult(status: "error", message: "Cancel request failed.")
     }
 
     /// Log out -- revoke consent.
@@ -495,6 +493,19 @@ public class Synheart {
                 guard self.consentModule?.current().biosignals == true else { return }
                 self.hsiSubject.send(json)
             }
+
+            // Configure the cloud consent client so a subject-scoped token can be
+            // minted; without a base URL the cloud clients are unconfigured.
+            let cloudBaseUrl = resolvedConfig.cloudConfig?.baseUrl ?? ApiEndpoints.defaultCloudBaseUrl
+            _ = bridge.consentConfigureCloud(baseUrl: cloudBaseUrl, appId: resolvedConfig.appId)
+
+            // Self-heal: if cloud upload is already in the effective state (e.g. a
+            // persisted grant), re-ensure a token for the current subject. Best-effort.
+            if let effJson = bridge.consentEffectiveState(),
+               let eff = parseDict(effJson),
+               (eff["cloud_upload"] as? Bool) == true {
+                _ = await _ensureCloudConsentReady()
+            }
         }
 
         SynheartLogger.log("[Synheart] Initialization complete. Call startSession() to begin.")
@@ -669,6 +680,12 @@ public class Synheart {
         }
 
         try await consentModule.updateConsent(updated)
+
+        // Granting cloud upload should immediately mint a consent token for the
+        // current subject so pending data can flush. Best-effort.
+        if consentType == "cloudUpload" {
+            _ = await _ensureCloudConsentReady()
+        }
     }
 
     /// Revoke consent for a specific data type. Any modules gated on this
@@ -701,6 +718,89 @@ public class Synheart {
         }
 
         try await consentModule.updateConsent(updated)
+    }
+
+    // MARK: - Cloud Consent Token
+
+    /// The subject id this SDK instance is configured for — the value uploads
+    /// are attributed under and the consent token is minted for. Nil when not
+    /// configured.
+    public static var subjectId: String? { shared.subjectId }
+
+    /// Ensure a cloud consent token exists for the current subject so pending
+    /// data can upload. Short-circuits when a valid, subject-matched token is
+    /// already granted; otherwise reissues it by submitting the current consent
+    /// form with cloud upload enabled. Returns true when a usable token is in
+    /// place. Safe to call repeatedly; never throws.
+    @discardableResult
+    public static func ensureCloudConsentReady() async -> Bool {
+        await shared._ensureCloudConsentReady()
+    }
+
+    private func _ensureCloudConsentReady() async -> Bool {
+        guard let bridge = coreRuntime?.bridge else { return false }
+
+        // Cloud upload must be requested in the effective (token-authoritative)
+        // state before there is anything to mint a token for.
+        guard let effJson = bridge.consentEffectiveState(),
+              let eff = parseDict(effJson),
+              (eff["cloud_upload"] as? Bool) == true else {
+            return false
+        }
+
+        // Short-circuit when a usable, subject-matched token is already in place.
+        let status = bridge.consentStatus().flatMap { parseDict($0)?["status"] as? String }
+        let needsRefresh = bridge.consentNeedsTokenRefresh()
+        if CloudConsentLogic.isReadyWithoutReissue(
+            status: status,
+            needsRefresh: needsRefresh,
+            subjectStale: consentTokenSubjectStale()
+        ) {
+            return true
+        }
+
+        // Reissue: fetch the editable form, opt into cloud upload, resubmit.
+        guard let formJson = bridge.consentEditableForm(),
+              var form = parseDict(formJson) else { return false }
+        form["allow_cloud"] = true
+        guard let formData = try? JSONSerialization.data(withJSONObject: form),
+              let formStr = String(data: formData, encoding: .utf8) else { return false }
+
+        let subject = subjectId
+        guard let resultJson = bridge.consentSubmitForm(
+            deviceId: _synheartConfig?.deviceId,
+            platform: "ios",
+            userId: subject,
+            formJson: formStr
+        ), let result = parseDict(resultJson) else { return false }
+
+        if let err = result["error"] as? String {
+            SynheartLogger.log("[Synheart] cloud consent submit failed: \(err)")
+            return false
+        }
+        let synced = (result["synced"] as? Bool) ?? false
+        let hasToken = result["token"] is [String: Any]
+        guard CloudConsentLogic.submitIssuedToken(synced: synced, hasToken: hasToken) else {
+            SynheartLogger.log("[Synheart] cloud consent not synced; token not issued")
+            return false
+        }
+        // The token is minted under the `user_id` we submitted, so its subject
+        // is `subject`. Record it to detect staleness after a future re-key.
+        currentTokenSubject = subject
+
+        let newStatus = bridge.consentStatus().flatMap { parseDict($0)?["status"] as? String }
+        return newStatus?.lowercased() == "granted"
+    }
+
+    /// True when the issued cloud consent token was minted for a DIFFERENT
+    /// subject than the current one (e.g. after an account re-key). Conservative:
+    /// false when there's no token or the subject is unknown.
+    public static func consentTokenSubjectStale() -> Bool {
+        shared.consentTokenSubjectStale()
+    }
+
+    func consentTokenSubjectStale() -> Bool {
+        CloudConsentLogic.isTokenSubjectStale(tokenUserId: currentTokenSubject, currentSubject: subjectId)
     }
 
     /// Get current HSI state (latest JSON frame).

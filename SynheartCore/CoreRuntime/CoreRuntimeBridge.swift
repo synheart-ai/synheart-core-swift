@@ -759,4 +759,78 @@ public final class CoreRuntimeBridge {
         hsiCallbackBox?.release()
         hsiCallbackBox = nil
     }
+
+    // MARK: - Cloud Consent (token binding)
+
+    private typealias ConsentConfigureCloudFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int32
+    private typealias ConsentEditableFormFn   = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias ConsentSubmitFormFn      = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+    private typealias ConsentStatusFn          = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias ConsentEffectiveStateFn  = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias ConsentNeedsRefreshFn    = @convention(c) (OpaquePointer?) -> Int32
+    private typealias ConsentClearStoredFn     = @convention(c) (OpaquePointer?) -> Int32
+
+    private static let _consentConfigureCloud: ConsentConfigureCloudFn? = sym("synheart_core_consent_configure_cloud")
+    private static let _consentEditableForm:   ConsentEditableFormFn?   = sym("synheart_core_consent_get_editable_form")
+    private static let _consentSubmitForm:     ConsentSubmitFormFn?     = sym("synheart_core_consent_submit_form")
+    private static let _consentStatus:         ConsentStatusFn?         = sym("synheart_core_consent_status")
+    private static let _consentEffState:       ConsentEffectiveStateFn? = sym("synheart_core_consent_effective_state")
+    private static let _consentNeedsRefresh:   ConsentNeedsRefreshFn?   = sym("synheart_core_consent_needs_token_refresh")
+    private static let _consentClearStored:    ConsentClearStoredFn?    = sym("synheart_core_consent_clear_stored")
+
+    /// Run `body` with a C string for `s`, or a null pointer when `s` is nil —
+    /// for FFI params the runtime treats as optional.
+    private func withOptionalCString<R>(_ s: String?, _ body: (UnsafePointer<CChar>?) -> R) -> R {
+        if let s = s { return s.withCString { body($0) } }
+        return body(nil)
+    }
+
+    /// Configure the runtime's cloud consent client (base URL + app id) so a
+    /// consent token can be minted. Returns true on success.
+    public func consentConfigureCloud(baseUrl: String, appId: String) -> Bool {
+        baseUrl.withCString { b in
+            appId.withCString { a in
+                (Self._consentConfigureCloud?(handle, b, a) ?? 1) == 0
+            }
+        }
+    }
+
+    /// Get the editable consent form as JSON (fields incl. `allow_cloud`), or nil.
+    public func consentEditableForm() -> String? {
+        consumeCString(Self._consentEditableForm?(handle))
+    }
+
+    /// Submit a consent form. `deviceId` and `userId` are optional. Returns the
+    /// result JSON `{ synced, accepted, token }` (or `{ error }`), or nil.
+    public func consentSubmitForm(deviceId: String?, platform: String, userId: String?, formJson: String) -> String? {
+        platform.withCString { p in
+            formJson.withCString { fj in
+                withOptionalCString(userId) { uid in
+                    withOptionalCString(deviceId) { did in
+                        consumeCString(Self._consentSubmitForm?(handle, did, p, uid, fj))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Cloud consent status JSON `{ "status": "granted|pending|denied|expired" }`, or nil.
+    public func consentStatus() -> String? {
+        consumeCString(Self._consentStatus?(handle))
+    }
+
+    /// Effective (token-authoritative) consent snapshot JSON, or nil.
+    public func consentEffectiveState() -> String? {
+        consumeCString(Self._consentEffState?(handle))
+    }
+
+    /// Whether the stored consent token is absent or about to expire.
+    public func consentNeedsTokenRefresh() -> Bool {
+        (Self._consentNeedsRefresh?(handle) ?? 0) != 0
+    }
+
+    /// Clear any stored consent token. Returns true on success.
+    public func consentClearStored() -> Bool {
+        (Self._consentClearStored?(handle) ?? 1) == 0
+    }
 }
