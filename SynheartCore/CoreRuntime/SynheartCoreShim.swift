@@ -375,6 +375,9 @@ public final class SynheartCoreShim {
             "privacy": [
                 "allow_research": config.privacy.allowResearch,
             ],
+            // Base URL for the runtime's cloud consent + upload clients. Without
+            // it those clients are unconfigured and uploads no-op.
+            "api_base_url": config.cloudConfig?.baseUrl ?? ApiEndpoints.defaultCloudBaseUrl,
         ]
         if let token = config.capabilityToken,
            let tokenData = try? JSONEncoder().encode(token),
