@@ -494,6 +494,19 @@ public class Synheart {
                 self.hsiSubject.send(json)
             }
 
+            // Device auth: hand the runtime its secure-storage + Secure Enclave
+            // crypto callbacks before any registration so consent tokens persist
+            // and can be minted. Best-effort: a build lacking the symbols just
+            // means minting stays unavailable (logged), not a crash.
+            let storageRc = bridge.setStorageCallbacks()
+            if storageRc != 0 {
+                SynheartLogger.log("[Synheart] set_storage_callbacks rc=\(storageRc); state will not persist")
+            }
+            let cryptoRc = bridge.setSdkCryptoCallbacks()
+            if cryptoRc != 0 {
+                SynheartLogger.log("[Synheart] set_crypto_callbacks rc=\(cryptoRc); device auth unavailable")
+            }
+
             // Configure the cloud consent client so a subject-scoped token can be
             // minted; without a base URL the cloud clients are unconfigured.
             let cloudBaseUrl = resolvedConfig.cloudConfig?.baseUrl ?? ApiEndpoints.defaultCloudBaseUrl
@@ -759,6 +772,20 @@ public class Synheart {
             return true
         }
 
+        let subject = subjectId
+
+        // The runtime can only mint once the device is registered (device-signed).
+        // Register on first use; idempotent — skip when already registered.
+        let authStatus = bridge.deviceAuthStatus().flatMap { parseDict($0)?["status"] as? String }
+        if authStatus != "registered", let clientId = subject, !clientId.isEmpty {
+            let reg = bridge.registerDevice(clientId: clientId).flatMap { parseDict($0) }
+            let deviceId = reg?["device_id"] as? String
+            if reg?["error"] is String || deviceId == nil {
+                SynheartLogger.log("[Synheart] device registration failed: \(reg?["error"] as? String ?? "no device_id")")
+                return false
+            }
+        }
+
         // Reissue: fetch the editable form, opt into cloud upload, resubmit.
         guard let formJson = bridge.consentEditableForm(),
               var form = parseDict(formJson) else { return false }
@@ -766,7 +793,6 @@ public class Synheart {
         guard let formData = try? JSONSerialization.data(withJSONObject: form),
               let formStr = String(data: formData, encoding: .utf8) else { return false }
 
-        let subject = subjectId
         guard let resultJson = bridge.consentSubmitForm(
             deviceId: _synheartConfig?.deviceId,
             platform: "ios",

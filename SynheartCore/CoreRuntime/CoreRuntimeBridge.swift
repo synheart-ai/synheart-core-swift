@@ -833,4 +833,49 @@ public final class CoreRuntimeBridge {
     public func consentClearStored() -> Bool {
         (Self._consentClearStored?(handle) ?? 1) == 0
     }
+
+    // MARK: - Device auth (crypto + storage callbacks + registration)
+
+    private typealias SetCryptoCallbacksFn = @convention(c) (OpaquePointer?, UnsafeRawPointer?) -> Int32
+    private typealias SetStorageCallbacksFn = @convention(c) (
+        OpaquePointer?,
+        @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int32,
+        @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?,
+        @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int32
+    ) -> Int32
+    private typealias RegisterDeviceFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
+    private typealias DeviceAuthStatusFn = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+
+    private static let _setCryptoCb:    SetCryptoCallbacksFn?  = sym("synheart_core_sdk_set_crypto_callbacks")
+    private static let _setStorageCb:   SetStorageCallbacksFn? = sym("synheart_core_set_storage_callbacks")
+    private static let _registerDevice: RegisterDeviceFn?      = sym("synheart_core_sdk_register_device")
+    private static let _deviceAuthStat: DeviceAuthStatusFn?    = sym("synheart_core_sdk_device_auth_status")
+
+    /// Hand the runtime the Secure Enclave-backed crypto callbacks. Returns the
+    /// runtime status (0 ok), or -2 if the symbol is absent in this build.
+    public func setSdkCryptoCallbacks() -> Int32 {
+        guard let fn = Self._setCryptoCb else { return -2 }
+        var cb = DeviceAuthCallbacks.cryptoCallbacks()
+        return withUnsafePointer(to: &cb) { fn(handle, UnsafeRawPointer($0)) }
+    }
+
+    /// Hand the runtime the Keychain-backed secure-storage callbacks so consent
+    /// tokens + device records persist. Returns 0 on success, -2 if absent.
+    public func setStorageCallbacks() -> Int32 {
+        guard let fn = Self._setStorageCb else { return -2 }
+        return fn(handle, DeviceAuthCallbacks.store, DeviceAuthCallbacks.load, DeviceAuthCallbacks.delete)
+    }
+
+    /// Register this device for `clientId` (the subject id). Returns the result
+    /// JSON `{ subject_id, device_id, session_secret_b64 }` (or `{ error }`), or nil.
+    public func registerDevice(clientId: String) -> String? {
+        guard let fn = Self._registerDevice else { return nil }
+        return clientId.withCString { consumeCString(fn(handle, $0)) }
+    }
+
+    /// Device-auth status JSON `{ "status": "registered|...", "device_id": "..." }`, or nil.
+    public func deviceAuthStatus() -> String? {
+        guard let fn = Self._deviceAuthStat else { return nil }
+        return consumeCString(fn(handle))
+    }
 }
