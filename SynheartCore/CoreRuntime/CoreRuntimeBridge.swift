@@ -878,4 +878,27 @@ public final class CoreRuntimeBridge {
         guard let fn = Self._deviceAuthStat else { return nil }
         return consumeCString(fn(handle))
     }
+
+    // MARK: - Subject identity
+
+    private typealias GetSubjectIdFn  = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias RebindSubjectFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Int32) -> Int32
+
+    private static let _getSubjectId: GetSubjectIdFn?  = sym("synheart_core_get_subject_id")
+    private static let _rebindSubject: RebindSubjectFn? = sym("synheart_core_rebind_subject_id")
+
+    /// The runtime's canonical subject id (RFC-0008), or nil when unavailable
+    /// (incl. a runtime build that predates the symbol — degrades softly).
+    public func runtimeSubjectId() -> String? {
+        guard let fn = Self._getSubjectId else { return nil }
+        return consumeCString(fn(handle))
+    }
+
+    /// Atomically rebind the runtime subject id, re-pointing consent + the cloud
+    /// connector without a full reinit. Returns 1 (re-mint required), 0 (valid
+    /// token loaded), or -1 (error / symbol absent).
+    public func rebindSubjectId(_ subjectId: String, invalidateToken: Bool = true) -> Int32 {
+        guard let fn = Self._rebindSubject else { return -1 }
+        return subjectId.withCString { fn(handle, $0, invalidateToken ? 1 : 0) }
+    }
 }

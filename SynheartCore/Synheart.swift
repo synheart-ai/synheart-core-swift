@@ -66,12 +66,32 @@ public class Synheart {
     /// Used to detect a stale (different-subject) token after an account re-key.
     private var currentTokenSubject: String?
 
+    /// Canonical subject reported by the native runtime, captured after init (the
+    /// runtime may derive it from `client_id` per RFC-0008) and after a
+    /// `rebindSubjectId`. Takes precedence over the configured value so the SDK
+    /// agrees with what uploads are attributed under. Nil until the runtime loads.
+    private var nativeSubjectIdOverride: String?
+
     private init() {}
 
-    /// The subject id this SDK instance is configured for — the value uploads
-    /// are attributed under and the consent token is minted for. Nil when not
-    /// configured.
-    var subjectId: String? { _synheartConfig?.subjectId ?? userId }
+    /// The subject id this SDK instance is bound to — the value uploads are
+    /// attributed under and the consent token is minted for. Prefers the native
+    /// runtime subject; falls back to the configured value before init. Nil when
+    /// not configured.
+    var subjectId: String? {
+        if let native = nativeSubjectIdOverride, !native.isEmpty { return native }
+        return _synheartConfig?.subjectId ?? userId
+    }
+
+    /// Capture the runtime's canonical subject so `subjectId` /
+    /// `consentTokenSubjectStale` agree with the native source of truth. A
+    /// null/empty value (e.g. an older runtime without the symbol) leaves the
+    /// override unchanged, keeping the configured fallback.
+    private func syncSubjectFromNative() {
+        if let native = coreRuntime?.bridge?.runtimeSubjectId(), !native.isEmpty {
+            nativeSubjectIdOverride = native
+        }
+    }
 
     /// Parse a JSON object string into a dictionary, or nil.
     private func parseDict(_ json: String) -> [String: Any]? {
@@ -488,6 +508,10 @@ public class Synheart {
         if let cr = coreRuntime, let bridge = cr.bridge {
             SynheartLogger.log("[Synheart] Core runtime bridge loaded")
 
+            // Capture the canonical subject the runtime resolved (a device-auth
+            // derive may have changed it) so SDK subject checks match native.
+            syncSubjectFromNative()
+
             bridge.setHsiCallback { [weak self] json in
                 guard let self = self else { return }
                 guard self.consentModule?.current().biosignals == true else { return }
@@ -829,6 +853,36 @@ public class Synheart {
         CloudConsentLogic.isTokenSubjectStale(tokenUserId: currentTokenSubject, currentSubject: subjectId)
     }
 
+    /// Rebind the runtime subject id when the signed-in identity changes, then
+    /// re-mint cloud consent for the new subject if needed — without a full
+    /// dispose/reinit. Prefer this over re-initializing the SDK on sign-in.
+    ///
+    /// The native runtime atomically re-points consent (`cached_subject_id` +
+    /// token slot) and the cloud connector; this syncs the SDK subject and runs
+    /// the self-heal so a stale token is reissued before the next upload. Returns
+    /// true when the rebind was applied (false on a runtime that lacks the symbol).
+    @discardableResult
+    public static func rebindSubjectId(_ subjectId: String) async -> Bool {
+        await shared._rebindSubjectId(subjectId)
+    }
+
+    private func _rebindSubjectId(_ subjectId: String) async -> Bool {
+        guard let bridge = coreRuntime?.bridge else { return false }
+        let trimmed = subjectId.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return false }
+        let rc = bridge.rebindSubjectId(trimmed)
+        if rc < 0 {
+            SynheartLogger.log("[Synheart] rebindSubjectId failed (rc=\(rc))")
+            return false
+        }
+        // Keep the SDK subject in lockstep with the native runtime.
+        syncSubjectFromNative()
+        // rc == 1 => re-mint required; rc == 0 => valid token already loaded.
+        // Self-heal regardless: cheap no-op when ready, reissues otherwise.
+        _ = await _ensureCloudConsentReady()
+        return true
+    }
+
     /// Get current HSI state (latest JSON frame).
     public static var currentState: String? {
         shared.hsiSubject.value
@@ -999,6 +1053,8 @@ public class Synheart {
 
         _currentSessionHandle = nil
         _synheartConfig = nil
+        nativeSubjectIdOverride = nil
+        currentTokenSubject = nil
 
         coreRuntime?.bridge?.clearHsiCallback()
         coreRuntime = nil
