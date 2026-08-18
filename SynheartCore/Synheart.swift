@@ -61,6 +61,7 @@ public class Synheart {
     private var hsiToSessionCancellable: AnyCancellable?
 
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
+    private let hsiDeliveryDeduplicator = HSIDeliveryDeduplicator()
     private var cancellables = Set<AnyCancellable>()
 
     /// Subject the most recently issued cloud consent token was minted for.
@@ -620,6 +621,7 @@ public class Synheart {
             bridge.setHsiCallback { [weak self] json in
                 guard let self = self else { return }
                 guard self.consentModule?.current().biosignals == true else { return }
+                guard self.hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
                 self.hsiSubject.send(json)
             }
 
@@ -682,6 +684,8 @@ public class Synheart {
         nativeSubjectIdOverride = nil
         currentTokenSubject = nil
         userId = nil
+        hsiDeliveryDeduplicator.reset()
+        hsiSubject.send(nil)
         isConfigured = false
         isRunning = false
     }
@@ -1200,6 +1204,9 @@ public class Synheart {
 
         coreRuntime?.bridge?.clearHsiCallback()
         coreRuntime = nil
+
+        hsiDeliveryDeduplicator.reset()
+        hsiSubject.send(nil)
 
         consentModule = nil
         capabilityModule = nil

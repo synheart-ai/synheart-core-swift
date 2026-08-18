@@ -27,6 +27,7 @@ public final class SynheartCoreShim {
     public let onStateUpdate: AnyPublisher<HSIState, Never>
 
     private let hsiSubject = PassthroughSubject<HSIState, Never>()
+    private let hsiDeliveryDeduplicator = HSIDeliveryDeduplicator()
 
     // MARK: - Init
 
@@ -116,7 +117,9 @@ public final class SynheartCoreShim {
     public func ingestBatch(batchJson: String, nowMs: Int64) -> HSIState? {
         guard let json = bridge?.ingestBatch(batchJson: batchJson, nowMs: nowMs) else { return nil }
         let state = HSIState.fromJson(json)
-        hsiSubject.send(state)
+        if hsiDeliveryDeduplicator.shouldDeliver(json: json) {
+            hsiSubject.send(state)
+        }
         return state
     }
 
