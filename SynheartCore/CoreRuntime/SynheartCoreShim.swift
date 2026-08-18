@@ -34,10 +34,10 @@ public final class SynheartCoreShim {
     ///
     /// Serializes the config to JSON and passes it to `synheart_core_new`.
     /// Throws `SynheartError.notInitialized` if the runtime library is not linked.
-    public init(config: SynheartConfig) throws {
+    public init(config: SynheartConfig, dataDir: String? = nil) throws {
         self.onStateUpdate = hsiSubject.eraseToAnyPublisher()
 
-        let configDict = Self.configToDict(config)
+        let configDict = RuntimeConfigBuilder.build(config, dataDir: dataDir)
         guard let jsonData = try? JSONSerialization.data(withJSONObject: configDict),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
             throw SynheartError.notInitialized
@@ -356,37 +356,4 @@ public final class SynheartCoreShim {
         return SessionHandle(sessionId: sessionId, startedAtMs: startedAtMs, mode: mode)
     }
 
-    // MARK: - Config Serialization
-
-    private static func configToDict(_ config: SynheartConfig) -> [String: Any] {
-        var dict: [String: Any] = [
-            "app_id": config.appId,
-            "subject_id": config.subjectId,
-            "mode": config.mode.rawValue,
-            "device_id": config.deviceId,
-            "app_version": config.appVersion,
-            "platform": config.platform,
-            "storage": [
-                "enabled": config.storage.enabled,
-            ],
-            "sync": [
-                "enabled": config.sync.enabled,
-            ],
-            "privacy": [
-                "allow_research": config.privacy.allowResearch,
-            ],
-            // Base URL for the runtime's cloud consent + upload clients. Without
-            // it those clients are unconfigured and uploads no-op.
-            "api_base_url": config.cloudConfig?.baseUrl ?? ApiEndpoints.defaultCloudBaseUrl,
-        ]
-        if let token = config.capabilityToken,
-           let tokenData = try? JSONEncoder().encode(token),
-           let tokenStr = String(data: tokenData, encoding: .utf8) {
-            dict["capability_token"] = tokenStr
-        }
-        if let secret = config.capabilitySecret {
-            dict["capability_secret"] = secret
-        }
-        return dict
-    }
 }

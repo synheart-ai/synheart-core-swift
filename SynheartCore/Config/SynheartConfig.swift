@@ -14,9 +14,32 @@ public struct StorageConfig {
 /// Sync sub-configuration.
 public struct SyncConfig {
     public let enabled: Bool
+    /// Base URL used by the native Synsync client.
+    public let baseUrl: String
 
-    public init(enabled: Bool = false) {
+    public init(
+        enabled: Bool = false,
+        baseUrl: String = ApiEndpoints.defaultAuthBaseUrl
+    ) {
         self.enabled = enabled
+        self.baseUrl = baseUrl
+    }
+}
+
+/// Hardware-backed device authentication configuration.
+public struct DeviceAuthConfig {
+    /// Device-auth service origin.
+    public let authBaseUrl: String
+
+    /// Bundle identifier bound to the device registration.
+    public let packageName: String
+
+    public init(
+        authBaseUrl: String,
+        packageName: String = ""
+    ) {
+        self.authBaseUrl = authBaseUrl
+        self.packageName = packageName
     }
 }
 
@@ -50,6 +73,7 @@ public struct SynheartConfig {
     public let cloudConfig: CloudConfig?
     public let labIngestConfig: LabIngestConfig?
     public let consentConfig: ConsentConfig?
+    public let deviceAuthConfig: DeviceAuthConfig?
 
     /// Server-signed capability token for feature gating
     public let capabilityToken: CapabilityToken?
@@ -78,6 +102,7 @@ public struct SynheartConfig {
         cloudConfig: CloudConfig? = nil,
         labIngestConfig: LabIngestConfig? = nil,
         consentConfig: ConsentConfig? = nil,
+        deviceAuthConfig: DeviceAuthConfig? = nil,
         capabilityToken: CapabilityToken? = nil,
         capabilitySecret: String? = nil,
         allowUnsignedCapabilities: Bool = false
@@ -99,6 +124,7 @@ public struct SynheartConfig {
         self.cloudConfig = cloudConfig
         self.labIngestConfig = labIngestConfig
         self.consentConfig = consentConfig
+        self.deviceAuthConfig = deviceAuthConfig
         self.capabilityToken = capabilityToken
         self.capabilitySecret = capabilitySecret
         self.allowUnsignedCapabilities = allowUnsignedCapabilities
@@ -150,6 +176,9 @@ public struct CloudConfig {
     /// Instance ID (UUID for this SDK instance)
     public let instanceId: String
 
+    /// Organization identifier required by native cloud ingest.
+    public let orgId: String?
+
     /// Max upload queue size (default: 100)
     public let maxQueueSize: Int
 
@@ -169,6 +198,7 @@ public struct CloudConfig {
         authProvider: AuthProvider? = nil,
         subjectId: String,
         instanceId: String = UUID().uuidString,
+        orgId: String? = nil,
         baseUrl: String = ApiEndpoints.defaultCloudBaseUrl,
         subjectType: String = "pseudonymous_user",
         maxQueueSize: Int = 100,
@@ -180,6 +210,7 @@ public struct CloudConfig {
         self.authProvider = authProvider
         self.subjectId = subjectId
         self.instanceId = instanceId
+        self.orgId = orgId
         self.baseUrl = baseUrl
         self.subjectType = subjectType
         self.maxQueueSize = maxQueueSize
