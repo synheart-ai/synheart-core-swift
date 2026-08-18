@@ -38,6 +38,7 @@ public class Synheart {
 
     private var coreRuntime: SynheartCoreShim?
     private let moduleManager = ModuleManager()
+    private let initializationGate = InitializationGate()
 
     private var capabilityModule: CapabilityModule?
     private var consentModule: ConsentModule?
@@ -374,7 +375,8 @@ public class Synheart {
     /**
      * Initialize Synheart Core SDK.
      *
-     * Must be called before any other operations. Throws if already initialized.
+     * Must be called before any other operations. Repeated calls after a
+     * successful initialization are safe no-ops.
      *
      * Example:
      * ```swift
@@ -395,11 +397,13 @@ public class Synheart {
         }
         let resolvedUserId = userId ?? config?.subjectId ?? ""
         let appKey = config?.appId ?? "default"
-        try await shared._initialize(
-            userId: resolvedUserId,
-            config: config,
-            appKey: appKey
-        )
+        try await shared.initializationGate.run {
+            try await shared._initialize(
+                userId: resolvedUserId,
+                config: config,
+                appKey: appKey
+            )
+        }
         if autoStart {
             try await shared._startSession()
         }
@@ -410,9 +414,25 @@ public class Synheart {
         config: SynheartConfig?,
         appKey: String
     ) async throws {
-        if isConfigured {
-            throw SynheartError.alreadyConfigured
+        guard !isConfigured else { return }
+
+        do {
+            try await _performInitialization(
+                userId: userId,
+                config: config,
+                appKey: appKey
+            )
+        } catch {
+            await _resetAfterInitializationFailure()
+            throw error
         }
+    }
+
+    private func _performInitialization(
+        userId: String,
+        config: SynheartConfig?,
+        appKey: String
+    ) async throws {
 
         self.userId = userId
 
@@ -502,9 +522,11 @@ public class Synheart {
             SynheartAuth.shared.configure(baseUrl: "https://api.synheart.ai/auth")
         }
 
-        isConfigured = true
-
-        self.coreRuntime = try? SynheartCoreShim(config: resolvedConfig)
+        let dataDirectory = try RuntimeDataDirectory.prepare()
+        self.coreRuntime = try SynheartCoreShim(
+            config: resolvedConfig,
+            dataDir: dataDirectory
+        )
         if let cr = coreRuntime, let bridge = cr.bridge {
             SynheartLogger.log("[Synheart] Core runtime bridge loaded")
 
@@ -545,7 +567,40 @@ public class Synheart {
             }
         }
 
+        isConfigured = true
+
         SynheartLogger.log("[Synheart] Initialization complete. Call startSession() to begin.")
+    }
+
+    /// Clears every partially-created component so a failed initialization can
+    /// be retried without duplicate module registrations or stale callbacks.
+    private func _resetAfterInitializationFailure() async {
+        await moduleManager.disposeAll()
+
+        sessionModule?.dispose()
+        sessionModule = nil
+        sessionSubscription?.cancel()
+        sessionSubscription = nil
+        hsiToSessionCancellable?.cancel()
+        hsiToSessionCancellable = nil
+        cancellables.removeAll()
+
+        coreRuntime?.bridge?.clearHsiCallback()
+        coreRuntime = nil
+
+        capabilityModule = nil
+        consentModule = nil
+        wearModule = nil
+        phoneModule = nil
+        behaviorModule = nil
+        _activationManager = nil
+        previousConsent = nil
+        _synheartConfig = nil
+        nativeSubjectIdOverride = nil
+        currentTokenSubject = nil
+        userId = nil
+        isConfigured = false
+        isRunning = false
     }
 
     // MARK: - Session Lifecycle
