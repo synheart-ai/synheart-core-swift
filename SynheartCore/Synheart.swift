@@ -1133,6 +1133,7 @@ public class Synheart {
 public enum SynheartError: Error {
     case notInitialized
     case alreadyConfigured
+    case runtimeIncompatible(missingSymbols: [String])
     case notImplemented(String)
     case capabilityTokenRequired
 }

@@ -37,6 +37,13 @@ public final class SynheartCoreShim {
     public init(config: SynheartConfig, dataDir: String? = nil) throws {
         self.onStateUpdate = hsiSubject.eraseToAnyPublisher()
 
+        let symbolDiagnostics = CoreRuntimeBridge.symbolDiagnostics
+        guard symbolDiagnostics.isCompatible else {
+            throw SynheartError.runtimeIncompatible(
+                missingSymbols: symbolDiagnostics.missingRequiredSymbols
+            )
+        }
+
         let configDict = RuntimeConfigBuilder.build(config, dataDir: dataDir)
         guard let jsonData = try? JSONSerialization.data(withJSONObject: configDict),
               let jsonString = String(data: jsonData, encoding: .utf8) else {

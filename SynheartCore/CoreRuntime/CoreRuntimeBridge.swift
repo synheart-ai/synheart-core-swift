@@ -135,6 +135,11 @@ public final class CoreRuntimeBridge {
         return unsafeBitCast(p, to: T.self)
     }
 
+    private static func hasSymbol(_ name: String) -> Bool {
+        guard let lib else { return false }
+        return dlsym(lib, name) != nil
+    }
+
     // Lifecycle
     private static let _new:           NewFn?             = sym("synheart_core_new")
     private static let _free:          FreeFn?            = sym("synheart_core_free")
@@ -230,9 +235,15 @@ public final class CoreRuntimeBridge {
 
     // MARK: - Availability check
 
-    /// Whether the core runtime library is linked and the `synheart_core_new` symbol is resolved.
+    /// Full audit of the required and optional symbols exported by the runtime.
+    public static let symbolDiagnostics: RuntimeSymbolDiagnostics = {
+        let resolved = Set(RuntimeSymbolManifest.all.filter(hasSymbol))
+        return RuntimeSymbolManifest.audit(resolvedSymbols: resolved)
+    }()
+
+    /// Whether the linked runtime satisfies the SDK's minimum ABI contract.
     public static var isAvailable: Bool {
-        _new != nil
+        symbolDiagnostics.isCompatible
     }
 
     // MARK: - Init / Deinit
@@ -245,6 +256,7 @@ public final class CoreRuntimeBridge {
     /// `device_id`, `app_version`, `platform`, `storage`, `sync`, `privacy`,
     /// `capability_token`, `capability_secret`.
     public init?(configJson: String) {
+        guard Self.isAvailable else { return nil }
         guard let newFn = Self._new else { return nil }
         guard let ptr = configJson.withCString({ newFn($0) }) else { return nil }
         self.handle = ptr
