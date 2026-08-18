@@ -51,7 +51,9 @@ public final class SynheartCoreShim {
         }
 
         guard let b = CoreRuntimeBridge(configJson: jsonString) else {
-            throw SynheartError.notInitialized
+            throw SynheartError.runtimeCreationFailed(
+                message: CoreRuntimeBridge.lastInitializationError()
+            )
         }
         self.bridge = b
     }
@@ -90,8 +92,8 @@ public final class SynheartCoreShim {
 
     // MARK: - Sensor Push
 
-    public func pushRr(tsMs: Int64, rrMs: Double) {
-        bridge?.pushRr(tsMs: tsMs, rrMs: rrMs)
+    public func pushRr(tsMs: Int64, rrMs: Double, provider: String = "default_sensor") {
+        bridge?.pushRr(tsMs: tsMs, rrMs: rrMs, provider: provider)
     }
 
     public func pushHr(tsMs: Int64, bpm: Double) {

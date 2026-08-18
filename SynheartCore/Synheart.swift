@@ -988,9 +988,13 @@ public class Synheart {
 
     // MARK: - Sensor Push
 
-    /// Push an RR interval to the core runtime.
-    public static func pushRr(tsMs: Int64, rrMs: Double) {
-        shared.coreRuntime?.pushRr(tsMs: tsMs, rrMs: rrMs)
+    /// Push an RR interval to the core runtime with its sensor provider label.
+    public static func pushRr(
+        tsMs: Int64,
+        rrMs: Double,
+        provider: String = "default_sensor"
+    ) {
+        shared.coreRuntime?.pushRr(tsMs: tsMs, rrMs: rrMs, provider: provider)
     }
 
     /// Push a heart rate sample to the core runtime.
@@ -1134,6 +1138,7 @@ public enum SynheartError: Error {
     case notInitialized
     case alreadyConfigured
     case runtimeIncompatible(missingSymbols: [String])
+    case runtimeCreationFailed(message: String?)
     case notImplemented(String)
     case capabilityTokenRequired
 }

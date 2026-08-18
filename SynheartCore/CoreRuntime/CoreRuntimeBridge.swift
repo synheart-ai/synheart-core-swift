@@ -31,6 +31,7 @@ public final class CoreRuntimeBridge {
     private typealias NewFn               = @convention(c) (UnsafePointer<CChar>?) -> OpaquePointer?
     private typealias FreeFn              = @convention(c) (OpaquePointer?) -> Void
     private typealias FreeStringFn        = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
+    private typealias LastInitErrorFn     = @convention(c) () -> UnsafeMutablePointer<CChar>?
 
     // Session
     private typealias StartSessionFn      = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
@@ -39,7 +40,7 @@ public final class CoreRuntimeBridge {
     private typealias IsRunningFn         = @convention(c) (OpaquePointer?) -> Int32
 
     // Sensor push
-    private typealias PushRrFn            = @convention(c) (OpaquePointer?, Int64, Double) -> Void
+    private typealias PushRrFn            = @convention(c) (OpaquePointer?, Int64, Double, UnsafePointer<CChar>?) -> Void
     private typealias PushHrFn            = @convention(c) (OpaquePointer?, Int64, Double) -> Void
     private typealias PushAccelFn         = @convention(c) (OpaquePointer?, Int64, Double, Double, Double) -> Void
     private typealias PushBehaviorFn      = @convention(c) (OpaquePointer?, Int64, Int32, Double) -> Void
@@ -144,6 +145,7 @@ public final class CoreRuntimeBridge {
     private static let _new:           NewFn?             = sym("synheart_core_new")
     private static let _free:          FreeFn?            = sym("synheart_core_free")
     private static let _freeString:    FreeStringFn?      = sym("synheart_core_free_string")
+    private static let _lastInitError: LastInitErrorFn?   = sym("synheart_core_last_error")
 
     // Session
     private static let _startSession:  StartSessionFn?    = sym("synheart_core_start_session")
@@ -222,9 +224,9 @@ public final class CoreRuntimeBridge {
     private static let _cancelAcctDel: CancelAcctDelFn?   = sym("synheart_core_cancel_account_deletion")
 
     // Wearable SRM (longitudinal)
-    private static let _pushWearDaily: PushWearDailyFn?     = sym("synheart_core_push_wearable_daily_value")
-    private static let _triggerWearRe: TriggerWearRecompFn? = sym("synheart_core_trigger_wearable_recompute")
-    private static let _getWearRef:    GetWearRefFn?        = sym("synheart_core_get_wearable_reference")
+    private static let _pushWearDaily: PushWearDailyFn?     = sym("synheart_core_srm_push_wearable_daily")
+    private static let _triggerWearRe: TriggerWearRecompFn? = sym("synheart_core_srm_trigger_wearable_recompute")
+    private static let _getWearRef:    GetWearRefFn?        = sym("synheart_core_wearable_reference_json")
 
     // Priority + Resilience (handle-less, read by per-module utilities)
     internal static let _prioritySetProvider:       PrioritySetProviderFn?       = sym("synheart_core_priority_set_provider")
@@ -263,6 +265,7 @@ public final class CoreRuntimeBridge {
     }
 
     deinit {
+        Self._clearHsiCb?(handle)
         hsiCallbackBox?.release()
         Self._free?(handle)
     }
@@ -282,6 +285,11 @@ public final class CoreRuntimeBridge {
         let result = String(cString: ptr)
         _freeString?(ptr)
         return result
+    }
+
+    /// Human-readable reason from the most recent `synheart_core_new` failure.
+    public static func lastInitializationError() -> String? {
+        consumeCString(_lastInitError?())
     }
 
     // MARK: - Session Lifecycle
@@ -311,8 +319,8 @@ public final class CoreRuntimeBridge {
     // MARK: - Sensor Push
 
     /// Push an RR-interval sample.
-    public func pushRr(tsMs: Int64, rrMs: Double) {
-        Self._pushRr?(handle, tsMs, rrMs)
+    public func pushRr(tsMs: Int64, rrMs: Double, provider: String = "default_sensor") {
+        provider.withCString { Self._pushRr?(handle, tsMs, rrMs, $0) }
     }
 
     /// Push a heart-rate sample.
@@ -609,7 +617,7 @@ public final class CoreRuntimeBridge {
     private typealias LabSetOverridesFn  = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int32
     private typealias LabFinalizeFn      = @convention(c) (OpaquePointer?, Int64) -> UnsafeMutablePointer<CChar>?
 
-    private static let _labAvail:        LabAvailFn?        = sym("synheart_core_lab_available")
+    private static let _labAvail:        LabAvailFn?        = sym("synheart_core_is_lab_available")
     private static let _labStart:        LabStartFn?        = sym("synheart_core_lab_start")
     private static let _labOpenWin:      LabOpenWindowFn?   = sym("synheart_core_lab_open_window")
     private static let _labCloseWin:     LabCloseWindowFn?  = sym("synheart_core_lab_close_window")
@@ -746,23 +754,26 @@ public final class CoreRuntimeBridge {
     /// The callback fires on a background thread. Dispatch to main thread
     /// if updating UI.
     public func setHsiCallback(_ callback: @escaping (String) -> Void) {
-        // Release any previous callback's retained box before installing the
-        // new one — otherwise each setHsiCallback call leaks the prior
-        // closure (and anything it captures) for the lifetime of the bridge.
-        hsiCallbackBox?.release()
-
+        let previousBox = hsiCallbackBox
         let box = Unmanaged.passRetained(callback as AnyObject)
-        hsiCallbackBox = box
         let ud = box.toOpaque()
 
         let cCallback: @convention(c) (UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void = { jsonPtr, userData in
-            guard let jsonPtr = jsonPtr, let userData = userData else { return }
+            guard let jsonPtr else { return }
+            defer {
+                CoreRuntimeBridge._freeString?(
+                    UnsafeMutablePointer(mutating: jsonPtr)
+                )
+            }
+            guard let userData else { return }
             let json = String(cString: jsonPtr)
             let cb = Unmanaged<AnyObject>.fromOpaque(userData).takeUnretainedValue() as! (String) -> Void
             cb(json)
         }
 
         Self._setHsiCb?(handle, cCallback, ud)
+        hsiCallbackBox = box
+        previousBox?.release()
     }
 
     /// Unregister the HSI callback.

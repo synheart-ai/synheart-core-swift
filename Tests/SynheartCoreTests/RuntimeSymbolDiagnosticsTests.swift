@@ -39,4 +39,22 @@ final class RuntimeSymbolDiagnosticsTests: XCTestCase {
                 .isEmpty
         )
     }
+
+    func testManifestUsesCurrentRuntimeSymbolNames() {
+        let currentNames: Set<String> = [
+            "synheart_core_is_lab_available",
+            "synheart_core_srm_push_wearable_daily",
+            "synheart_core_srm_trigger_wearable_recompute",
+            "synheart_core_wearable_reference_json",
+        ]
+        let retiredNames: Set<String> = [
+            "synheart_core_lab_available",
+            "synheart_core_push_wearable_daily_value",
+            "synheart_core_trigger_wearable_recompute",
+            "synheart_core_get_wearable_reference",
+        ]
+
+        XCTAssertTrue(currentNames.isSubset(of: RuntimeSymbolManifest.all))
+        XCTAssertTrue(retiredNames.isDisjoint(with: RuntimeSymbolManifest.all))
+    }
 }
