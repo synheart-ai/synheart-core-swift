@@ -167,6 +167,19 @@ required symbol is missing, initialization throws
 `SynheartError.runtimeIncompatible(missingSymbols:)`; optional symbols remain
 visible through `CoreRuntimeBridge.symbolDiagnostics` for support diagnostics.
 
+### Runnable iOS example
+
+Open [`ExampleApp/SynheartExample.xcodeproj`](ExampleApp/SynheartExample.xcodeproj)
+to run the SwiftUI integration app. It demonstrates configuration, consent,
+native session lifecycle, live typed/raw HSI 1.3 delivery, storage, sync, orphan
+repair, and copyable runtime ABI diagnostics. The project references this
+repository as a local Swift package, so local SDK changes are reflected
+immediately.
+
+See [`ExampleApp/README.md`](ExampleApp/README.md) for native-runtime linking,
+the command-line build, and the temporary iOS deployment-target workaround for
+`synheart-wear-swift` 0.4.1.
+
 ## Usage
 
 ### Basic Setup

@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compatibility error when the linked runtime is incomplete.
 - Runtime-backed session catalog, HSI-window, storage-usage, retention,
   orphan-repair, sync-status, and sync-conflict handling.
+- A runnable SwiftUI iOS example app covering configuration, consent/session
+  lifecycle, live HSI 1.3 state, storage, sync, and runtime ABI diagnostics.
+  CI builds the example against the local package on an iOS simulator target.
 
 ### Changed
 - Account deletion (`requestAccountDeletion` / `cancelAccountDeletion`) now goes
