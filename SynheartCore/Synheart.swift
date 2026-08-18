@@ -324,33 +324,49 @@ public class Synheart {
 
     /// Delete a session and all its artifacts locally.
     public static func deleteLocalSession(_ sessionId: String) throws {
-        guard let cr = shared.coreRuntime, cr.isAvailable else { return }
-        let _ = cr.deleteSession(sessionId)
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        guard cr.deleteSession(sessionId) else {
+            throw SynheartError.runtimeOperationFailed("Unable to delete local session \(sessionId)")
+        }
     }
 
     /// Wipe all local data.
     public static func wipeLocalData() async throws {
-        if let cr = shared.coreRuntime, cr.isAvailable {
-            let _ = cr.wipeLocalData()
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
         }
         if shared.isRunning {
             try await shared._stopSession()
         }
-        shared.coreRuntime = nil
+        guard cr.wipeLocalData() else {
+            throw SynheartError.runtimeOperationFailed("Unable to wipe local data")
+        }
         shared._currentSessionHandle = nil
         shared.isRunning = false
+        shared.hsiSubject.send(nil)
     }
 
     /// Request account deletion -- requests server-side deletion (device-signed
     /// by the runtime) and wipes local data.
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
-        // The runtime owns the device-signed account-deletion request.
-        let serverResult = shared.coreRuntime?.requestAccountDeletion()
-        try await wipeLocalData()
-        if let serverResult = serverResult, serverResult.status == "accepted" {
-            return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion requested.")
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
         }
-        return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion pending.")
+        let serverAccepted = cr.requestAccountDeletion().status == "accepted"
+        let localWiped: Bool
+        do {
+            try await wipeLocalData()
+            localWiped = true
+        } catch {
+            SynheartLogger.log("[Synheart] Account deletion local wipe failed: \(error)")
+            localWiped = false
+        }
+        return DeletionOutcome.accountResult(
+            serverAccepted: serverAccepted,
+            localWiped: localWiped
+        )
     }
 
     /// Cancel a pending account deletion request (device-signed by the runtime).
@@ -359,7 +375,10 @@ public class Synheart {
             return DeletionRequestResult(status: "error", message: "Runtime unavailable; cannot cancel deletion.")
         }
         if cr.cancelAccountDeletion() {
-            return DeletionRequestResult(status: "cancelled", message: "Account deletion cancelled.")
+            return DeletionRequestResult(
+                status: "cancelled",
+                message: "Account deletion cancelled."
+            )
         }
         return DeletionRequestResult(status: "error", message: "Cancel request failed.")
     }

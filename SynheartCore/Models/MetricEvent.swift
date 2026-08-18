@@ -64,6 +64,20 @@ public struct StorageUsage {
 public struct DeletionRequestResult {
     public let status: String
     public let message: String
+    public let serverDeletionRequested: Bool
+    public let localDataWiped: Bool
+
+    public init(
+        status: String,
+        message: String,
+        serverDeletionRequested: Bool = false,
+        localDataWiped: Bool = false
+    ) {
+        self.status = status
+        self.message = message
+        self.serverDeletionRequested = serverDeletionRequested
+        self.localDataWiped = localDataWiped
+    }
 }
 
 /// Optional filter for listing sessions.
