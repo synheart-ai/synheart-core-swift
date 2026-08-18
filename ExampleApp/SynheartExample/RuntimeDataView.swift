@@ -7,17 +7,6 @@ struct RuntimeDataView: View {
         NavigationStack {
             List {
                 Section("Sync") {
-                    Toggle(
-                        "Background sync",
-                        isOn: Binding(
-                            get: { model.syncStatus?.enabled ?? false },
-                            set: { enabled in
-                                Task { await model.setSyncEnabled(enabled) }
-                            }
-                        )
-                    )
-                    .disabled(!model.isInitialized || model.isBusy)
-
                     LabeledContent("Devices", value: "\(model.syncStatus?.deviceCount ?? 0)")
                     LabeledContent("Sync space", value: model.syncStatus?.syncSpaceId ?? "None")
 

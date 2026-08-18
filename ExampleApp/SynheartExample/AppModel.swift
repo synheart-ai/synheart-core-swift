@@ -127,14 +127,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func setSyncEnabled(_ enabled: Bool) async {
-        await perform("Update sync") {
-            try await Synheart.setSyncEnabled(enabled)
-            self.refreshData()
-            self.appendEvent("Sync \(enabled ? "enabled" : "disabled")")
-        }
-    }
-
     func syncNow() async {
         await perform("Sync now") {
             self.lastSyncResult = try await Synheart.syncNow()
