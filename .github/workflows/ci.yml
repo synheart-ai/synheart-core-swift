@@ -39,6 +39,18 @@ jobs:
             echo "No Tests directory found, skipping"
           fi
 
+      - name: Build iOS example app
+        run: |
+          xcodebuild -quiet \
+            -project ExampleApp/SynheartExample.xcodeproj \
+            -scheme SynheartExample \
+            -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
   lint:
     name: Lint
     runs-on: macos-latest
