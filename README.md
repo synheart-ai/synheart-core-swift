@@ -158,9 +158,14 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.0.8")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.1.0")
 ]
 ```
+
+The SDK validates the linked native runtime ABI during initialization. If a
+required symbol is missing, initialization throws
+`SynheartError.runtimeIncompatible(missingSymbols:)`; optional symbols remain
+visible through `CoreRuntimeBridge.symbolDiagnostics` for support diagnostics.
 
 ## Usage
 
@@ -198,7 +203,8 @@ Synheart.onStateUpdate
     }
     .store(in: &cancellables)
 
-// Start session — data collection begins
+// Start session — at least one collection consent must already be granted,
+// and native runtime session creation must succeed.
 try await Synheart.startSession()
 
 // Later, stop when done
@@ -318,6 +324,10 @@ For the modular architecture, features are collected in time windows:
 | `activate(_:)` | Enable a feature (wear, behavior, phoneContext, etc.) |
 | `deactivate(_:)` | Disable a feature |
 | `syncNow()` | Execute a sync cycle (push + pull) |
+| `enrolResearchStudy(accessCode:studyCode:)` | Asynchronously enrol using the device-signed credential |
+| `validateResearchStudyCodes(accessCode:studyCode:)` | Asynchronously validate study codes without redeeming them |
+| `withdrawResearchStudy()` | Asynchronously withdraw the current study enrolment |
+| `requestStudyDataDeletion(dryRun:)` | Asynchronously preview or request study-data erasure |
 | `grantConsent(_:)` | Grant consent for a data type |
 | `revokeConsent(_:)` | Revoke consent for a data type |
 | `hasConsent(_:)` | Check if consent is granted |

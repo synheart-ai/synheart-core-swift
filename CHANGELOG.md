@@ -12,11 +12,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
   consent token scoped to the current subject (configure-cloud on init,
   mint-on-grant, init self-heal) so uploads are attributed to that subject.
+- Runtime symbol diagnostics that distinguish required ABI symbols from
+  optional capabilities and fail initialization with an actionable
+  compatibility error when the linked runtime is incomplete.
+- Runtime-backed session catalog, HSI-window, storage-usage, retention,
+  orphan-repair, sync-status, and sync-conflict handling.
 
 ### Changed
 - Account deletion (`requestAccountDeletion` / `cancelAccountDeletion`) now goes
   through the native runtime's device-signed request instead of an in-process
   bearer token. Request signing is backed by `synheart-auth-swift`.
+- **BREAKING:** research-study enrolment, validation, withdrawal, and data
+  deletion methods are now `async`; their native network calls execute away
+  from the caller executor, matching the Flutter API contract.
+- Sync, upload flush, local wipe, and account-deletion runtime work now executes
+  on a serial utility queue instead of blocking the caller executor.
+- Native runtime configuration is built in one place and uses durable
+  application-support storage. Bundle secrets are no longer forwarded to the
+  native runtime.
+- Starting a session now requires collection consent and a real native session
+  handle. A runtime failure is no longer hidden by a synthetic handle.
+
+### Fixed
+- Native FFI declarations and symbol names now match the current runtime ABI,
+  including RR providers, lab-window functions, wearable SRM functions, and
+  runtime-owned callback strings.
+- Initialization is concurrency-safe, retryable after failure, and reports
+  native creation errors truthfully.
+- Failed session/module starts roll back partially allocated resources and can
+  be retried. Wear, Phone, and Behavior now participate in the shared lifecycle
+  state machine instead of bypassing it.
+- Wear collection no longer injects a mock source in production by default.
+- HSI 1.3 payloads parse canonical domain arrays, IDs, timestamps, modalities,
+  and tiers; duplicate native deliveries are suppressed by HSI ID.
+- Sync and privacy APIs no longer report placeholder or successful outcomes
+  when the native operation failed.
 
 ### Removed
 - **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` aliases —
