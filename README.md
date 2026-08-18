@@ -1,6 +1,6 @@
 # Synheart Core SDK — Swift
 
-[![Version](https://img.shields.io/badge/version-0.0.8-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-FA7343.svg)](https://swift.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -194,11 +194,14 @@ import Combine
 try await Synheart.initialize(config: SynheartConfig(
     appId: "com.example.app",
     subjectId: "anon_user_123",
-    allowUnsignedCapabilities: true  // Use capabilityToken + capabilitySecret in production
+    allowUnsignedCapabilities: true  // Debug only; use DeviceAuthConfig in production
 ))
 
 // Grant consent for biosignal collection
 try await Synheart.grantConsent("biosignals")
+
+// Declare which consented collector the app intends to run
+Synheart.activate(.wear)
 
 // Subscribe to HSI updates (core state representation)
 var cancellables = Set<AnyCancellable>()
@@ -216,8 +219,8 @@ Synheart.onStateUpdate
     }
     .store(in: &cancellables)
 
-// Start session — at least one collection consent must already be granted,
-// and native runtime session creation must succeed.
+// Start session — at least one activated collector must have matching consent
+// and capability, and native runtime session creation must succeed.
 try await Synheart.startSession()
 
 // Later, stop when done
@@ -233,7 +236,7 @@ The SDK exposes individual modules for hosts that need finer-grained lifecycle c
 import SynheartCore
 
 let capabilities = CapabilityModule()
-capabilities.loadDefaults() // Development only — use loadFromToken in production
+capabilities.loadDefaults() // Development-only modular setup
 
 let consent = ConsentModule()
 
@@ -279,6 +282,8 @@ do {
         subjectId: "user_123",
         allowUnsignedCapabilities: true
     ))
+    try await Synheart.grantConsent("biosignals")
+    Synheart.activate(.wear)
     try await Synheart.startSession()
 } catch SynheartError.alreadyConfigured {
     print("SDK already initialized")
@@ -297,7 +302,7 @@ do {
 |-------|------|
 | `SynheartError.notInitialized` | Method called before `initialize()` |
 | `SynheartError.alreadyConfigured` | `initialize()` called twice |
-| `SynheartError.capabilityTokenRequired` | No token provided and `allowUnsignedCapabilities` is false |
+| `SynheartError.capabilityTokenRequired` | No `deviceAuthConfig` or verified legacy token provided and `allowUnsignedCapabilities` is false |
 | `SynheartError.notImplemented(String)` | Feature not yet available |
 
 
@@ -431,9 +436,11 @@ The Behavior Module captures user-device interaction patterns:
 swift test
 ```
 
-### Testing with Mock Providers
+### Testing the Session Lifecycle
 
-The SDK ships with mock data sources for development and testing. When no real wearable or sensor is connected, modules use mock collectors that emit synthetic data.
+The production facade does not inject synthetic wearable data. Use this flow to
+smoke-test initialization and the native session lifecycle; inject an explicit
+`MockWearSourceHandler` only in module-level tests that need generated samples.
 
 To test your integration without hardware:
 
@@ -445,7 +452,10 @@ try await Synheart.initialize(config: SynheartConfig(
     allowUnsignedCapabilities: true
 ))
 
-// Start session — mock data will flow through all streams
+try await Synheart.grantConsent("biosignals")
+Synheart.activate(.wear)
+
+// Start a native session. Data flows only from explicitly configured sources.
 try await Synheart.startSession()
 
 // Subscribe and verify

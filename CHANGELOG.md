@@ -5,7 +5,7 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - Unreleased
 
 ### Added
 - **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   native runtime.
 - Starting a session now requires collection consent and a real native session
   handle. A runtime failure is no longer hidden by a synthetic handle.
+- **BREAKING:** session start now requires at least one collection feature with
+  matching developer activation, user consent, device-role support, and SDK
+  capability. Registered collectors are no longer started unconditionally.
+- Device-auth configuration now uses provisional SDK capability defaults while
+  the native runtime performs registration and consent-token enforcement. The
+  static bundle capability-token/secret path is deprecated for new apps.
 
 ### Fixed
 - Native FFI declarations and symbol names now match the current runtime ABI,
@@ -50,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and tiers; duplicate native deliveries are suppressed by HSI ID.
 - Sync and privacy APIs no longer report placeholder or successful outcomes
   when the native operation failed.
+- Legacy capability tokens are rejected when expired, not yet valid,
+  unverifiable, or rejected by the native signature verifier.
+- Phone and Wear callbacks recheck consent before caching or publishing data.
 
 ### Removed
 - **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` aliases —
@@ -190,6 +199,7 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.0.5...HEAD
+[0.2.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.1.0
 [0.0.5]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.0.5
 [0.0.4]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.0.4
