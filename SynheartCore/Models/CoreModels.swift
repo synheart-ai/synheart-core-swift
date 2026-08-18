@@ -12,19 +12,54 @@ import Foundation
 public struct SyncResult {
     public let pushed: Int
     public let pulled: Int
+    public let conflictsResolved: Int
     public let errors: [String]
 
-    public init(pushed: Int = 0, pulled: Int = 0, errors: [String] = []) {
+    public init(
+        pushed: Int = 0,
+        pulled: Int = 0,
+        conflictsResolved: Int = 0,
+        errors: [String] = []
+    ) {
         self.pushed = pushed
         self.pulled = pulled
+        self.conflictsResolved = conflictsResolved
         self.errors = errors
+    }
+
+    init(runtimeMap map: [String: Any]) {
+        self.init(
+            pushed: (map["pushed"] as? NSNumber)?.intValue ?? 0,
+            pulled: (map["pulled"] as? NSNumber)?.intValue ?? 0,
+            conflictsResolved: (map["conflicts_resolved"] as? NSNumber)?.intValue ?? 0,
+            errors: map["errors"] as? [String] ?? []
+        )
     }
 }
 
 /// Whether background sync is currently enabled.
 public struct SyncStatus {
     public let enabled: Bool
-    public init(enabled: Bool) { self.enabled = enabled }
+    public let syncSpaceId: String?
+    public let deviceCount: Int
+
+    public init(
+        enabled: Bool,
+        syncSpaceId: String? = nil,
+        deviceCount: Int = 0
+    ) {
+        self.enabled = enabled
+        self.syncSpaceId = syncSpaceId
+        self.deviceCount = deviceCount
+    }
+
+    init(runtimeMap map: [String: Any]) {
+        self.init(
+            enabled: map["enabled"] as? Bool ?? false,
+            syncSpaceId: map["sync_space_id"] as? String,
+            deviceCount: (map["device_count"] as? NSNumber)?.intValue ?? 0
+        )
+    }
 }
 
 // MARK: - SessionRecord

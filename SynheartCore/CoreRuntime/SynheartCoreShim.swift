@@ -270,15 +270,18 @@ public final class SynheartCoreShim {
     }
 
     /// Run a push/pull sync cycle. Returns a `SyncResult`.
-    public func syncNow() -> SyncResult {
+    public func syncNow() -> SyncResult? {
         guard let json = bridge?.syncNow(), let dict = parseJsonDict(json) else {
-            return SyncResult()
+            return nil
         }
-        return SyncResult(
-            pushed: (dict["pushed"] as? Int) ?? 0,
-            pulled: (dict["pulled"] as? Int) ?? 0,
-            errors: (dict["errors"] as? [String]) ?? []
-        )
+        return SyncResult(runtimeMap: dict)
+    }
+
+    public func syncStatus() -> SyncStatus? {
+        guard let json = bridge?.syncStatus(), let dict = parseJsonDict(json) else {
+            return nil
+        }
+        return SyncStatus(runtimeMap: dict)
     }
 
     // MARK: - SRM / Baselines

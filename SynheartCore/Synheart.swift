@@ -373,17 +373,40 @@ public class Synheart {
 
     /// Enable or disable sync.
     public static func setSyncEnabled(_ enabled: Bool) async throws {
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        cr.setSyncEnabled(enabled)
+        guard let status = cr.syncStatus() else {
+            throw SynheartError.runtimeOperationFailed("Unable to read sync status")
+        }
+        guard status.enabled == enabled else {
+            throw SynheartError.runtimeOperationFailed(
+                enabled ? "Native sync prerequisites are not satisfied" : "Unable to disable native sync"
+            )
+        }
     }
 
     /// Execute a sync cycle (push + pull).
     public static func syncNow() async throws -> SyncResult {
-        guard let cr = shared.coreRuntime, cr.isAvailable else { return SyncResult() }
-        return cr.syncNow()
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        guard let result = cr.syncNow() else {
+            throw SynheartError.runtimeOperationFailed("Native sync cycle failed")
+        }
+        return result
     }
 
     /// Get current sync status.
     public static func getSyncStatus() throws -> SyncStatus {
-        return SyncStatus(enabled: false)
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        guard let status = cr.syncStatus() else {
+            throw SynheartError.runtimeOperationFailed("Unable to read sync status")
+        }
+        return status
     }
 
     // MARK: - Activation API

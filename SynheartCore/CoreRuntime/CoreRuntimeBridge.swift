@@ -79,6 +79,7 @@ public final class CoreRuntimeBridge {
     // Sync
     private typealias SetSyncEnabledFn    = @convention(c) (OpaquePointer?, Int32) -> Void
     private typealias SyncNowFn           = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias SyncStatusFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
 
     // SRM / Baselines
     private typealias BaselinesJsonFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
@@ -199,6 +200,7 @@ public final class CoreRuntimeBridge {
     // Sync
     private static let _setSyncOn:     SetSyncEnabledFn?  = sym("synheart_core_set_sync_enabled")
     private static let _syncNow:       SyncNowFn?         = sym("synheart_core_sync_now")
+    private static let _syncStatus:    SyncStatusFn?      = sym("synheart_core_sync_status")
 
     // SRM / Baselines
     private static let _baselines:     BaselinesJsonFn?   = sym("synheart_core_baselines_json")
@@ -505,6 +507,11 @@ public final class CoreRuntimeBridge {
     /// JSON: `{ "pushed": N, "pulled": N, "errors": [...] }`
     public func syncNow() -> String? {
         consumeCString(Self._syncNow?(handle))
+    }
+
+    /// Current native sync-engine state as JSON.
+    public func syncStatus() -> String? {
+        consumeCString(Self._syncStatus?(handle))
     }
 
     // MARK: - SRM / Baselines

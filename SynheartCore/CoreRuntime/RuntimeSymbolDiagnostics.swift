@@ -37,6 +37,7 @@ enum RuntimeSymbolManifest {
         "synheart_core_set_retention_days",
         "synheart_core_set_sync_enabled",
         "synheart_core_sync_now",
+        "synheart_core_sync_status",
         "synheart_core_set_hsi_callback",
         "synheart_core_clear_hsi_callback",
     ]
