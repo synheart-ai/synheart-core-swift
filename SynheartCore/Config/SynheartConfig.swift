@@ -75,10 +75,14 @@ public struct SynheartConfig {
     public let consentConfig: ConsentConfig?
     public let deviceAuthConfig: DeviceAuthConfig?
 
-    /// Server-signed capability token for feature gating
+    /// Legacy server-signed capability token for feature gating.
+    ///
+    /// Prefer `deviceAuthConfig`. The static bundle-token path is retained for
+    /// migration compatibility and is always verified by the native runtime.
     public let capabilityToken: CapabilityToken?
 
-    /// HMAC secret for verifying the capability token signature
+    /// Legacy HMAC secret paired with `capabilityToken`.
+    /// Prefer `deviceAuthConfig`; bundle secrets should not be used by new apps.
     public let capabilitySecret: String?
 
     /// When true, allows SDK to run with default capabilities and no signed token (debug only)

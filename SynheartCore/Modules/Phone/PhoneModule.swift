@@ -40,6 +40,10 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
 
     public override func onStart() async throws {
         SynheartLogger.log("[PhoneModule] Starting phone data collection...")
+        guard consent.current().phoneContext else {
+            SynheartLogger.log("[PhoneModule] Phone-context consent is not granted; collection remains stopped")
+            return
+        }
 
         try await motionCollector.start()
         motionCollector.motionStream
@@ -50,7 +54,7 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
                     }
                 },
                 receiveValue: { [weak self] motion in
-                    self?.cache.addMotionData(motion)
+                    self?.cacheMotionIfConsented(motion)
                 }
             )
             .store(in: &cancellables)
@@ -64,7 +68,7 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
                     }
                 },
                 receiveValue: { [weak self] state in
-                    self?.cache.addScreenState(state, timestamp: Date())
+                    self?.cacheScreenStateIfConsented(state, timestamp: Date())
                 }
             )
             .store(in: &cancellables)
@@ -79,7 +83,7 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
                         }
                     },
                     receiveValue: { [weak self] _ in
-                        self?.cache.addAppSwitch(timestamp: Date())
+                        self?.cacheAppSwitchIfConsented(timestamp: Date())
                     }
                 )
                 .store(in: &cancellables)
@@ -95,13 +99,33 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
                         }
                     },
                     receiveValue: { [weak self] event in
-                        self?.cache.addNotification(event)
+                        self?.cacheNotificationIfConsented(event)
                     }
                 )
                 .store(in: &cancellables)
         }
 
         SynheartLogger.log("[PhoneModule] Started \(cancellables.count) collectors")
+    }
+
+    func cacheMotionIfConsented(_ motion: MotionData) {
+        guard consent.current().phoneContext else { return }
+        cache.addMotionData(motion)
+    }
+
+    private func cacheScreenStateIfConsented(_ state: ScreenState, timestamp: Date) {
+        guard consent.current().phoneContext else { return }
+        cache.addScreenState(state, timestamp: timestamp)
+    }
+
+    private func cacheAppSwitchIfConsented(timestamp: Date) {
+        guard consent.current().phoneContext else { return }
+        cache.addAppSwitch(timestamp: timestamp)
+    }
+
+    private func cacheNotificationIfConsented(_ event: NotificationEvent) {
+        guard consent.current().phoneContext else { return }
+        cache.addNotification(event)
     }
 
     public override func onStop() async throws {

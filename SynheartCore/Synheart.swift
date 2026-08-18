@@ -29,6 +29,8 @@ import SynheartAuth
  *     .sink { state in print("State: \(state)") }
  *     .store(in: &cancellables)
  *
+ * try await Synheart.grantConsent("biosignals")
+ * Synheart.activate(.wear)
  * try await Synheart.startSession()
  * try await Synheart.syncNow()
  * ```
@@ -532,14 +534,27 @@ public class Synheart {
     ) async throws {
 
         self.userId = userId
+        let resolvedConfig = config ?? SynheartConfig()
 
         SynheartLogger.log("[Synheart] Initializing...")
 
-        capabilityModule = CapabilityModule()
-        let resolvedConfig = config ?? SynheartConfig()
-        if let token = resolvedConfig.capabilityToken,
+        // Create the native runtime before accepting any legacy capability
+        // token so signature verification can never be silently skipped.
+        let dataDirectory = try RuntimeDataDirectory.prepare()
+        self.coreRuntime = try SynheartCoreShim(
+            config: resolvedConfig,
+            dataDir: dataDirectory
+        )
+
+        capabilityModule = CapabilityModule(bridge: coreRuntime?.bridge)
+        if resolvedConfig.deviceAuthConfig != nil {
+            // Device-auth registrations and verified consent tokens are owned by
+            // the native runtime. Defaults are provisional SDK-side gates until
+            // that runtime authority is established.
+            capabilityModule!.loadDefaults()
+        } else if let token = resolvedConfig.capabilityToken,
            let secret = resolvedConfig.capabilitySecret {
-            try capabilityModule!.loadFromToken(token, secret: secret)
+            try capabilityModule!.loadVerifiedToken(token, secret: secret)
         } else if resolvedConfig.allowUnsignedCapabilities {
             SynheartLogger.log("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
             capabilityModule!.loadDefaults()
@@ -547,7 +562,7 @@ public class Synheart {
             throw SynheartError.capabilityTokenRequired
         }
 
-        consentModule = ConsentModule()
+        consentModule = ConsentModule(bridge: coreRuntime?.bridge)
 
         let capturedAppId = resolvedConfig.appId
         consentModule!.setDeviceSigner { method, path, bodyData in
@@ -619,11 +634,6 @@ public class Synheart {
             SynheartAuth.shared.configure(baseUrl: "https://api.synheart.ai/auth")
         }
 
-        let dataDirectory = try RuntimeDataDirectory.prepare()
-        self.coreRuntime = try SynheartCoreShim(
-            config: resolvedConfig,
-            dataDir: dataDirectory
-        )
         if let cr = coreRuntime, let bridge = cr.bridge {
             SynheartLogger.log("[Synheart] Core runtime bridge loaded")
 
@@ -720,10 +730,19 @@ public class Synheart {
             throw SynheartError.notInitialized
         }
         guard !isRunning else { return }
-        guard let consent = consentModule?.current(),
-              SessionStartPolicy.hasCollectionConsent(consent) else {
+        guard let consent = consentModule?.current() else {
+            throw SynheartError.notInitialized
+        }
+        let collectionFeatures = SessionStartPolicy.operationalCollectionFeatures(
+            consent: consent,
+            activated: _activationManager?.activatedFeatures() ?? [],
+            capabilityAllowed: { [weak self] feature in
+                self?._isCapabilityAllowed(feature) ?? false
+            }
+        )
+        guard !collectionFeatures.isEmpty else {
             throw SynheartError.consentRequired(
-                "Grant biosignals, behavior, or phone-context consent before starting a session"
+                "Activate at least one capable collection feature and grant its matching consent before starting a session"
             )
         }
         guard let cr = coreRuntime, cr.isAvailable else {
@@ -762,7 +781,7 @@ public class Synheart {
                     )
             }
 
-            try await moduleManager.startAll()
+            try await moduleManager.startModules(Set(collectionFeatures.map(moduleId)))
             isRunning = true
             _reevaluateAllFeatures()
             SynheartLogger.log("[Synheart] Session started")
@@ -876,6 +895,18 @@ public class Synheart {
         guard let consentModule = consentModule else {
             throw SynheartError.notInitialized
         }
+        guard let nativeType = nativeConsentType(for: consentType) else { return }
+        guard let coreRuntime, coreRuntime.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        let nativeGranted = await RuntimeWorkExecutor.run {
+            coreRuntime.grantConsent(nativeType.rawValue)
+        }
+        guard nativeGranted else {
+            throw SynheartError.runtimeOperationFailed(
+                "Native runtime rejected \(consentType) consent"
+            )
+        }
 
         let current = consentModule.current()
         let updated: ConsentSnapshot
@@ -914,6 +945,18 @@ public class Synheart {
         guard let consentModule = consentModule else {
             throw SynheartError.notInitialized
         }
+        guard let nativeType = nativeConsentType(for: consentType) else { return }
+        guard let coreRuntime, coreRuntime.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        let nativeRevoked = await RuntimeWorkExecutor.run {
+            coreRuntime.revokeConsent(nativeType.rawValue)
+        }
+        guard nativeRevoked else {
+            throw SynheartError.runtimeOperationFailed(
+                "Native runtime rejected \(consentType) consent revocation"
+            )
+        }
 
         let current = consentModule.current()
         let updated: ConsentSnapshot
@@ -928,6 +971,17 @@ public class Synheart {
         }
 
         try await consentModule.updateConsent(updated)
+    }
+
+    private func nativeConsentType(for publicName: String) -> ConsentType? {
+        switch publicName {
+        case "biosignals": return .biosignals
+        case "behavior": return .behavior
+        case "phoneContext": return .phoneContext
+        case "cloudUpload": return .cloudUpload
+        case "syni": return .syni
+        default: return nil
+        }
     }
 
     // MARK: - Cloud Consent Token
@@ -1193,6 +1247,9 @@ public class Synheart {
     }
 
     private func _isCapabilityAllowed(_ feature: SynheartFeature) -> Bool {
+        guard _synheartConfig?.deviceRole.supportedFeatures.contains(feature) == true else {
+            return false
+        }
         guard let cap = capabilityModule else { return false }
         switch feature {
         case .wear:         return cap.capability(.wear) != .none
@@ -1200,6 +1257,16 @@ public class Synheart {
         case .phoneContext: return cap.capability(.phone) != .none
         case .cloud:        return cap.capability(.cloud) != .none
         case .syni:         return true
+        }
+    }
+
+    private func moduleId(for feature: SynheartFeature) -> String {
+        switch feature {
+        case .wear: return "wear"
+        case .behavior: return "behavior"
+        case .phoneContext: return "phone"
+        case .cloud: return "cloud"
+        case .syni: return "syni"
         }
     }
 

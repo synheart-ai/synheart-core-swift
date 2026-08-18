@@ -52,6 +52,14 @@ public class ModuleManager {
 
     /// Start all modules in dependency order
     public func startAll() async throws {
+        try await startModules(Set(modules.keys))
+    }
+
+    /// Start only the requested modules and their dependencies.
+    ///
+    /// This is the collection-safe entry point used by the Synheart facade: a
+    /// collector is never started merely because it was registered.
+    public func startModules(_ moduleIds: Set<String>) async throws {
         guard isInitialized else {
             throw NSError(domain: "ModuleManager", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "Modules must be initialized before starting"
@@ -59,16 +67,23 @@ public class ModuleManager {
         }
 
         let startOrder = try resolveInitializationOrder()
+        let selectedModuleIds = try moduleIds.reduce(into: Set<String>()) { selected, moduleId in
+            try includeModuleAndDependencies(moduleId, in: &selected)
+        }
+        var startedInThisCall: [SynheartModule] = []
 
         do {
-            for moduleId in startOrder {
+            for moduleId in startOrder where selectedModuleIds.contains(moduleId) {
                 if let module = modules[moduleId],
                    module.status == .initialized || module.status == .stopped {
                     try await module.start()
+                    startedInThisCall.append(module)
                 }
             }
         } catch {
-            await stopAll()
+            for module in startedInThisCall.reversed() where module.status == .running {
+                try? await module.stop()
+            }
             throw error
         }
     }
@@ -117,6 +132,21 @@ public class ModuleManager {
     }
 
     // MARK: - Private Methods
+
+    private func includeModuleAndDependencies(
+        _ moduleId: String,
+        in selected: inout Set<String>
+    ) throws {
+        guard modules[moduleId] != nil else {
+            throw NSError(domain: "ModuleManager", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "Module \(moduleId) is not registered"
+            ])
+        }
+        guard selected.insert(moduleId).inserted else { return }
+        for dependency in dependencies[moduleId] ?? [] {
+            try includeModuleAndDependencies(dependency, in: &selected)
+        }
+    }
 
     /// Resolve the initialization order based on dependencies
     private func resolveInitializationOrder() throws -> [String] {

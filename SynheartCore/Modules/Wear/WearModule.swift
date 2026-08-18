@@ -113,6 +113,10 @@ public class WearModule: BaseSynheartModule, RawWearDataProvider {
 
     public override func onStart() async throws {
         SynheartLogger.log("[WearModule] Starting wear data collection...")
+        guard consent.current().biosignals else {
+            SynheartLogger.log("[WearModule] Biosignal consent is not granted; collection remains stopped")
+            return
+        }
 
         // Track vendor sync consent changes
         consent.observe()
@@ -135,8 +139,9 @@ public class WearModule: BaseSynheartModule, RawWearDataProvider {
                         }
                     },
                     receiveValue: { [weak self] sample in
-                        self?.cache.addSample(sample)
-                        self?.rawSampleSubject.send(sample)
+                        guard let self, self.consent.current().biosignals else { return }
+                        self.cache.addSample(sample)
+                        self.rawSampleSubject.send(sample)
                     }
                 )
                 .store(in: &cancellables)
