@@ -34,11 +34,11 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
 
     // MARK: - SynheartModule
 
-    public override func initialize() async throws {
+    public override func onInitialize() async throws {
         SynheartLogger.log("[PhoneModule] Initializing phone collectors...")
     }
 
-    public override func start() async throws {
+    public override func onStart() async throws {
         SynheartLogger.log("[PhoneModule] Starting phone data collection...")
 
         try await motionCollector.start()
@@ -104,7 +104,7 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
         SynheartLogger.log("[PhoneModule] Started \(cancellables.count) collectors")
     }
 
-    public override func stop() async throws {
+    public override func onStop() async throws {
         SynheartLogger.log("[PhoneModule] Stopping phone data collection...")
 
         cancellables.removeAll()
@@ -115,7 +115,7 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
         try await notificationTracker.stop()
     }
 
-    public override func dispose() async throws {
+    public override func onDispose() async throws {
         SynheartLogger.log("[PhoneModule] Disposing phone module...")
 
         try await motionCollector.dispose()

@@ -37,11 +37,11 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
 
     // MARK: - SynheartModule
 
-    public override func initialize() async throws {
+    public override func onInitialize() async throws {
         SynheartLogger.log("[BehaviorModule] Initializing behavior tracking...")
     }
 
-    public override func start() async throws {
+    public override func onStart() async throws {
         SynheartLogger.log("[BehaviorModule] Starting behavior tracking...")
 
         eventSubscription = eventStream.events
@@ -65,7 +65,7 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
         SynheartLogger.log("[BehaviorModule] Behavior tracking started")
     }
 
-    public override func stop() async throws {
+    public override func onStop() async throws {
         SynheartLogger.log("[BehaviorModule] Stopping behavior tracking...")
 
         eventSubscription?.cancel()
@@ -75,7 +75,7 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
         cleanupTimer = nil
     }
 
-    public override func dispose() async throws {
+    public override func onDispose() async throws {
         SynheartLogger.log("[BehaviorModule] Disposing behavior module...")
         try await eventStream.dispose()
     }
