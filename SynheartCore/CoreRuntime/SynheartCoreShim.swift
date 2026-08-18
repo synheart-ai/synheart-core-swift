@@ -210,7 +210,10 @@ public final class SynheartCoreShim {
             endMs: endMs,
             limit: limit
         ) else { return [] }
-        return parseJsonArray(json)
+        return RuntimePayloadDecoder.dictionaryArray(
+            json,
+            acceptingJSONStringElements: true
+        )
     }
 
     /// Storage usage summary.
@@ -219,8 +222,7 @@ public final class SynheartCoreShim {
               let dict = parseJsonDict(json) else {
             return StorageUsage(totalBytes: 0, bySessionBytes: [:])
         }
-        let totalBytes = (dict["total_bytes"] as? NSNumber)?.int64Value ?? 0
-        return StorageUsage(totalBytes: totalBytes, bySessionBytes: [:])
+        return StorageUsage(runtimeMap: dict)
     }
 
     // MARK: - Metrics
@@ -244,6 +246,11 @@ public final class SynheartCoreShim {
     @discardableResult
     public func deleteSession(_ sessionId: String) -> Bool {
         bridge?.deleteSession(sessionId: sessionId) ?? false
+    }
+
+    @discardableResult
+    public func closeOrphanSession(_ sessionId: String) -> Bool {
+        bridge?.closeOrphanSession(sessionId: sessionId) ?? false
     }
 
     @discardableResult
@@ -346,14 +353,11 @@ public final class SynheartCoreShim {
     // MARK: - JSON Parsing Helpers
 
     private func parseJsonDict(_ json: String) -> [String: Any]? {
-        guard let data = json.data(using: .utf8) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        RuntimePayloadDecoder.dictionary(json)
     }
 
     private func parseJsonArray(_ json: String) -> [[String: Any]] {
-        guard let data = json.data(using: .utf8),
-              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
-        return arr
+        RuntimePayloadDecoder.dictionaryArray(json)
     }
 
     private func parseSessionHandle(_ json: String) -> SessionHandle? {

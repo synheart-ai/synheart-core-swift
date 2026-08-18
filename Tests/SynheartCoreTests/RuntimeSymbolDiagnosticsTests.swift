@@ -43,6 +43,7 @@ final class RuntimeSymbolDiagnosticsTests: XCTestCase {
     func testManifestUsesCurrentRuntimeSymbolNames() {
         let currentNames: Set<String> = [
             "synheart_core_is_lab_available",
+            "synheart_core_close_orphan_session",
             "synheart_core_srm_push_wearable_daily",
             "synheart_core_srm_trigger_wearable_recompute",
             "synheart_core_wearable_reference_json",

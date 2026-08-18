@@ -19,6 +19,45 @@ public struct MetricEvent {
 public struct StorageUsage {
     public let totalBytes: Int64
     public let bySessionBytes: [String: Int64]
+    public let artifactCount: Int64
+    public let sessionCount: Int64
+    public let pendingSync: Int64
+
+    public init(
+        totalBytes: Int64,
+        bySessionBytes: [String: Int64] = [:],
+        artifactCount: Int64 = 0,
+        sessionCount: Int64 = 0,
+        pendingSync: Int64 = 0
+    ) {
+        self.totalBytes = totalBytes
+        self.bySessionBytes = bySessionBytes
+        self.artifactCount = artifactCount
+        self.sessionCount = sessionCount
+        self.pendingSync = pendingSync
+    }
+
+    init(runtimeMap map: [String: Any]) {
+        func int64(_ key: String) -> Int64 {
+            (map[key] as? NSNumber)?.int64Value ?? 0
+        }
+
+        let bySession = (map["by_session_bytes"] as? [String: Any])?.reduce(
+            into: [String: Int64]()
+        ) { result, entry in
+            if let value = entry.value as? NSNumber {
+                result[entry.key] = value.int64Value
+            }
+        } ?? [:]
+
+        self.init(
+            totalBytes: int64("total_bytes"),
+            bySessionBytes: bySession,
+            artifactCount: int64("artifact_count"),
+            sessionCount: int64("session_count"),
+            pendingSync: int64("pending_sync")
+        )
+    }
 }
 
 /// Result of an account deletion request.

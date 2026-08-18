@@ -49,6 +49,7 @@ enum RuntimeSymbolManifest {
         "synheart_core_breathing_set_target_bpm",
         "synheart_core_breathing_set_window_secs",
         "synheart_core_cancel_account_deletion",
+        "synheart_core_close_orphan_session",
         "synheart_core_consent_clear_stored",
         "synheart_core_consent_configure_cloud",
         "synheart_core_consent_effective_state",

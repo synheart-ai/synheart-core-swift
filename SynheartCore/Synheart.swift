@@ -201,28 +201,56 @@ public class Synheart {
 
     /// List stored sessions with optional filters.
     public static func listSessions(range: SessionRange? = nil) throws -> [SessionRecord] {
-        guard let cr = shared.coreRuntime, cr.isAvailable else { return [] }
-        let dicts = cr.listSessions()
-        return dicts.compactMap { dict in
-            guard let sessionId = dict["session_id"] as? String else { return nil }
-            return SessionRecord(
-                sessionId: sessionId,
-                subjectId: (dict["subject_id"] as? String) ?? "",
-                mode: (dict["mode"] as? String) ?? "personal",
-                createdAtUtc: (dict["created_at_utc"] as? NSNumber)?.int64Value ?? 0,
-                startUtc: (dict["start_utc"] as? NSNumber)?.int64Value ?? 0,
-                appId: (dict["app_id"] as? String) ?? "",
-                appVersion: (dict["app_version"] as? String) ?? "",
-                deviceId: (dict["device_id"] as? String) ?? "",
-                platform: (dict["platform"] as? String) ?? "ios"
-            )
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
         }
+        return cr.listSessions()
+            .compactMap(SessionRecord.init(runtimeMap:))
+            .filter { session in
+                if let startMs = range?.startMs, session.startUtc < startMs { return false }
+                if let endMs = range?.endMs, session.startUtc > endMs { return false }
+                if let mode = range?.mode, session.mode != mode { return false }
+                return true
+            }
     }
 
     /// Get a session summary (decrypted) for the given session.
     public static func getSessionSummary(_ sessionId: String) throws -> [String: Any]? {
-        guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
         return cr.getSessionSummary(sessionId)
+    }
+
+    /// Mark a stranded active session as closed without replaying the normal
+    /// stop-session lifecycle. The native operation is idempotent.
+    @discardableResult
+    public static func closeOrphanSession(_ sessionId: String) throws -> Bool {
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        return cr.closeOrphanSession(sessionId)
+    }
+
+    /// Close active catalog sessions older than the supplied interval. Call at
+    /// app startup to repair sessions stranded by process termination.
+    @discardableResult
+    public static func sweepOrphanSessions(
+        olderThan: TimeInterval = 6 * 60 * 60,
+        now: Date = Date()
+    ) throws -> Int {
+        guard olderThan >= 0 else {
+            throw SynheartError.invalidArgument("Orphan-session age must be non-negative")
+        }
+        let cutoffMs = Int64((now.timeIntervalSince1970 - olderThan) * 1_000)
+        let orphans = try listSessions().filter {
+            $0.isActive && $0.startUtc > 0 && $0.startUtc < cutoffMs
+        }
+        return try orphans.reduce(into: 0) { closed, session in
+            if try closeOrphanSession(session.sessionId) {
+                closed += 1
+            }
+        }
     }
 
     // MARK: - Research Studies
@@ -262,7 +290,10 @@ public class Synheart {
 
     /// Get decrypted HSI window artifacts for a session.
     public static func getHSIWindows(_ sessionId: String, range: WindowRange? = nil) throws -> [[String: Any]] {
-        return []
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        return cr.getHSIWindows(sessionId, range: range)
     }
 
     // MARK: - Storage & Retention
@@ -270,13 +301,23 @@ public class Synheart {
     /// Get storage usage statistics.
     public static func getStorageUsage() throws -> StorageUsage {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
-            return StorageUsage(totalBytes: 0, bySessionBytes: [:])
+            throw SynheartError.notInitialized
         }
         return cr.getStorageUsage()
     }
 
-    /// Set retention policy. Deletes sessions older than the given number of days.
+    /// Set retention policy. Nil leaves the existing native policy unchanged.
     public static func setRetentionDays(_ days: Int?) throws {
+        guard let days else { return }
+        guard days >= 0, days <= Int(Int32.max) else {
+            throw SynheartError.invalidArgument("Retention days must be between 0 and \(Int32.max)")
+        }
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        guard cr.setRetentionDays(days) >= 0 else {
+            throw SynheartError.runtimeOperationFailed("Unable to apply retention policy")
+        }
     }
 
     // MARK: - Deletion API
@@ -1139,6 +1180,8 @@ public enum SynheartError: Error {
     case alreadyConfigured
     case runtimeIncompatible(missingSymbols: [String])
     case runtimeCreationFailed(message: String?)
+    case invalidArgument(String)
+    case runtimeOperationFailed(String)
     case notImplemented(String)
     case capabilityTokenRequired
 }

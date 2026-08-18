@@ -72,6 +72,7 @@ public final class CoreRuntimeBridge {
 
     // Deletion
     private typealias DeleteSessionFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
+    private typealias CloseOrphanSessionFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
     private typealias WipeLocalDataFn     = @convention(c) (OpaquePointer?) -> Int32
     private typealias SetRetentionDaysFn  = @convention(c) (OpaquePointer?, Int32) -> Int64
 
@@ -191,6 +192,7 @@ public final class CoreRuntimeBridge {
 
     // Deletion
     private static let _deleteSession: DeleteSessionFn?   = sym("synheart_core_delete_session")
+    private static let _closeOrphan:   CloseOrphanSessionFn? = sym("synheart_core_close_orphan_session")
     private static let _wipeLocal:     WipeLocalDataFn?   = sym("synheart_core_wipe_local_data")
     private static let _setRetention:  SetRetentionDaysFn? = sym("synheart_core_set_retention_days")
 
@@ -474,6 +476,11 @@ public final class CoreRuntimeBridge {
     /// Delete a session and create a tombstone. Returns true on success.
     public func deleteSession(sessionId: String) -> Bool {
         sessionId.withCString { (Self._deleteSession?(handle, $0) ?? 1) == 0 }
+    }
+
+    /// Mark a stranded active session as closed. This is idempotent.
+    public func closeOrphanSession(sessionId: String) -> Bool {
+        sessionId.withCString { (Self._closeOrphan?(handle, $0) ?? -1) == 0 }
     }
 
     /// Wipe all local data. Returns true on success.
