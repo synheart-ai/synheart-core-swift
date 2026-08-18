@@ -260,22 +260,26 @@ public class Synheart {
     /// Enrolment rides the device's signed cloud credential — no tokens are
     /// handled by the caller. Returns the service response (enrolment on success,
     /// or an `error` key), or nil if the runtime is unavailable.
-    public static func enrolResearchStudy(accessCode: String, studyCode: String) throws -> [String: Any]? {
+    public static func enrolResearchStudy(accessCode: String, studyCode: String) async throws -> [String: Any]? {
         guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
-        return cr.enrolResearchStudy(accessCode: accessCode, studyCode: studyCode)
+        return await RuntimeWorkExecutor.run {
+            cr.enrolResearchStudy(accessCode: accessCode, studyCode: studyCode)
+        }
     }
 
     /// Preview an access + study code pair without redeeming the code.
-    public static func validateResearchStudyCodes(accessCode: String, studyCode: String) throws -> [String: Any]? {
+    public static func validateResearchStudyCodes(accessCode: String, studyCode: String) async throws -> [String: Any]? {
         guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
-        return cr.validateResearchStudyCodes(accessCode: accessCode, studyCode: studyCode)
+        return await RuntimeWorkExecutor.run {
+            cr.validateResearchStudyCodes(accessCode: accessCode, studyCode: studyCode)
+        }
     }
 
     /// Withdraw from the device's active research study for this app. No codes —
     /// the participant + app come from the device's signed credential. Idempotent.
-    public static func withdrawResearchStudy() throws -> [String: Any]? {
+    public static func withdrawResearchStudy() async throws -> [String: Any]? {
         guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
-        return cr.withdrawResearchStudy()
+        return await RuntimeWorkExecutor.run { cr.withdrawResearchStudy() }
     }
 
     /// Request erasure of the data the participant contributed to their study for
@@ -284,9 +288,11 @@ public class Synheart {
     /// credential. When `dryRun` is true the response is an inventory preview and
     /// nothing is deleted; a real request is accepted asynchronously and carries a
     /// `request_id`. Idempotent. Returns nil if the runtime is unavailable.
-    public static func requestStudyDataDeletion(dryRun: Bool = false) throws -> [String: Any]? {
+    public static func requestStudyDataDeletion(dryRun: Bool = false) async throws -> [String: Any]? {
         guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
-        return cr.requestStudyDataDeletion(dryRun: dryRun)
+        return await RuntimeWorkExecutor.run {
+            cr.requestStudyDataDeletion(dryRun: dryRun)
+        }
     }
 
     /// Get decrypted HSI window artifacts for a session.
@@ -341,7 +347,8 @@ public class Synheart {
         if shared.isRunning {
             try await shared._stopSession()
         }
-        guard cr.wipeLocalData() else {
+        let wiped = await RuntimeWorkExecutor.run { cr.wipeLocalData() }
+        guard wiped else {
             throw SynheartError.runtimeOperationFailed("Unable to wipe local data")
         }
         shared._currentSessionHandle = nil
@@ -355,7 +362,9 @@ public class Synheart {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
             throw SynheartError.notInitialized
         }
-        let serverAccepted = cr.requestAccountDeletion().status == "accepted"
+        let serverAccepted = await RuntimeWorkExecutor.run {
+            cr.requestAccountDeletion().status == "accepted"
+        }
         let localWiped: Bool
         do {
             try await wipeLocalData()
@@ -375,7 +384,7 @@ public class Synheart {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
             return DeletionRequestResult(status: "error", message: "Runtime unavailable; cannot cancel deletion.")
         }
-        if cr.cancelAccountDeletion() {
+        if await RuntimeWorkExecutor.run({ cr.cancelAccountDeletion() }) {
             return DeletionRequestResult(
                 status: "cancelled",
                 message: "Account deletion cancelled."
@@ -396,8 +405,11 @@ public class Synheart {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
             throw SynheartError.notInitialized
         }
-        cr.setSyncEnabled(enabled)
-        guard let status = cr.syncStatus() else {
+        let status = await RuntimeWorkExecutor.run {
+            cr.setSyncEnabled(enabled)
+            return cr.syncStatus()
+        }
+        guard let status else {
             throw SynheartError.runtimeOperationFailed("Unable to read sync status")
         }
         guard status.enabled == enabled else {
@@ -412,7 +424,8 @@ public class Synheart {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
             throw SynheartError.notInitialized
         }
-        guard let result = cr.syncNow() else {
+        let result = await RuntimeWorkExecutor.run { cr.syncNow() }
+        guard let result else {
             throw SynheartError.runtimeOperationFailed("Native sync cycle failed")
         }
         return result
@@ -809,7 +822,8 @@ public class Synheart {
     }
 
     private func _autoIngestSession(_ session: SessionHandle) async {
-        coreRuntime?.bridge?.flushUploads()
+        guard let bridge = coreRuntime?.bridge else { return }
+        _ = await RuntimeWorkExecutor.run { bridge.flushUploads() }
     }
 
     // MARK: - Session Module Access
