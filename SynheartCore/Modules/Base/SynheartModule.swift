@@ -98,12 +98,16 @@ open class BaseSynheartModule: SynheartModule {
             throw ModuleException(moduleId, "Module must be initialized or stopped before starting")
         }
 
+        let retryStatus = _status
         do {
             setStatus(.starting)
             try await onStart()
             setStatus(.running)
         } catch {
-            setStatus(.error)
+            // A failed start may have partially allocated resources. Give the
+            // module a best-effort rollback and restore a retryable state.
+            try? await onStop()
+            setStatus(retryStatus)
             throw ModuleException(moduleId, "Failed to start", underlyingError: error)
         }
     }

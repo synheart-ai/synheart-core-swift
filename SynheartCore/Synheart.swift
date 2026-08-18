@@ -707,17 +707,24 @@ public class Synheart {
             throw SynheartError.notInitialized
         }
         guard !isRunning else { return }
+        guard let consent = consentModule?.current(),
+              SessionStartPolicy.hasCollectionConsent(consent) else {
+            throw SynheartError.consentRequired(
+                "Grant biosignals, behavior, or phone-context consent before starting a session"
+            )
+        }
+        guard let cr = coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
 
         SynheartLogger.log("[Synheart] Starting session...")
 
-        if let cr = coreRuntime, cr.isAvailable {
-            if let handle = cr.startSession() {
-                _currentSessionHandle = handle
-            }
+        guard let nativeHandle = cr.startSession() else {
+            throw SynheartError.runtimeOperationFailed("Native session creation failed")
         }
+        _currentSessionHandle = nativeHandle
 
-        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let sessionId = _currentSessionHandle?.sessionId ?? "core_\(nowMs)"
+        let sessionId = nativeHandle.sessionId
         let durationSec = 86400
 
         let config = SessionConfig(
@@ -726,33 +733,39 @@ public class Synheart {
             durationSec: durationSec
         )
 
-        if let module = sessionModule {
-            let stream = module.startSession(config: config)
-            sessionSubscription = stream
-                .sink(
-                    receiveCompletion: { [weak self] _ in
-                        guard let self = self else { return }
-                        if self.isRunning {
-                            self.isRunning = false
-                            self._reevaluateAllFeatures()
-                            Task { try? await self.moduleManager.stopAll() }
-                            SynheartLogger.log("[Synheart] Main session ended (duration or stream closed)")
-                        }
-                    },
-                    receiveValue: { _ in }
-                )
+        do {
+            if let module = sessionModule {
+                let stream = module.startSession(config: config)
+                sessionSubscription = stream
+                    .sink(
+                        receiveCompletion: { [weak self] _ in
+                            guard let self = self else { return }
+                            if self.isRunning {
+                                Task { try? await self._stopSession() }
+                                SynheartLogger.log("[Synheart] Main session ended (duration or stream closed)")
+                            }
+                        },
+                        receiveValue: { _ in }
+                    )
+            }
+
+            try await moduleManager.startAll()
+            isRunning = true
+            _reevaluateAllFeatures()
+            SynheartLogger.log("[Synheart] Session started")
+        } catch {
+            if let activeId = sessionModule?.currentSessionId {
+                sessionModule?.stopSession(sessionId: activeId)
+            }
+            sessionSubscription?.cancel()
+            sessionSubscription = nil
+            await moduleManager.stopAll()
+            _ = cr.stopSession()
+            _currentSessionHandle = nil
+            isRunning = false
+            _reevaluateAllFeatures()
+            throw error
         }
-
-        try await moduleManager.startAll()
-
-        if _currentSessionHandle == nil {
-            let mode = _synheartConfig?.mode ?? .personal
-            _currentSessionHandle = SessionHandle(sessionId: sessionId, startedAtMs: nowMs, mode: mode)
-        }
-
-        isRunning = true
-        _reevaluateAllFeatures()
-        SynheartLogger.log("[Synheart] Session started")
     }
 
     /**
@@ -766,11 +779,13 @@ public class Synheart {
 
     private func _stopSession() async throws {
         guard isRunning else { return }
+        isRunning = false
 
         SynheartLogger.log("[Synheart] Stopping session...")
 
+        var nativeStopped = true
         if let cr = coreRuntime, cr.isAvailable {
-            let _ = cr.stopSession()
+            nativeStopped = cr.stopSession()
         }
 
         if let activeId = sessionModule?.currentSessionId {
@@ -785,9 +800,11 @@ public class Synheart {
 
         _currentSessionHandle = nil
 
-        isRunning = false
         _reevaluateAllFeatures()
-        try await moduleManager.stopAll()
+        await moduleManager.stopAll()
+        guard nativeStopped else {
+            throw SynheartError.runtimeOperationFailed("Native session stop failed")
+        }
         SynheartLogger.log("[Synheart] Session stopped")
     }
 
@@ -1186,7 +1203,7 @@ public class Synheart {
 
     private func _dispose() async throws {
         try await _stopSession()
-        try await moduleManager.disposeAll()
+        await moduleManager.disposeAll()
 
         sessionModule?.dispose()
         sessionModule = nil
@@ -1231,6 +1248,7 @@ public enum SynheartError: Error {
     case runtimeCreationFailed(message: String?)
     case invalidArgument(String)
     case runtimeOperationFailed(String)
+    case consentRequired(String)
     case notImplemented(String)
     case capabilityTokenRequired
 }

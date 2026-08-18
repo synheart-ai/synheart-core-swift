@@ -60,10 +60,16 @@ public class ModuleManager {
 
         let startOrder = try resolveInitializationOrder()
 
-        for moduleId in startOrder {
-            if let module = modules[moduleId], module.status == .initialized {
-                try await module.start()
+        do {
+            for moduleId in startOrder {
+                if let module = modules[moduleId],
+                   module.status == .initialized || module.status == .stopped {
+                    try await module.start()
+                }
             }
+        } catch {
+            await stopAll()
+            throw error
         }
     }
 
