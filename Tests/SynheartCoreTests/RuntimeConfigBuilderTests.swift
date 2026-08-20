@@ -25,6 +25,7 @@ final class RuntimeConfigBuilderTests: XCTestCase {
         XCTAssertEqual(deviceAuth["enabled"] as? Bool, false)
         XCTAssertEqual(deviceAuth["auth_base_url"] as? String, "")
         XCTAssertEqual(deviceAuth["package_name"] as? String, "")
+        XCTAssertEqual(deviceAuth["allow_unattested_dev_registration"] as? Bool, false)
 
         let sync = try XCTUnwrap(map["sync"] as? [String: Any])
         XCTAssertEqual(sync["base_url"] as? String, ApiEndpoints.defaultAuthBaseUrl)
@@ -42,7 +43,8 @@ final class RuntimeConfigBuilderTests: XCTestCase {
             ),
             deviceAuthConfig: DeviceAuthConfig(
                 authBaseUrl: "https://auth.example.test",
-                packageName: "com.test.cloud"
+                packageName: "com.test.cloud",
+                allowUnattestedDevRegistration: true
             )
         )
 
@@ -58,6 +60,11 @@ final class RuntimeConfigBuilderTests: XCTestCase {
         XCTAssertEqual(deviceAuth["enabled"] as? Bool, true)
         XCTAssertEqual(deviceAuth["auth_base_url"] as? String, "https://auth.example.test")
         XCTAssertEqual(deviceAuth["package_name"] as? String, "com.test.cloud")
+        #if DEBUG
+        XCTAssertEqual(deviceAuth["allow_unattested_dev_registration"] as? Bool, true)
+        #else
+        XCTAssertEqual(deviceAuth["allow_unattested_dev_registration"] as? Bool, false)
+        #endif
 
         let sync = try XCTUnwrap(map["sync"] as? [String: Any])
         XCTAssertEqual(sync["enabled"] as? Bool, true)

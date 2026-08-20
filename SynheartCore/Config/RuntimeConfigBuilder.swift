@@ -15,6 +15,11 @@ enum RuntimeConfigBuilder {
         let cloudReady = !orgId.isEmpty
         let deviceAuth = config.deviceAuthConfig
         let endpoints = ServiceEndpointResolver.resolve(config)
+        #if DEBUG
+        let allowUnattestedDevRegistration = deviceAuth?.allowUnattestedDevRegistration ?? false
+        #else
+        let allowUnattestedDevRegistration = false
+        #endif
 
         var storage: [String: Any] = ["enabled": config.storage.enabled]
         if let retentionDays = config.storage.retentionDays {
@@ -41,6 +46,7 @@ enum RuntimeConfigBuilder {
                 "enabled": deviceAuth != nil,
                 "auth_base_url": deviceAuth == nil ? "" : endpoints.authBaseURL,
                 "package_name": deviceAuth?.packageName ?? "",
+                "allow_unattested_dev_registration": allowUnattestedDevRegistration,
             ],
             "sync": [
                 "enabled": config.sync.enabled,

@@ -34,12 +34,19 @@ public struct DeviceAuthConfig {
     /// Bundle identifier bound to the device registration.
     public let packageName: String
 
+    /// Allow registration without an App Attest claim in development builds.
+    /// The runtime still creates a real device key and the server must also
+    /// explicitly permit development registration for this app id.
+    public let allowUnattestedDevRegistration: Bool
+
     public init(
         authBaseUrl: String,
-        packageName: String = ""
+        packageName: String = "",
+        allowUnattestedDevRegistration: Bool = false
     ) {
         self.authBaseUrl = authBaseUrl
         self.packageName = packageName
+        self.allowUnattestedDevRegistration = allowUnattestedDevRegistration
     }
 }
 

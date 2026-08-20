@@ -45,6 +45,7 @@ enum RuntimeSymbolManifest {
         "synheart_core_revoke_consent",
         "synheart_core_has_consent",
         "synheart_core_consent_clear_stored",
+        "synheart_core_consent_effective_state",
     ]
 
     static let optional: Set<String> = [
@@ -57,7 +58,6 @@ enum RuntimeSymbolManifest {
         "synheart_core_cancel_account_deletion",
         "synheart_core_close_orphan_session",
         "synheart_core_consent_configure_cloud",
-        "synheart_core_consent_effective_state",
         "synheart_core_consent_get_editable_form",
         "synheart_core_consent_needs_token_refresh",
         "synheart_core_consent_status",
@@ -81,6 +81,7 @@ enum RuntimeSymbolManifest {
         "synheart_core_lab_start",
         "synheart_core_last_error",
         "synheart_core_last_error_code",
+        "synheart_core_last_ingest_success_at_ms",
         "synheart_core_load_capability_token",
         "synheart_core_load_srm_snapshot",
         "synheart_core_priority_effective_rank",

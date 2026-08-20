@@ -55,6 +55,10 @@ public class Synheart {
     private var collectionModuleFailures: [String: String] = [:]
     private var userId: String?
     private var previousConsent: ConsentSnapshot?
+    private var lastUploadBatchId: String?
+    private var lastUploadAt: Date?
+    private var lastUploadAttemptAt: Date?
+    private var lastUploadFailure: NativeOperationFailure?
 
     private var _currentSessionHandle: SessionHandle?
     private var _synheartConfig: SynheartConfig?
@@ -376,6 +380,7 @@ public class Synheart {
         shared._currentSessionHandle = nil
         shared.isRunning = false
         shared.collectionModuleFailures = [:]
+        shared.resetUploadDiagnostics()
         shared.hsiSubject.send(nil)
     }
 
@@ -496,6 +501,186 @@ public class Synheart {
             throw SynheartError.runtimeOperationFailed("Unable to read sync status")
         }
         return status
+    }
+
+    // MARK: - Cloud Ingestion & Device Auth
+
+    /// Observable outbound HSI queue state. The native runtime automatically
+    /// enqueues closed HSI windows; hosts should not enqueue every callback again.
+    public static var uploadQueueStatus: UploadQueueStatus {
+        shared._uploadQueueStatus()
+    }
+
+    public static var uploadQueueLength: Int {
+        shared.coreRuntime?.uploadQueueLength ?? 0
+    }
+
+    private func _uploadQueueStatus() -> UploadQueueStatus {
+        guard let runtime = coreRuntime, runtime.isAvailable else {
+            return UploadQueueStatus(
+                state: .localOnly,
+                queueLength: 0,
+                lastUploadBatchId: lastUploadBatchId,
+                lastUploadAt: lastUploadAt,
+                lastUploadAttemptAt: lastUploadAttemptAt,
+                lastFailure: lastUploadFailure
+            )
+        }
+        let queueLength = runtime.uploadQueueLength
+        let nativeSuccess = runtime.bridge?.lastIngestSuccessAtMs().map {
+            Date(timeIntervalSince1970: TimeInterval($0) / 1_000)
+        }
+        let resolvedLastUpload = nativeSuccess ?? lastUploadAt
+        let cloudChosen = _effectiveConsent()?.cloudUpload == true
+        let cloudEnforceable = runtime.hasConsent(ConsentType.cloudUpload.rawValue)
+        let state: CloudSyncState
+        if !cloudChosen {
+            state = .localOnly
+        } else if !cloudEnforceable {
+            state = .blocked
+        } else if queueLength > 0 {
+            state = .syncing
+        } else if resolvedLastUpload != nil {
+            state = .synced
+        } else {
+            state = .pending
+        }
+        return UploadQueueStatus(
+            state: state,
+            queueLength: queueLength,
+            lastUploadBatchId: lastUploadBatchId,
+            lastUploadAt: resolvedLastUpload,
+            lastUploadAttemptAt: lastUploadAttemptAt,
+            lastFailure: lastUploadFailure
+        )
+    }
+
+    /// Force the native runtime to flush its automatically-managed HSI queue.
+    @discardableResult
+    public static func flushUploads(requireConsent: Bool = true) async -> UploadFlushResult {
+        await shared._flushUploads(requireConsent: requireConsent)
+    }
+
+    private func _flushUploads(requireConsent: Bool) async -> UploadFlushResult {
+        lastUploadAttemptAt = Date()
+        guard let runtime = coreRuntime, runtime.isAvailable else {
+            return recordUploadFailure(.init(
+                reason: .misconfigured,
+                message: "Core runtime bridge is unavailable"
+            ))
+        }
+        if requireConsent && !runtime.hasConsent(ConsentType.cloudUpload.rawValue) {
+            let locallyChosen = _effectiveConsent()?.cloudUpload == true
+            return recordUploadFailure(.init(
+                reason: .policy,
+                message: locallyChosen
+                    ? "Cloud upload is selected, but the runtime gate is closed. Check device registration and consent-token issuance."
+                    : "Cloud upload consent is not granted"
+            ))
+        }
+        guard let map = await RuntimeWorkExecutor.run({ runtime.flushUploads() }) else {
+            return recordUploadFailure(.init(
+                reason: .unknown,
+                message: "Native upload flush returned no result"
+            ))
+        }
+        let result = UploadFlushResult(runtimeMap: map)
+        if let failure = result.failure {
+            lastUploadFailure = failure
+            return result
+        }
+        lastUploadFailure = nil
+        if result.uploaded > 0 {
+            let now = Date()
+            lastUploadAt = now
+            lastUploadBatchId = result.batchId
+                ?? "flush_\(Int64(now.timeIntervalSince1970 * 1_000))"
+        }
+        return result
+    }
+
+    private func recordUploadFailure(_ failure: NativeOperationFailure) -> UploadFlushResult {
+        lastUploadFailure = failure
+        return UploadFlushResult(success: false, failure: failure)
+    }
+
+    private func resetUploadDiagnostics() {
+        lastUploadBatchId = nil
+        lastUploadAt = nil
+        lastUploadAttemptAt = nil
+        lastUploadFailure = nil
+    }
+
+    /// Native device-auth status, including the separate attestation provenance
+    /// claim (`attested`, `unattested`, or `unknown`).
+    public static var deviceAuthAvailable: Bool {
+        let required = Set([
+            "synheart_core_sdk_set_crypto_callbacks",
+            "synheart_core_set_storage_callbacks",
+            "synheart_core_sdk_register_device",
+            "synheart_core_sdk_device_auth_status",
+        ])
+        return required.isDisjoint(with: CoreRuntimeBridge.symbolDiagnostics.missingOptionalSymbols)
+    }
+
+    public static var deviceAuthStatus: DeviceAuthStatus? {
+        guard let json = shared.coreRuntime?.bridge?.deviceAuthStatus(),
+              let map = shared.parseDict(json) else { return nil }
+        return DeviceAuthStatus(runtimeMap: map)
+    }
+
+    /// Idempotently register the configured device through the native runtime.
+    @discardableResult
+    public static func ensureDeviceAuthRegistered() async -> DeviceRegistrationResult {
+        await shared._ensureDeviceAuthRegistered()
+    }
+
+    private func _ensureDeviceAuthRegistered() async -> DeviceRegistrationResult {
+        guard _synheartConfig?.deviceAuthConfig != nil,
+              let bridge = coreRuntime?.bridge else {
+            let failure = NativeOperationFailure(
+                reason: .misconfigured,
+                message: "DeviceAuthConfig is required before registering a device"
+            )
+            return DeviceRegistrationResult(
+                success: false,
+                status: DeviceAuthStatus(status: "not_configured"),
+                failure: failure
+            )
+        }
+        if let existing = Self.deviceAuthStatus, existing.isRegistered {
+            return DeviceRegistrationResult(success: true, status: existing)
+        }
+        guard let clientId = subjectId, !clientId.isEmpty,
+              let json = await RuntimeWorkExecutor.run({ bridge.registerDevice(clientId: clientId) }),
+              let map = parseDict(json) else {
+            let failure = NativeOperationFailure(
+                reason: .unknown,
+                message: "Native device registration returned no result"
+            )
+            return DeviceRegistrationResult(
+                success: false,
+                status: DeviceAuthStatus(status: "failed"),
+                failure: failure
+            )
+        }
+        if let failure = NativeOperationFailure.fromRuntimeMap(map, fallback: "Device registration failed") {
+            return DeviceRegistrationResult(
+                success: false,
+                status: DeviceAuthStatus(runtimeMap: map),
+                failure: failure
+            )
+        }
+        let status = Self.deviceAuthStatus
+            ?? DeviceAuthStatus(
+                status: "registered",
+                deviceId: map["device_id"] as? String,
+                attestation: map["attestation"] as? String ?? "unknown"
+            )
+        if status.isRegistered {
+            _ = await _ensureCloudConsentReady()
+        }
+        return DeviceRegistrationResult(success: status.isRegistered, status: status)
     }
 
     // MARK: - Activation API
@@ -781,6 +966,7 @@ public class Synheart {
         isConfigured = false
         isRunning = false
         collectionModuleFailures = [:]
+        resetUploadDiagnostics()
     }
 
     // MARK: - Session Lifecycle
@@ -934,9 +1120,8 @@ public class Synheart {
         SynheartLogger.log("[Synheart] Session stopped")
     }
 
-    private func _autoIngestSession(_ session: SessionHandle) async {
-        guard let bridge = coreRuntime?.bridge else { return }
-        _ = await RuntimeWorkExecutor.run { bridge.flushUploads() }
+    private func _autoIngestSession(_: SessionHandle) async {
+        _ = await _flushUploads(requireConsent: true)
     }
 
     // MARK: - Session Module Access
@@ -1261,6 +1446,15 @@ public class Synheart {
         guard let bridge = coreRuntime?.bridge, consentModule != nil else {
             throw SynheartError.notInitialized
         }
+        if form.allowCloud, _synheartConfig?.deviceAuthConfig != nil {
+            let registration = await _ensureDeviceAuthRegistered()
+            if !registration.success {
+                SynheartLogger.log(
+                    "[Synheart] Cloud consent saved locally; device registration is not ready: "
+                        + (registration.failure?.message ?? registration.status.status)
+                )
+            }
+        }
         let data = try JSONEncoder().encode(form)
         guard let formJSON = String(data: data, encoding: .utf8) else {
             throw SynheartError.invalidArgument("Consent form could not be encoded")
@@ -1494,6 +1688,7 @@ public class Synheart {
         isConfigured = false
         isRunning = false
         collectionModuleFailures = [:]
+        resetUploadDiagnostics()
 
         SynheartLogger.log("[Synheart] Disposed")
     }

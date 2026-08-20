@@ -213,6 +213,9 @@ public final class CoreRuntimeBridge {
     private static let _uploadQLen:    UploadQueueLenFn?  = sym("synheart_core_upload_queue_length")
     private static let _flushUploads:  FlushUploadsFn?    = sym("synheart_core_flush_uploads")
     private static let _uploadMeta:    UploadMetadataFn?  = sym("synheart_core_upload_metadata")
+    private typealias LastIngestSuccessAtMsFn = @convention(c) (OpaquePointer?) -> Int64
+    private static let _lastIngestSuccessAtMs: LastIngestSuccessAtMsFn? =
+        sym("synheart_core_last_ingest_success_at_ms")
 
     // Wellness Score
     private static let _wellnessJson:  DiagnosticsFn?     = sym("synheart_core_wellness_json")
@@ -560,6 +563,14 @@ public final class CoreRuntimeBridge {
     /// Get upload metadata summary as JSON.
     public func uploadMetadata() -> String? {
         consumeCString(Self._uploadMeta?(handle))
+    }
+
+    /// Unix milliseconds of the most recent successful automatic or manual
+    /// ingest upload, or nil when unavailable/never uploaded.
+    public func lastIngestSuccessAtMs() -> Int64? {
+        guard let fn = Self._lastIngestSuccessAtMs else { return nil }
+        let value = fn(handle)
+        return value > 0 ? value : nil
     }
 
     // MARK: - Wellness Score

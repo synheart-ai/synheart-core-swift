@@ -66,6 +66,7 @@ final class RuntimeSymbolDiagnosticsTests: XCTestCase {
             "synheart_core_revoke_consent",
             "synheart_core_has_consent",
             "synheart_core_consent_clear_stored",
+            "synheart_core_consent_effective_state",
         ]
 
         XCTAssertTrue(consentAuthority.isSubset(of: RuntimeSymbolManifest.required))
