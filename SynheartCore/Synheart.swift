@@ -1156,6 +1156,82 @@ public class Synheart {
         shared.consentModule?.current()
     }
 
+    /// Runtime-owned editable consent form. Hosts should edit this value and
+    /// submit it with ``submitConsentForm(_:deviceId:platform:userId:)``.
+    public static var editableConsentForm: ConsentForm? {
+        guard let json = shared.coreRuntime?.bridge?.consentEditableForm(),
+              let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ConsentForm.self, from: data)
+    }
+
+    /// Consent state currently enforced by the native runtime after local
+    /// choices, app policy, and any cloud token are reconciled.
+    public static var effectiveConsent: ConsentEffectiveState? {
+        shared._effectiveConsent()
+    }
+
+    private func _effectiveConsent() -> ConsentEffectiveState? {
+        guard let json = coreRuntime?.bridge?.consentEffectiveState(),
+              let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ConsentEffectiveState.self, from: data)
+    }
+
+    /// Submit a category-level consent form using the native runtime's
+    /// offline-first flow, then refresh the Swift consent snapshot from the
+    /// runtime's effective state.
+    @discardableResult
+    public static func submitConsentForm(
+        _ form: ConsentForm,
+        deviceId: String? = nil,
+        platform: String? = nil,
+        userId: String? = nil
+    ) async throws -> ConsentSubmissionResult {
+        try await shared._submitConsentForm(
+            form,
+            deviceId: deviceId,
+            platform: platform,
+            userId: userId
+        )
+    }
+
+    private func _submitConsentForm(
+        _ form: ConsentForm,
+        deviceId: String?,
+        platform: String?,
+        userId: String?
+    ) async throws -> ConsentSubmissionResult {
+        guard let bridge = coreRuntime?.bridge, let consentModule else {
+            throw SynheartError.notInitialized
+        }
+        let data = try JSONEncoder().encode(form)
+        guard let formJSON = String(data: data, encoding: .utf8) else {
+            throw SynheartError.invalidArgument("Consent form could not be encoded")
+        }
+        let configuredConsent = _synheartConfig?.consentConfig
+        let resolvedDeviceId = deviceId ?? configuredConsent?.deviceId ?? _synheartConfig?.deviceId
+        let resolvedPlatform = platform ?? configuredConsent?.platform ?? _synheartConfig?.platform ?? "ios"
+        let resolvedUserId = userId ?? configuredConsent?.userId ?? subjectId
+
+        guard let resultJSON = await RuntimeWorkExecutor.run({
+            bridge.consentSubmitForm(
+                deviceId: resolvedDeviceId,
+                platform: resolvedPlatform,
+                userId: resolvedUserId,
+                formJson: formJSON
+            )
+        }) else {
+            throw SynheartError.runtimeOperationFailed("Native consent submission returned no result")
+        }
+        let result = try ConsentSubmissionResult(json: resultJSON)
+        if let error = result.error {
+            throw SynheartError.runtimeOperationFailed("Native consent submission failed: \(error)")
+        }
+        if let effective = _effectiveConsent() {
+            try await consentModule.updateConsent(effective.snapshot)
+        }
+        return result
+    }
+
     /// Update consent.
     public static func updateConsent(_ consent: ConsentSnapshot) async throws {
         try await shared._updateConsent(consent)
