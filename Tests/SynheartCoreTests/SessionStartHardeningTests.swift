@@ -48,6 +48,46 @@ final class SessionStartHardeningTests: XCTestCase {
         ), [.wear])
     }
 
+    func testCollectionUsesRuntimeEffectiveConsentInsteadOfRequestedConsent() {
+        let effective = ConsentEffectiveState(
+            biosignals: false,
+            phoneContext: false,
+            behavior: true,
+            cloudUpload: false,
+            syni: false,
+            vendorSync: false,
+            research: false,
+            timestampMs: 0,
+            version: "1.0.0"
+        )
+
+        XCTAssertEqual(SessionStartPolicy.operationalCollectionFeatures(
+            consent: effective,
+            activated: [.wear, .behavior],
+            capabilityAllowed: { _ in true }
+        ), [.behavior])
+    }
+
+    func testResearchConsentAloneDoesNotPermitCollection() {
+        let effective = ConsentEffectiveState(
+            biosignals: false,
+            phoneContext: false,
+            behavior: false,
+            cloudUpload: false,
+            syni: false,
+            vendorSync: false,
+            research: true,
+            timestampMs: 0,
+            version: "1.0.0"
+        )
+
+        XCTAssertTrue(SessionStartPolicy.operationalCollectionFeatures(
+            consent: effective,
+            activated: [.wear, .behavior, .phoneContext],
+            capabilityAllowed: { _ in true }
+        ).isEmpty)
+    }
+
     func testBiosignalConsentDoesNotStartOrCachePhoneData() async throws {
         let manager = ModuleManager()
         let capabilities = CapabilityModule()

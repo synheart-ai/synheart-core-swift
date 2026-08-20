@@ -662,6 +662,12 @@ public class Synheart {
             try await consentModule!.updateConsent(restored)
         }
 
+        // The editable/current snapshot represents what was requested. Modules
+        // and sessions consume the runtime's policy-intersected effective state.
+        if let effective = _effectiveConsent() {
+            try await consentModule!.updateConsent(effective.snapshot)
+        }
+
         previousConsent = consentModule!.current()
         consentModule!.addListener { [weak self] newConsent in
             self?.handleConsentChange(newConsent)
@@ -700,7 +706,7 @@ public class Synheart {
 
             bridge.setHsiCallback { [weak self] json in
                 guard let self = self else { return }
-                guard self.consentModule?.current().biosignals == true else { return }
+                guard self._effectiveConsent()?.allows(.biosignals) == true else { return }
                 guard self.hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
                 self.hsiSubject.send(json)
             }
@@ -769,8 +775,10 @@ public class Synheart {
             throw SynheartError.notInitialized
         }
         guard !isRunning else { return }
-        guard let consent = consentModule?.current() else {
-            throw SynheartError.notInitialized
+        guard let consent = _effectiveConsent() else {
+            throw SynheartError.runtimeOperationFailed(
+                "Native runtime did not provide an effective consent state"
+            )
         }
         let collectionFeatures = SessionStartPolicy.operationalCollectionFeatures(
             consent: consent,
@@ -910,16 +918,10 @@ public class Synheart {
     }
 
     private func _hasConsent(_ consentType: String) async -> Bool {
-        guard let consentModule = consentModule else { return false }
-
-        let consent = consentModule.current()
-        switch consentType {
-        case "biosignals":  return consent.biosignals
-        case "behavior":    return consent.behavior
-        case "phoneContext": return consent.phoneContext
-        case "cloudUpload": return consent.cloudUpload
-        default:            return false
-        }
+        guard let type = nativeConsentType(for: consentType),
+              let runtime = coreRuntime,
+              runtime.isAvailable else { return false }
+        return runtime.hasConsent(type.rawValue)
     }
 
     /// Grant consent for a specific data type.
@@ -959,12 +961,13 @@ public class Synheart {
         }) {
             throw error
         }
-        try await consentModule.updateConsent(updated)
+        try await _refreshEffectiveConsent()
 
         // Granting cloud upload should immediately mint a consent token for the
         // current subject so pending data can flush. Best-effort.
         if consentType == "cloudUpload" {
             _ = await _ensureCloudConsentReady()
+            try await _refreshEffectiveConsent()
         }
     }
 
@@ -1006,7 +1009,7 @@ public class Synheart {
         }) {
             throw error
         }
-        try await consentModule.updateConsent(updated)
+        try await _refreshEffectiveConsent()
     }
 
     private func nativeConsentType(for publicName: String) -> ConsentType? {
@@ -1176,6 +1179,17 @@ public class Synheart {
         return try? JSONDecoder().decode(ConsentEffectiveState.self, from: data)
     }
 
+    private func _refreshEffectiveConsent() async throws {
+        guard let consentModule else { throw SynheartError.notInitialized }
+        guard let effective = _effectiveConsent() else {
+            try await consentModule.updateConsent(.none())
+            throw SynheartError.runtimeOperationFailed(
+                "Native runtime did not provide an effective consent state"
+            )
+        }
+        try await consentModule.updateConsent(effective.snapshot)
+    }
+
     /// Submit a category-level consent form using the native runtime's
     /// offline-first flow, then refresh the Swift consent snapshot from the
     /// runtime's effective state.
@@ -1200,7 +1214,7 @@ public class Synheart {
         platform: String?,
         userId: String?
     ) async throws -> ConsentSubmissionResult {
-        guard let bridge = coreRuntime?.bridge, let consentModule else {
+        guard let bridge = coreRuntime?.bridge, consentModule != nil else {
             throw SynheartError.notInitialized
         }
         let data = try JSONEncoder().encode(form)
@@ -1226,9 +1240,7 @@ public class Synheart {
         if let error = result.error {
             throw SynheartError.runtimeOperationFailed("Native consent submission failed: \(error)")
         }
-        if let effective = _effectiveConsent() {
-            try await consentModule.updateConsent(effective.snapshot)
-        }
+        try await _refreshEffectiveConsent()
         return result
     }
 
@@ -1247,7 +1259,7 @@ public class Synheart {
         }) {
             throw error
         }
-        try await consentModule.updateConsent(consent)
+        try await _refreshEffectiveConsent()
     }
 
     // MARK: - SRM API
@@ -1357,13 +1369,13 @@ public class Synheart {
     }
 
     private func _hasConsentForFeature(_ feature: SynheartFeature) -> Bool {
-        guard let consent = consentModule?.current() else { return false }
+        guard let consent = _effectiveConsent() else { return false }
         switch feature.requiredConsent {
-        case "biosignals":  return consent.biosignals
-        case "behavior":    return consent.behavior
-        case "phoneContext": return consent.phoneContext
-        case "cloudUpload": return consent.cloudUpload
-        case "syni":        return consent.syni
+        case "biosignals":  return consent.allows(.biosignals)
+        case "behavior":    return consent.allows(.behavior)
+        case "phoneContext": return consent.allows(.phoneContext)
+        case "cloudUpload": return consent.allows(.cloudUpload)
+        case "syni":        return consent.allows(.syni)
         default:            return false
         }
     }

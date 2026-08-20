@@ -153,13 +153,13 @@ public struct ConsentEffectiveState: Codable, Equatable, Sendable {
 
     public func allows(_ type: ConsentType) -> Bool {
         switch type {
-        case .biosignals: return biosignals || research
-        case .phoneContext: return phoneContext || research
-        case .behavior: return behavior || research
+        case .biosignals: return biosignals
+        case .phoneContext: return phoneContext
+        case .behavior: return behavior
         case .cloudUpload: return cloudUpload
         case .syni: return syni
         case .vendorSync: return vendorSync
-        case .focusEstimation, .emotionEstimation: return biosignals || research
+        case .focusEstimation, .emotionEstimation: return biosignals
         }
     }
 
@@ -201,4 +201,3 @@ public struct ConsentSubmissionResult: Equatable, Sendable {
         rawJSON = json
     }
 }
-
