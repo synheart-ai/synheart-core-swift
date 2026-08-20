@@ -30,6 +30,8 @@
     <string>$(SYNHEART_BASE_URL)</string>
     <key>SYNHEART_AUTH_BASE_URL</key>
     <string>$(SYNHEART_AUTH_BASE_URL)</string>
+    <key>SYNHEART_AUTH_URL</key>
+    <string>$(SYNHEART_AUTH_URL)</string>
     <key>SYNHEART_CONSENT_BASE_URL</key>
     <string>$(SYNHEART_CONSENT_BASE_URL)</string>
     <key>SYNHEART_INGEST_BASE_URL</key>
@@ -38,6 +40,10 @@
     <string>$(SYNHEART_ORG_ID)</string>
     <key>SYNHEART_PACKAGE_NAME</key>
     <string>$(SYNHEART_PACKAGE_NAME)</string>
+    <key>SYNHEART_TENANT_ID</key>
+    <string>$(SYNHEART_TENANT_ID)</string>
+    <key>SYNHEART_PROJECT_ID</key>
+    <string>$(SYNHEART_PROJECT_ID)</string>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>

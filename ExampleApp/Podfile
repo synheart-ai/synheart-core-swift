@@ -1,0 +1,7 @@
+platform :ios, '16.0'
+
+project 'SynheartExample.xcodeproj'
+
+target 'SynheartExample' do
+  pod 'SynheartCoreRuntimeHost', :path => 'synheart'
+end

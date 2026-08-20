@@ -1,0 +1,23 @@
+PODS:
+  - onnxruntime-c (1.26.0)
+  - SynheartCoreRuntimeHost (0.2.0):
+    - onnxruntime-c (= 1.26.0)
+
+DEPENDENCIES:
+  - SynheartCoreRuntimeHost (from `synheart`)
+
+SPEC REPOS:
+  trunk:
+    - onnxruntime-c
+
+EXTERNAL SOURCES:
+  SynheartCoreRuntimeHost:
+    :path: synheart
+
+SPEC CHECKSUMS:
+  onnxruntime-c: e6e9272f5996fed3ea3ca3c9bc843478b2ecbc73
+  SynheartCoreRuntimeHost: 9f499e48cd6327605447c7a4b6e540ad69abd99d
+
+PODFILE CHECKSUM: 198c5c5f859c4392009d9ff51dbc094827156660
+
+COCOAPODS: 1.16.2
