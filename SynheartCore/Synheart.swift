@@ -137,6 +137,13 @@ public class Synheart {
             .eraseToAnyPublisher()
     }
 
+    /// Consent-filtered interaction events accepted by the behavior module and
+    /// forwarded to the native runtime during an active behavior session.
+    public static var onBehaviorEvent: AnyPublisher<BehaviorEvent, Never> {
+        shared.behaviorModule?.capturedEvents
+            ?? Empty<BehaviorEvent, Never>().eraseToAnyPublisher()
+    }
+
     /// Get the current HSI state as a typed object.
     public static var currentHSIState: HSIState? {
         guard let json = shared.hsiSubject.value else { return nil }
@@ -647,7 +654,9 @@ public class Synheart {
         )
         behaviorModule = BehaviorModule(
             capabilities: capabilityModule!,
-            consent: consentModule!
+            consent: consentModule!,
+            runtimeSink: coreRuntime,
+            sessionIdProvider: { [weak self] in self?._currentSessionHandle?.sessionId }
         )
 
         try moduleManager.registerModule(wearModule!, dependsOn: ["capabilities", "consent"])

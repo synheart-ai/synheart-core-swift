@@ -9,6 +9,8 @@ public enum BehaviorEventType {
     case appSwitch
     case notificationReceived
     case notificationOpened
+    case swipe
+    case call
 }
 
 /// Behavior event captured from user interactions
@@ -73,5 +75,14 @@ public struct BehaviorEvent {
             timestamp: Date()
         )
     }
-}
 
+    public static func swipe(velocity: Double, direction: String? = nil) -> BehaviorEvent {
+        var metadata: [String: Any] = ["velocity": velocity]
+        if let direction { metadata["direction"] = direction }
+        return BehaviorEvent(type: .swipe, timestamp: Date(), metadata: metadata)
+    }
+
+    public static func call() -> BehaviorEvent {
+        BehaviorEvent(type: .call, timestamp: Date())
+    }
+}

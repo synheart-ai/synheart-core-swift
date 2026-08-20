@@ -10,6 +10,11 @@ public class BehaviorEventStream {
     public var events: AnyPublisher<BehaviorEvent, Error> {
         controller.eraseToAnyPublisher()
     }
+
+    /// Record an already-normalized event.
+    public func record(_ event: BehaviorEvent) {
+        controller.send(event)
+    }
     
     /// Record a tap event
     public func recordTap(x: Double, y: Double) {
@@ -50,4 +55,3 @@ public class BehaviorEventStream {
         controller.send(completion: .finished)
     }
 }
-
