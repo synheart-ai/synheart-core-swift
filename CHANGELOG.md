@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device-auth configuration now uses provisional SDK capability defaults while
   the native runtime performs registration and consent-token enforcement. The
   static bundle capability-token/secret path is deprecated for new apps.
+- **BREAKING:** `Synheart.logout()` is now `async throws`; it revokes native
+  grants and clears persisted consent tokens before changing Swift-visible state.
+- Phone collectors are injectable. Production defaults use CoreMotion and app
+  lifecycle notifications, while unavailable system-wide app/notification data
+  remains idle instead of being fabricated.
 
 ### Fixed
 - Native FFI declarations and symbol names now match the current runtime ABI,
@@ -59,6 +64,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Legacy capability tokens are rejected when expired, not yet valid,
   unverifiable, or rejected by the native signature verifier.
 - Phone and Wear callbacks recheck consent before caching or publishing data.
+- Consent updates are native-first, compensate partial failures, restore native
+  state during initialization, and never enable Swift collection after native
+  rejection.
+- Custom platform origins now configure native ingest/sync plus Swift auth and
+  consent consistently; storage retention is forwarded to the native runtime.
+- Failed native session stops preserve the active Swift/native session handle.
+- HSI 1.3 digital axes (`focus_quality`, `interruption_pressure`, and
+  `interaction_mode`) are available as typed values.
 
 ### Removed
 - **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` aliases —

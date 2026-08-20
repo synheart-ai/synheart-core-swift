@@ -14,23 +14,24 @@ enum RuntimeConfigBuilder {
         let orgId = config.cloudConfig?.orgId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let cloudReady = !orgId.isEmpty
         let deviceAuth = config.deviceAuthConfig
-        let resolvedApiBaseUrl = config.sync.baseUrl.isEmpty
-            ? ApiEndpoints.defaultAuthBaseUrl
-            : config.sync.baseUrl
+        let endpoints = ServiceEndpointResolver.resolve(config)
+
+        var storage: [String: Any] = ["enabled": config.storage.enabled]
+        if let retentionDays = config.storage.retentionDays {
+            storage["retention_days"] = retentionDays
+        }
 
         var result: [String: Any] = [
             "app_id": config.appId,
             "org_id": orgId,
             "subject_id": config.subjectId,
             "client_id": config.subjectId,
-            "api_base_url": resolvedApiBaseUrl,
+            "api_base_url": endpoints.platformBaseURL,
             "mode": config.mode.rawValue,
             "device_id": config.deviceId,
             "app_version": config.appVersion,
             "platform": config.platform,
-            "storage": [
-                "enabled": config.storage.enabled,
-            ],
+            "storage": storage,
             "ingest": [
                 "enabled": cloudReady,
                 "hsi": cloudReady,
@@ -38,12 +39,12 @@ enum RuntimeConfigBuilder {
             ],
             "device_auth": [
                 "enabled": deviceAuth != nil,
-                "auth_base_url": deviceAuth?.authBaseUrl ?? "",
+                "auth_base_url": deviceAuth == nil ? "" : endpoints.authBaseURL,
                 "package_name": deviceAuth?.packageName ?? "",
             ],
             "sync": [
                 "enabled": config.sync.enabled,
-                "base_url": resolvedApiBaseUrl,
+                "base_url": endpoints.syncBaseURL,
             ],
             "privacy": [
                 "allow_research": config.privacy.allowResearch,

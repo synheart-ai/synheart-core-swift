@@ -58,4 +58,17 @@ final class RuntimeSymbolDiagnosticsTests: XCTestCase {
         XCTAssertTrue(currentNames.isSubset(of: RuntimeSymbolManifest.all))
         XCTAssertTrue(retiredNames.isDisjoint(with: RuntimeSymbolManifest.all))
     }
+
+    func testConsentAuthoritySymbolsAreRequired() {
+        let consentAuthority: Set<String> = [
+            "synheart_core_current_consent",
+            "synheart_core_grant_consent",
+            "synheart_core_revoke_consent",
+            "synheart_core_has_consent",
+            "synheart_core_consent_clear_stored",
+        ]
+
+        XCTAssertTrue(consentAuthority.isSubset(of: RuntimeSymbolManifest.required))
+        XCTAssertTrue(consentAuthority.isDisjoint(with: RuntimeSymbolManifest.optional))
+    }
 }

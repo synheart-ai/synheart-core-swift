@@ -148,6 +148,13 @@ public struct SynheartConfig {
         guard !subjectId.contains("|") else {
             throw SynheartCoreError.invalidMode("subjectId must not contain pipe character")
         }
+        if let retentionDays = storage.retentionDays {
+            guard (0...Int(Int32.max)).contains(retentionDays) else {
+                throw SynheartCoreError.notConfigured(
+                    "storage.retentionDays must be between 0 and \(Int32.max)"
+                )
+            }
+        }
     }
 }
 

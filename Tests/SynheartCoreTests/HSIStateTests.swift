@@ -115,4 +115,22 @@ final class HSIStateTests: XCTestCase {
 
         XCTAssertEqual(HSIState.fromJson(json).hsi.focus?.value, 0.5)
     }
+
+    func testParsesCanonicalHSI13DigitalOnlyAxes() {
+        let json = """
+        {"hsi_version":"1.3","axes":{"digital":[
+          {"name":"focus_quality","score":0.81,"confidence":0.7},
+          {"name":"interruption_pressure","score":0.36,"confidence":0.8},
+          {"name":"interaction_mode","score":0.62,"confidence":0.9}
+        ]}}
+        """
+
+        let axes = HSIState.fromJson(json).hsi
+
+        XCTAssertEqual(axes.focusQuality?.value, 0.81)
+        XCTAssertEqual(axes.interruptionPressure?.value, 0.36)
+        XCTAssertEqual(axes.interactionMode?.value, 0.62)
+        XCTAssertNil(axes.focus)
+        XCTAssertNil(axes.stress)
+    }
 }

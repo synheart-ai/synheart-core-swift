@@ -21,15 +21,25 @@ public struct HSIAxes: Codable {
     /// behavioral corroborator). New in engine v0.10.0; nil on the legacy/1.2
     /// path that never carried it.
     public let stress: HSIAxisValue?
+    /// HSI 1.3 digital-context axes. Nil for older payloads.
+    public let focusQuality: HSIAxisValue?
+    public let interruptionPressure: HSIAxisValue?
+    public let interactionMode: HSIAxisValue?
 
     public init(focus: HSIAxisValue? = nil, arousal: HSIAxisValue? = nil,
                 capacity: HSIAxisValue? = nil, sleep: HSIAxisValue? = nil,
-                stress: HSIAxisValue? = nil) {
+                stress: HSIAxisValue? = nil,
+                focusQuality: HSIAxisValue? = nil,
+                interruptionPressure: HSIAxisValue? = nil,
+                interactionMode: HSIAxisValue? = nil) {
         self.focus = focus
         self.arousal = arousal
         self.capacity = capacity
         self.sleep = sleep
         self.stress = stress
+        self.focusQuality = focusQuality
+        self.interruptionPressure = interruptionPressure
+        self.interactionMode = interactionMode
     }
 }
 
@@ -153,7 +163,11 @@ public struct HSIState {
             arousal: parseAxis("arousal"),
             capacity: parseAxis("capacity"),
             sleep: parseAxis("sleep"),
-            stress: parseAxis("stress")
+            stress: parseAxis("stress"),
+            focusQuality: parseAxis("focus_quality") ?? parseAxis("focusQuality"),
+            interruptionPressure: parseAxis("interruption_pressure")
+                ?? parseAxis("interruptionPressure"),
+            interactionMode: parseAxis("interaction_mode") ?? parseAxis("interactionMode")
         )
     }
 
@@ -178,7 +192,10 @@ public struct HSIState {
             capacity: reading(domain: "cognitive", name: "capacity"),
             sleep: reading(domain: "physiological", name: "sleep_score")
                 ?? reading(domain: "physiological", name: "sleep"),
-            stress: reading(domain: "affective", name: "stress")
+            stress: reading(domain: "affective", name: "stress"),
+            focusQuality: reading(domain: "digital", name: "focus_quality"),
+            interruptionPressure: reading(domain: "digital", name: "interruption_pressure"),
+            interactionMode: reading(domain: "digital", name: "interaction_mode")
         )
     }
 

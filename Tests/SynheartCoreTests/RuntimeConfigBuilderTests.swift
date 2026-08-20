@@ -99,4 +99,51 @@ final class RuntimeConfigBuilderTests: XCTestCase {
         XCTAssertNil(map["capability_token"])
         XCTAssertNil(map["capability_secret"])
     }
+
+    func testCloudBaseURLConfiguresEveryServiceWhenNoOverrideIsProvided() throws {
+        let origin = "https://staging.example.test/"
+        let config = SynheartConfig(
+            appId: "com.test.staging",
+            subjectId: "subject-staging",
+            storage: StorageConfig(retentionDays: 30),
+            cloudConfig: CloudConfig(
+                subjectId: "subject-staging",
+                orgId: "org-staging",
+                baseUrl: origin
+            )
+        )
+
+        let endpoints = ServiceEndpointResolver.resolve(config)
+        let map = RuntimeConfigBuilder.build(config)
+
+        XCTAssertEqual(endpoints.platformBaseURL, "https://staging.example.test")
+        XCTAssertEqual(endpoints.authBaseURL, endpoints.platformBaseURL)
+        XCTAssertEqual(endpoints.consentBaseURL, endpoints.platformBaseURL)
+        XCTAssertEqual(endpoints.syncBaseURL, endpoints.platformBaseURL)
+        XCTAssertEqual(map["api_base_url"] as? String, endpoints.platformBaseURL)
+        XCTAssertEqual(
+            (map["sync"] as? [String: Any])?["base_url"] as? String,
+            endpoints.platformBaseURL
+        )
+        XCTAssertEqual(
+            (map["storage"] as? [String: Any])?["retention_days"] as? Int,
+            30
+        )
+    }
+
+    func testRejectsRetentionOutsideNativeRange() {
+        let negative = SynheartConfig(
+            appId: "com.test.retention",
+            subjectId: "subject",
+            storage: StorageConfig(retentionDays: -1)
+        )
+        let overflow = SynheartConfig(
+            appId: "com.test.retention",
+            subjectId: "subject",
+            storage: StorageConfig(retentionDays: Int(Int32.max) + 1)
+        )
+
+        XCTAssertThrowsError(try negative.validate())
+        XCTAssertThrowsError(try overflow.validate())
+    }
 }

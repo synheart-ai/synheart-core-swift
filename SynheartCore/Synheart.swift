@@ -395,9 +395,42 @@ public class Synheart {
         return DeletionRequestResult(status: "error", message: "Cancel request failed.")
     }
 
-    /// Log out -- revoke consent.
-    public static func logout() {
-        try? shared.consentModule?.revokeConsent()
+    /// Log out by revoking native consent, clearing the persisted native token,
+    /// and only then updating the Swift consent snapshot.
+    public static func logout() async throws {
+        try await shared._logout()
+    }
+
+    private func _logout() async throws {
+        guard let consentModule, let coreRuntime, coreRuntime.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+
+        let current = consentModule.current()
+        let nativeRevoked = current.copyWith(
+            biosignals: false,
+            behavior: false,
+            phoneContext: false,
+            cloudUpload: false,
+            syni: false,
+            focusEstimation: false,
+            emotionEstimation: false,
+            vendorSync: false
+        )
+        if let error = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.apply(nativeRevoked, replacing: current, through: coreRuntime)
+        }) {
+            throw error
+        }
+        guard await RuntimeWorkExecutor.run({ coreRuntime.clearStoredConsent() }) else {
+            _ = await RuntimeWorkExecutor.run {
+                ConsentRuntimeCoordinator.apply(current, replacing: nativeRevoked, through: coreRuntime)
+            }
+            throw SynheartError.runtimeOperationFailed("Native consent token cleanup failed")
+        }
+
+        try await consentModule.updateConsent(.none())
+        currentTokenSubject = nil
     }
 
     // MARK: - Sync API
@@ -545,6 +578,28 @@ public class Synheart {
             config: resolvedConfig,
             dataDir: dataDirectory
         )
+        let endpoints = ServiceEndpointResolver.resolve(resolvedConfig)
+
+        if !resolvedConfig.appId.isEmpty {
+            SynheartAuth.shared.configure(baseUrl: endpoints.authBaseURL)
+        }
+
+        // Native consent persistence depends on host storage/crypto callbacks.
+        // Install them before reading the authoritative consent snapshot.
+        if let bridge = coreRuntime?.bridge {
+            let storageRc = bridge.setStorageCallbacks()
+            if storageRc != 0 {
+                SynheartLogger.log("[Synheart] set_storage_callbacks rc=\(storageRc); state will not persist")
+            }
+            let cryptoRc = bridge.setSdkCryptoCallbacks()
+            if cryptoRc != 0 {
+                SynheartLogger.log("[Synheart] set_crypto_callbacks rc=\(cryptoRc); device auth unavailable")
+            }
+            _ = bridge.consentConfigureCloud(
+                baseUrl: endpoints.consentBaseURL,
+                appId: resolvedConfig.appId
+            )
+        }
 
         capabilityModule = CapabilityModule(bridge: coreRuntime?.bridge)
         if resolvedConfig.deviceAuthConfig != nil {
@@ -601,6 +656,12 @@ public class Synheart {
 
         try await moduleManager.initializeAll()
 
+        if let restored = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.restore(from: self.coreRuntime!)
+        }) {
+            try await consentModule!.updateConsent(restored)
+        }
+
         previousConsent = consentModule!.current()
         consentModule!.addListener { [weak self] newConsent in
             self?.handleConsentChange(newConsent)
@@ -630,10 +691,6 @@ public class Synheart {
 
         _synheartConfig = resolvedConfig
 
-        if !resolvedConfig.appId.isEmpty {
-            SynheartAuth.shared.configure(baseUrl: "https://api.synheart.ai/auth")
-        }
-
         if let cr = coreRuntime, let bridge = cr.bridge {
             SynheartLogger.log("[Synheart] Core runtime bridge loaded")
 
@@ -647,24 +704,6 @@ public class Synheart {
                 guard self.hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
                 self.hsiSubject.send(json)
             }
-
-            // Device auth: hand the runtime its secure-storage + Secure Enclave
-            // crypto callbacks before any registration so consent tokens persist
-            // and can be minted. Best-effort: a build lacking the symbols just
-            // means minting stays unavailable (logged), not a crash.
-            let storageRc = bridge.setStorageCallbacks()
-            if storageRc != 0 {
-                SynheartLogger.log("[Synheart] set_storage_callbacks rc=\(storageRc); state will not persist")
-            }
-            let cryptoRc = bridge.setSdkCryptoCallbacks()
-            if cryptoRc != 0 {
-                SynheartLogger.log("[Synheart] set_crypto_callbacks rc=\(cryptoRc); device auth unavailable")
-            }
-
-            // Configure the cloud consent client so a subject-scoped token can be
-            // minted; without a base URL the cloud clients are unconfigured.
-            let cloudBaseUrl = resolvedConfig.cloudConfig?.baseUrl ?? ApiEndpoints.defaultCloudBaseUrl
-            _ = bridge.consentConfigureCloud(baseUrl: cloudBaseUrl, appId: resolvedConfig.appId)
 
             // Self-heal: if cloud upload is already in the effective state (e.g. a
             // persisted grant), re-ensure a token for the current subject. Best-effort.
@@ -811,14 +850,20 @@ public class Synheart {
 
     private func _stopSession() async throws {
         guard isRunning else { return }
-        isRunning = false
 
         SynheartLogger.log("[Synheart] Stopping session...")
 
-        var nativeStopped = true
         if let cr = coreRuntime, cr.isAvailable {
-            nativeStopped = cr.stopSession()
+            let resolution = await RuntimeWorkExecutor.run {
+                SessionStopCoordinator.stop(cr)
+            }
+            if !resolution.mayClearLocalState {
+                _currentSessionHandle = resolution.activeSession ?? _currentSessionHandle
+                isRunning = true
+                throw SynheartError.runtimeOperationFailed("Native session stop failed")
+            }
         }
+        isRunning = false
 
         if let activeId = sessionModule?.currentSessionId {
             sessionModule?.stopSession(sessionId: activeId)
@@ -834,9 +879,6 @@ public class Synheart {
 
         _reevaluateAllFeatures()
         await moduleManager.stopAll()
-        guard nativeStopped else {
-            throw SynheartError.runtimeOperationFailed("Native session stop failed")
-        }
         SynheartLogger.log("[Synheart] Session stopped")
     }
 
@@ -895,17 +937,9 @@ public class Synheart {
         guard let consentModule = consentModule else {
             throw SynheartError.notInitialized
         }
-        guard let nativeType = nativeConsentType(for: consentType) else { return }
+        guard nativeConsentType(for: consentType) != nil else { return }
         guard let coreRuntime, coreRuntime.isAvailable else {
             throw SynheartError.notInitialized
-        }
-        let nativeGranted = await RuntimeWorkExecutor.run {
-            coreRuntime.grantConsent(nativeType.rawValue)
-        }
-        guard nativeGranted else {
-            throw SynheartError.runtimeOperationFailed(
-                "Native runtime rejected \(consentType) consent"
-            )
         }
 
         let current = consentModule.current()
@@ -920,6 +954,11 @@ public class Synheart {
         default:            updated = current
         }
 
+        if let error = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.apply(updated, replacing: current, through: coreRuntime)
+        }) {
+            throw error
+        }
         try await consentModule.updateConsent(updated)
 
         // Granting cloud upload should immediately mint a consent token for the
@@ -945,17 +984,9 @@ public class Synheart {
         guard let consentModule = consentModule else {
             throw SynheartError.notInitialized
         }
-        guard let nativeType = nativeConsentType(for: consentType) else { return }
+        guard nativeConsentType(for: consentType) != nil else { return }
         guard let coreRuntime, coreRuntime.isAvailable else {
             throw SynheartError.notInitialized
-        }
-        let nativeRevoked = await RuntimeWorkExecutor.run {
-            coreRuntime.revokeConsent(nativeType.rawValue)
-        }
-        guard nativeRevoked else {
-            throw SynheartError.runtimeOperationFailed(
-                "Native runtime rejected \(consentType) consent revocation"
-            )
         }
 
         let current = consentModule.current()
@@ -970,6 +1001,11 @@ public class Synheart {
         default:            updated = current
         }
 
+        if let error = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.apply(updated, replacing: current, through: coreRuntime)
+        }) {
+            throw error
+        }
         try await consentModule.updateConsent(updated)
     }
 
@@ -1122,8 +1158,18 @@ public class Synheart {
 
     /// Update consent.
     public static func updateConsent(_ consent: ConsentSnapshot) async throws {
-        guard let consentModule = shared.consentModule else {
+        try await shared._updateConsent(consent)
+    }
+
+    private func _updateConsent(_ consent: ConsentSnapshot) async throws {
+        guard let consentModule, let coreRuntime, coreRuntime.isAvailable else {
             throw SynheartError.notInitialized
+        }
+        let current = consentModule.current()
+        if let error = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.apply(consent, replacing: current, through: coreRuntime)
+        }) {
+            throw error
         }
         try await consentModule.updateConsent(consent)
     }
