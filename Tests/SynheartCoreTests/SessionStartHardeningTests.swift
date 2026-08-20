@@ -155,4 +155,45 @@ final class SessionStartHardeningTests: XCTestCase {
         XCTAssertEqual(first.status, .running)
         XCTAssertEqual(second.status, .running)
     }
+
+    func testResilientStartKeepsIndependentHealthyModulesRunning() async throws {
+        let manager = ModuleManager()
+        let first = TestModule(moduleId: "first")
+        let failing = TestModule(moduleId: "failing")
+        let third = TestModule(moduleId: "third")
+        failing.shouldFailStart = true
+
+        try manager.registerModule(first)
+        try manager.registerModule(failing)
+        try manager.registerModule(third)
+        try await manager.initializeAll()
+
+        let report = try await manager.startModulesResiliently(["first", "failing", "third"])
+
+        XCTAssertEqual(report.runningModuleIds, ["first", "third"])
+        XCTAssertNotNil(report.failures["failing"])
+        XCTAssertEqual(first.status, .running)
+        XCTAssertEqual(failing.status, .initialized)
+        XCTAssertEqual(third.status, .running)
+        await manager.disposeAll()
+    }
+
+    func testResilientStartSkipsDependentsOfFailedModule() async throws {
+        let manager = ModuleManager()
+        let dependency = TestModule(moduleId: "dependency")
+        let dependent = TestModule(moduleId: "dependent")
+        dependency.shouldFailStart = true
+
+        try manager.registerModule(dependency)
+        try manager.registerModule(dependent, dependsOn: ["dependency"])
+        try await manager.initializeAll()
+
+        let report = try await manager.startModulesResiliently(["dependent"])
+
+        XCTAssertTrue(report.runningModuleIds.isEmpty)
+        XCTAssertNotNil(report.failures["dependency"])
+        XCTAssertEqual(report.failures["dependent"], "Dependency failed: dependency")
+        XCTAssertEqual(dependent.status, .initialized)
+        await manager.disposeAll()
+    }
 }

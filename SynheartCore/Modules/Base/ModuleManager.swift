@@ -1,5 +1,17 @@
 import Foundation
 
+/// Result of a best-effort module start. Independent modules continue starting
+/// after a sibling fails; dependents of a failed module are skipped.
+public struct ModuleStartReport: Equatable {
+    public let runningModuleIds: Set<String>
+    public let failures: [String: String]
+
+    public init(runningModuleIds: Set<String>, failures: [String: String]) {
+        self.runningModuleIds = runningModuleIds
+        self.failures = failures
+    }
+}
+
 /// Manages the lifecycle of all Synheart modules
 ///
 /// Responsibilities:
@@ -86,6 +98,51 @@ public class ModuleManager {
             }
             throw error
         }
+    }
+
+    /// Start requested modules and their dependencies without letting one
+    /// independent collector abort healthy siblings.
+    public func startModulesResiliently(_ moduleIds: Set<String>) async throws -> ModuleStartReport {
+        guard isInitialized else {
+            throw NSError(domain: "ModuleManager", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Modules must be initialized before starting"
+            ])
+        }
+
+        let startOrder = try resolveInitializationOrder()
+        let selectedModuleIds = try moduleIds.reduce(into: Set<String>()) { selected, moduleId in
+            try includeModuleAndDependencies(moduleId, in: &selected)
+        }
+        var running = Set<String>()
+        var failures: [String: String] = [:]
+
+        for moduleId in startOrder where selectedModuleIds.contains(moduleId) {
+            let failedDependencies = (dependencies[moduleId] ?? []).filter { failures[$0] != nil }
+            if !failedDependencies.isEmpty {
+                failures[moduleId] = "Dependency failed: \(failedDependencies.sorted().joined(separator: ", "))"
+                continue
+            }
+            guard let module = modules[moduleId] else {
+                failures[moduleId] = "Module is not registered"
+                continue
+            }
+            if module.status == .running {
+                running.insert(moduleId)
+                continue
+            }
+            guard module.status == .initialized || module.status == .stopped else {
+                failures[moduleId] = "Module cannot start from status \(String(describing: module.status))"
+                continue
+            }
+            do {
+                try await module.start()
+                running.insert(moduleId)
+            } catch {
+                failures[moduleId] = error.localizedDescription
+            }
+        }
+
+        return ModuleStartReport(runningModuleIds: running, failures: failures)
     }
 
     /// Stop all modules in reverse dependency order

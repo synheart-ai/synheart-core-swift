@@ -52,6 +52,7 @@ public class Synheart {
 
     private var isConfigured = false
     private var isRunning = false
+    private var collectionModuleFailures: [String: String] = [:]
     private var userId: String?
     private var previousConsent: ConsentSnapshot?
 
@@ -118,6 +119,12 @@ public class Synheart {
     /// Whether the SDK is currently running.
     public static var isRunning: Bool {
         shared.isRunning
+    }
+
+    /// Collection modules that could not start in the current session. Healthy
+    /// independent modules remain operational when this dictionary is non-empty.
+    public static var collectionStartupFailures: [String: String] {
+        shared.collectionModuleFailures
     }
 
     /// Stream of HSI JSON frames produced by synheart-engine.
@@ -368,6 +375,7 @@ public class Synheart {
         }
         shared._currentSessionHandle = nil
         shared.isRunning = false
+        shared.collectionModuleFailures = [:]
         shared.hsiSubject.send(nil)
     }
 
@@ -772,6 +780,7 @@ public class Synheart {
         hsiSubject.send(nil)
         isConfigured = false
         isRunning = false
+        collectionModuleFailures = [:]
     }
 
     // MARK: - Session Lifecycle
@@ -813,6 +822,7 @@ public class Synheart {
         }
 
         SynheartLogger.log("[Synheart] Starting session...")
+        collectionModuleFailures = [:]
 
         guard let nativeHandle = cr.startSession() else {
             throw SynheartError.runtimeOperationFailed("Native session creation failed")
@@ -844,9 +854,25 @@ public class Synheart {
                     )
             }
 
-            try await moduleManager.startModules(Set(collectionFeatures.map(moduleId)))
+            let requestedModuleIds = Set(collectionFeatures.map(moduleId))
+            let report = try await moduleManager.startModulesResiliently(requestedModuleIds)
+            collectionModuleFailures = report.failures.filter { requestedModuleIds.contains($0.key) }
+            let runningCollectors = report.runningModuleIds.intersection(requestedModuleIds)
+            guard !runningCollectors.isEmpty else {
+                let detail = collectionModuleFailures
+                    .sorted { $0.key < $1.key }
+                    .map { "\($0.key): \($0.value)" }
+                    .joined(separator: "; ")
+                throw SynheartError.runtimeOperationFailed(
+                    detail.isEmpty
+                        ? "No requested collection module became operational"
+                        : "No requested collection module became operational (\(detail))"
+                )
+            }
             isRunning = true
-            _reevaluateAllFeatures()
+            if !collectionModuleFailures.isEmpty {
+                SynheartLogger.log("[Synheart] Session started with degraded collectors: \(collectionModuleFailures)")
+            }
             SynheartLogger.log("[Synheart] Session started")
         } catch {
             if let activeId = sessionModule?.currentSessionId {
@@ -858,6 +884,7 @@ public class Synheart {
             _ = cr.stopSession()
             _currentSessionHandle = nil
             isRunning = false
+            collectionModuleFailures = [:]
             _reevaluateAllFeatures()
             throw error
         }
@@ -888,6 +915,7 @@ public class Synheart {
             }
         }
         isRunning = false
+        collectionModuleFailures = [:]
 
         if let activeId = sessionModule?.currentSessionId {
             sessionModule?.stopSession(sessionId: activeId)
@@ -1465,6 +1493,7 @@ public class Synheart {
         previousConsent = nil
         isConfigured = false
         isRunning = false
+        collectionModuleFailures = [:]
 
         SynheartLogger.log("[Synheart] Disposed")
     }
