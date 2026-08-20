@@ -61,4 +61,18 @@ final class ModuleLifecycleHardeningTests: XCTestCase {
         XCTAssertEqual(module.status, .disposed)
         try await consent.dispose()
     }
+
+    func testProductionPhoneModuleNeverConstructsRandomCollectors() {
+        let capabilities = CapabilityModule()
+        capabilities.loadDefaults()
+        let consent = ConsentModule()
+        let module = PhoneModule(capabilities: capabilities, consent: consent)
+
+        XCTAssertEqual(module.collectorTypeNames, [
+            "CoreMotionCollector",
+            "IOSScreenStateTracker",
+            "NoOpAppFocusTracker",
+            "NoOpNotificationTracker",
+        ])
+    }
 }

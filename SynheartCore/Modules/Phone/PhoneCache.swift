@@ -4,6 +4,7 @@ import Foundation
 ///
 class PhoneCache {
     private var windowData: [WindowType: [PhoneDataPoint]] = [:]
+    private let lock = NSLock()
 
     /// Add motion data
     func addMotionData(_ motion: MotionData) {
@@ -51,11 +52,15 @@ class PhoneCache {
 
     /// Get raw data points for a window
     func getDataPoints(_ window: WindowType) -> [PhoneDataPoint] {
+        lock.lock()
+        defer { lock.unlock() }
         return windowData[window] ?? []
     }
 
     /// Add a data point to all windows
     private func addDataPoint(_ point: PhoneDataPoint) {
+        lock.lock()
+        defer { lock.unlock() }
         let now = point.timestamp
 
         for windowType in [WindowType.window30s, .window5m, .window1h, .window24h] {

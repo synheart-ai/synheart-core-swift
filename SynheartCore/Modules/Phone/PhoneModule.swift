@@ -5,10 +5,10 @@ import Combine
 ///
 /// Captures device-level motion and context signals.
 public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
-    private let motionCollector = MotionCollector()
-    private let screenTracker = ScreenStateTracker()
-    private let appTracker = AppFocusTracker()
-    private let notificationTracker = NotificationTracker()
+    private let motionCollector: any MotionCollecting
+    private let screenTracker: any ScreenStateTracking
+    private let appTracker: any AppFocusTracking
+    private let notificationTracker: any NotificationTracking
     private let cache = PhoneCache()
 
     private let capabilities: CapabilityProvider
@@ -18,11 +18,28 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
 
     public init(
         capabilities: CapabilityProvider,
-        consent: ConsentProvider
+        consent: ConsentProvider,
+        motionCollector: any MotionCollecting = CoreMotionCollector(),
+        screenTracker: any ScreenStateTracking = IOSScreenStateTracker(),
+        appTracker: any AppFocusTracking = NoOpAppFocusTracker(),
+        notificationTracker: any NotificationTracking = NoOpNotificationTracker()
     ) {
         self.capabilities = capabilities
         self.consent = consent
+        self.motionCollector = motionCollector
+        self.screenTracker = screenTracker
+        self.appTracker = appTracker
+        self.notificationTracker = notificationTracker
         super.init(moduleId: "phone")
+    }
+
+    var collectorTypeNames: [String] {
+        [
+            String(describing: type(of: motionCollector)),
+            String(describing: type(of: screenTracker)),
+            String(describing: type(of: appTracker)),
+            String(describing: type(of: notificationTracker)),
+        ]
     }
 
     // MARK: - RawPhoneDataProvider
@@ -45,7 +62,6 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
             return
         }
 
-        try await motionCollector.start()
         motionCollector.motionStream
             .sink(
                 receiveCompletion: { completion in
@@ -58,8 +74,8 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
                 }
             )
             .store(in: &cancellables)
+        try await motionCollector.start()
 
-        try await screenTracker.start()
         screenTracker.screenStream
             .sink(
                 receiveCompletion: { completion in
@@ -72,9 +88,9 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
                 }
             )
             .store(in: &cancellables)
+        try await screenTracker.start()
 
-        if capabilities.capability(.phone) != .none {
-            try await appTracker.start()
+        if capabilities.capability(.phone) >= .extended {
             appTracker.appSwitchStream
                 .sink(
                     receiveCompletion: { completion in
@@ -87,10 +103,10 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
                     }
                 )
                 .store(in: &cancellables)
+            try await appTracker.start()
         }
 
-        if capabilities.capability(.phone) != .none {
-            try await notificationTracker.start()
+        if capabilities.capability(.phone) >= .extended {
             notificationTracker.notificationStream
                 .sink(
                     receiveCompletion: { completion in
@@ -103,6 +119,7 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
                     }
                 )
                 .store(in: &cancellables)
+            try await notificationTracker.start()
         }
 
         SynheartLogger.log("[PhoneModule] Started \(cancellables.count) collectors")
