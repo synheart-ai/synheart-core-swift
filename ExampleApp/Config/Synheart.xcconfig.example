@@ -1,0 +1,10 @@
+// Copy to Synheart.local.xcconfig, fill the values, and set the copy as the
+// SynheartExample target's Debug base configuration. The local copy is ignored.
+
+SYNHEART_APP_ID = your-app-id
+SYNHEART_BASE_URL = https:/$()/api.example.com
+SYNHEART_AUTH_BASE_URL = $(SYNHEART_BASE_URL)
+SYNHEART_CONSENT_BASE_URL = $(SYNHEART_BASE_URL)
+SYNHEART_INGEST_BASE_URL = $(SYNHEART_BASE_URL)
+SYNHEART_ORG_ID = your-organization-id
+SYNHEART_PACKAGE_NAME = ai.synheart.core.example

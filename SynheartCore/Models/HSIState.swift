@@ -93,6 +93,10 @@ public struct HSIState {
     public let modalities: HSIModalities
     public let tiers: HSITiers
     public let rawJson: String
+    /// Non-nil when the runtime payload could not be parsed as a JSON object.
+    /// A malformed delivery is therefore distinguishable from a valid state
+    /// whose axes simply have no evidence yet.
+    public let parseError: String?
 
     public init(
         subjectId: String,
@@ -102,7 +106,8 @@ public struct HSIState {
         hsiId: String? = nil,
         hsiVersion: String? = nil,
         modalities: HSIModalities = HSIModalities(),
-        tiers: HSITiers = HSITiers()
+        tiers: HSITiers = HSITiers(),
+        parseError: String? = nil
     ) {
         self.subjectId = subjectId
         self.timestampMs = timestampMs
@@ -112,14 +117,20 @@ public struct HSIState {
         self.modalities = modalities
         self.tiers = tiers
         self.rawJson = rawJson
+        self.parseError = parseError
     }
 
     /// Parse an HSI JSON string from the runtime into a typed HSIState.
     public static func fromJson(_ json: String, subjectId: String = "") -> HSIState {
         guard let data = json.data(using: .utf8),
               let map = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return HSIState(subjectId: subjectId, timestampMs: Int64(Date().timeIntervalSince1970 * 1000),
-                            hsi: HSIAxes(), rawJson: json)
+            return HSIState(
+                subjectId: subjectId,
+                timestampMs: Int64(Date().timeIntervalSince1970 * 1000),
+                hsi: HSIAxes(),
+                rawJson: json,
+                parseError: "Runtime HSI payload is not a JSON object"
+            )
         }
 
         let timestampMs = (map["timestamp_ms"] as? NSNumber)?.int64Value

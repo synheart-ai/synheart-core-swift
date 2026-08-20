@@ -26,16 +26,36 @@ struct SetupView: View {
                 }
 
                 Section("Configuration") {
+                    LabeledContent("Mode", value: model.modeDescription)
                     TextField("App ID", text: $model.appId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     TextField("Subject ID", text: $model.subjectId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    LabeledContent("Stable device ID", value: model.deviceId)
                     Toggle("Allow unsigned capabilities", isOn: $model.allowUnsignedCapabilities)
-                    Text("Unsigned capabilities are for local development only. Production apps should obtain a signed capability token from their backend.")
+                    Text("Unsigned capabilities are for Debug local testing only. Production cloud flows use hardware-backed device registration and verified consent; they do not need a secret embedded in the app bundle.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                if model.isCloudConfigured {
+                    Section("Cloud test environment") {
+                        LabeledContent("Platform", value: model.environment.cloudBaseUrl ?? "Missing")
+                        LabeledContent("Organization", value: model.environment.orgId ?? "Missing")
+                        LabeledContent("Device status", value: model.deviceAuthStatus?.status ?? "Not checked")
+                        LabeledContent("Attestation", value: model.deviceAuthStatus?.attestation ?? "Unknown")
+
+                        Button("Register Device") {
+                            Task { await model.registerDevice() }
+                        }
+                        .disabled(!model.isInitialized || model.isBusy)
+
+                        Text("Real registration requires the App Attest capability and a server configured for this app and bundle identifier.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section {

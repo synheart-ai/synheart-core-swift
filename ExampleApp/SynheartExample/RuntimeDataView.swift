@@ -6,25 +6,35 @@ struct RuntimeDataView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Sync") {
-                    LabeledContent("Devices", value: "\(model.syncStatus?.deviceCount ?? 0)")
-                    LabeledContent("Sync space", value: model.syncStatus?.syncSpaceId ?? "None")
+                Section("Cloud ingestion") {
+                    StatusRow(
+                        title: "Configuration",
+                        value: model.isCloudConfigured ? "Configured" : "Local only",
+                        isHealthy: model.isCloudConfigured
+                    )
+                    StatusRow(
+                        title: "Cloud consent",
+                        value: model.effectiveConsent?.cloudUpload == true ? "Enforced" : "Blocked",
+                        isHealthy: model.effectiveConsent?.cloudUpload == true
+                    )
+                    LabeledContent("Device", value: model.deviceAuthStatus?.status ?? "Unavailable")
+                    LabeledContent("Attestation", value: model.deviceAuthStatus?.attestation ?? "Unknown")
+                    LabeledContent("Queue", value: "\(model.uploadStatus.queueLength)")
+                    LabeledContent("State", value: model.uploadStatus.state.rawValue)
+                    LabeledContent("Last upload", value: model.uploadStatus.lastUploadAt?.formatted() ?? "Never")
 
-                    Button("Sync Now") {
-                        Task { await model.syncNow() }
+                    if let failure = model.uploadStatus.lastFailure {
+                        Text("\(failure.reason.rawValue): \(failure.message)")
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
-                    .disabled(!model.isInitialized || model.isBusy)
 
-                    if let result = model.lastSyncResult {
-                        LabeledContent("Pushed", value: "\(result.pushed)")
-                        LabeledContent("Pulled", value: "\(result.pulled)")
-                        LabeledContent("Conflicts resolved", value: "\(result.conflictsResolved)")
-                        if !result.errors.isEmpty {
-                            Text(result.errors.joined(separator: "\n"))
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
+                    Button("Flush Upload Queue") { Task { await model.flushUploads() } }
+                        .disabled(!model.isInitialized || model.isBusy || !model.isCloudConfigured)
+
+                    Text("Closed HSI windows are queued automatically by the native runtime. This app intentionally does not enqueue HSI callbacks a second time.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Storage") {
@@ -33,7 +43,7 @@ struct RuntimeDataView: View {
                     LabeledContent("Artifacts", value: "\(model.storageUsage?.artifactCount ?? 0)")
                     LabeledContent("Pending sync", value: "\(model.storageUsage?.pendingSync ?? 0)")
 
-                    Button("Refresh") { model.refreshData() }
+                    Button("Refresh") { model.refreshRuntimeData() }
                         .disabled(!model.isInitialized)
                     Button("Repair Orphan Sessions") {
                         Task { await model.repairOrphanSessions() }
@@ -59,7 +69,7 @@ struct RuntimeDataView: View {
                 }
             }
             .navigationTitle("Runtime Data")
-            .onAppear { model.refreshData() }
+            .onAppear { model.refreshRuntimeData() }
         }
     }
 }

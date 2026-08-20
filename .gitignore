@@ -130,6 +130,10 @@ Temporary Items
 *.log
 *.swiftpm
 
+# Example app local service configuration
+ExampleApp/Config/*.xcconfig
+!ExampleApp/Config/Synheart.xcconfig.example
+
 # Build artifacts
 *.o
 *.a

@@ -24,6 +24,20 @@
     <true/>
     <key>NSMotionUsageDescription</key>
     <string>Synheart Core uses motion data when phone-context collection is enabled with your consent.</string>
+    <key>SYNHEART_APP_ID</key>
+    <string>$(SYNHEART_APP_ID)</string>
+    <key>SYNHEART_BASE_URL</key>
+    <string>$(SYNHEART_BASE_URL)</string>
+    <key>SYNHEART_AUTH_BASE_URL</key>
+    <string>$(SYNHEART_AUTH_BASE_URL)</string>
+    <key>SYNHEART_CONSENT_BASE_URL</key>
+    <string>$(SYNHEART_CONSENT_BASE_URL)</string>
+    <key>SYNHEART_INGEST_BASE_URL</key>
+    <string>$(SYNHEART_INGEST_BASE_URL)</string>
+    <key>SYNHEART_ORG_ID</key>
+    <string>$(SYNHEART_ORG_ID)</string>
+    <key>SYNHEART_PACKAGE_NAME</key>
+    <string>$(SYNHEART_PACKAGE_NAME)</string>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>

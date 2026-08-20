@@ -68,6 +68,7 @@ public class Synheart {
     private var hsiToSessionCancellable: AnyCancellable?
 
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
+    private let typedHsiSubject = CurrentValueSubject<HSIState?, Never>(nil)
     private let hsiDeliveryDeduplicator = HSIDeliveryDeduplicator()
     private var cancellables = Set<AnyCancellable>()
 
@@ -142,9 +143,8 @@ public class Synheart {
 
     /// Stream of typed HSIState updates.
     public static var onStateUpdate: AnyPublisher<HSIState, Never> {
-        shared.hsiSubject
+        shared.typedHsiSubject
             .compactMap { $0 }
-            .map { HSIState.fromJson($0, subjectId: shared._synheartConfig?.subjectId ?? shared.userId ?? "") }
             .eraseToAnyPublisher()
     }
 
@@ -163,8 +163,7 @@ public class Synheart {
 
     /// Get the current HSI state as a typed object.
     public static var currentHSIState: HSIState? {
-        guard let json = shared.hsiSubject.value else { return nil }
-        return HSIState.fromJson(json, subjectId: shared._synheartConfig?.subjectId ?? shared.userId ?? "")
+        shared.typedHsiSubject.value
     }
 
     // MARK: - Metrics API
@@ -382,6 +381,7 @@ public class Synheart {
         shared.collectionModuleFailures = [:]
         shared.resetUploadDiagnostics()
         shared.hsiSubject.send(nil)
+        shared.typedHsiSubject.send(nil)
     }
 
     /// Request account deletion -- requests server-side deletion (device-signed
@@ -915,8 +915,11 @@ public class Synheart {
 
             bridge.setHsiCallback { [weak self] json in
                 guard let self = self else { return }
-                guard self._effectiveConsent()?.allows(.biosignals) == true else { return }
+                guard let consent = self._effectiveConsent(),
+                      consent.biosignals || consent.behavior || consent.phoneContext else { return }
                 guard self.hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
+                let typed = HSIState.fromJson(json, subjectId: self.subjectId ?? "")
+                self.typedHsiSubject.send(typed)
                 self.hsiSubject.send(json)
             }
 
@@ -963,6 +966,7 @@ public class Synheart {
         userId = nil
         hsiDeliveryDeduplicator.reset()
         hsiSubject.send(nil)
+        typedHsiSubject.send(nil)
         isConfigured = false
         isRunning = false
         collectionModuleFailures = [:]
@@ -1009,6 +1013,9 @@ public class Synheart {
 
         SynheartLogger.log("[Synheart] Starting session...")
         collectionModuleFailures = [:]
+        hsiDeliveryDeduplicator.reset()
+        hsiSubject.send(nil)
+        typedHsiSubject.send(nil)
 
         guard let nativeHandle = cr.startSession() else {
             throw SynheartError.runtimeOperationFailed("Native session creation failed")
@@ -1677,6 +1684,7 @@ public class Synheart {
 
         hsiDeliveryDeduplicator.reset()
         hsiSubject.send(nil)
+        typedHsiSubject.send(nil)
 
         consentModule = nil
         capabilityModule = nil

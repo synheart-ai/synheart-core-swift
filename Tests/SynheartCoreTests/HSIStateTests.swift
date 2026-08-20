@@ -2,6 +2,14 @@ import XCTest
 @testable import SynheartCore
 
 final class HSIStateTests: XCTestCase {
+    func testMalformedPayloadReportsParseErrorRatherThanLookingLikeEmptyEvidence() {
+        let state = HSIState.fromJson("not-json", subjectId: "subject")
+
+        XCTAssertNotNil(state.parseError)
+        XCTAssertEqual(state.subjectId, "subject")
+        XCTAssertNil(state.hsi.focus)
+    }
+
 
     func testParsesNestedHSIJson() {
         let json = """
