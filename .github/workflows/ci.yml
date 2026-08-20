@@ -42,7 +42,14 @@ jobs:
             echo "No Tests directory found, skipping"
           fi
 
-      - name: Build iOS example app
+      - name: Prepare source-only iOS example app
+        run: |
+          if ! command -v pod >/dev/null 2>&1; then
+            brew install cocoapods
+          fi
+          pod deintegrate ExampleApp/SynheartExample.xcodeproj
+
+      - name: Build source-only iOS example app
         run: |
           xcodebuild -quiet \
             -project ExampleApp/SynheartExample.xcodeproj \
