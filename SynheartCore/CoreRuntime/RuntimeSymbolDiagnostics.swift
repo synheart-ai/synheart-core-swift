@@ -13,6 +13,46 @@ public struct RuntimeSymbolDiagnostics: Equatable, Sendable {
     }
 }
 
+/// Snapshot of native libraries that must be supplied by the host app.
+///
+/// The iOS stable/lab runtime deliberately leaves ONNX Runtime to the host so
+/// that one copy can be shared by the app. Edge runtimes do not use ONNX and
+/// therefore do not require this dependency.
+public struct RuntimeDependencyDiagnostics: Equatable, Sendable {
+    public let requiresExternalONNXRuntime: Bool
+    public let onnxRuntimeEntrypointFound: Bool
+    public let missingRequiredDependencies: [String]
+
+    public var isCompatible: Bool {
+        missingRequiredDependencies.isEmpty
+    }
+}
+
+enum RuntimeDependencyManifest {
+    static let edgeRuntimeMarker = "synheart_core_edge_create"
+    static let onnxRuntimeEntrypoint = "OrtGetApiBase"
+    static let onnxRuntimeDependency = "onnxruntime-c (OrtGetApiBase)"
+
+    static func audit(
+        runtimeEntrypointFound: Bool,
+        edgeRuntimeFound: Bool,
+        onnxRuntimeEntrypointFound: Bool
+    ) -> RuntimeDependencyDiagnostics {
+        // No host dependency can be inferred until a native runtime is linked.
+        // An edge runtime contains the marker above and never loads ONNX.
+        let requiresExternalONNXRuntime = runtimeEntrypointFound && !edgeRuntimeFound
+        let missing = requiresExternalONNXRuntime && !onnxRuntimeEntrypointFound
+            ? [onnxRuntimeDependency]
+            : []
+
+        return RuntimeDependencyDiagnostics(
+            requiresExternalONNXRuntime: requiresExternalONNXRuntime,
+            onnxRuntimeEntrypointFound: onnxRuntimeEntrypointFound,
+            missingRequiredDependencies: missing
+        )
+    }
+}
+
 /// Single source of truth for required versus additive runtime capabilities.
 enum RuntimeSymbolManifest {
     static let required: Set<String> = [
@@ -49,12 +89,14 @@ enum RuntimeSymbolManifest {
     ]
 
     static let optional: Set<String> = [
+        "synheart_core_abort_session",
         "synheart_core_baselines_json",
         "synheart_core_breathing_evaluate",
         "synheart_core_breathing_reset",
         "synheart_core_breathing_set_population",
         "synheart_core_breathing_set_target_bpm",
         "synheart_core_breathing_set_window_secs",
+        "synheart_core_build_info",
         "synheart_core_cancel_account_deletion",
         "synheart_core_close_orphan_session",
         "synheart_core_consent_configure_cloud",
@@ -102,6 +144,7 @@ enum RuntimeSymbolManifest {
         "synheart_core_srm_overall_status",
         "synheart_core_srm_push_wearable_daily",
         "synheart_core_srm_trigger_wearable_recompute",
+        "synheart_core_stop_session_v2",
         "synheart_core_upload_metadata",
         "synheart_core_upload_queue_length",
         "synheart_core_validate_study_codes",

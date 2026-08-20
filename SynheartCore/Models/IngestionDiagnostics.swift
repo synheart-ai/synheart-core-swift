@@ -12,23 +12,34 @@ public enum NativeFailureReason: String, Sendable {
 }
 
 public struct NativeOperationFailure: Equatable, Sendable {
+    /// Stable native error code, for example `DEVICE_REGISTRATION_REQUIRED`.
+    public let code: String
     public let reason: NativeFailureReason
     public let message: String
     public let retryAfterMs: Int?
     public let detail: String?
+    private let reportedRetryable: Bool?
 
     public var retryable: Bool {
-        reason == .transient || reason == .timeout || reason == .quota || reason == .serverTransient
+        reportedRetryable
+            ?? (reason == .transient
+                || reason == .timeout
+                || reason == .quota
+                || reason == .serverTransient)
     }
 
     public init(
+        code: String = "UNKNOWN",
         reason: NativeFailureReason,
         message: String,
+        retryable: Bool? = nil,
         retryAfterMs: Int? = nil,
         detail: String? = nil
     ) {
+        self.code = code
         self.reason = reason
         self.message = message
+        self.reportedRetryable = retryable
         self.retryAfterMs = retryAfterMs
         self.detail = detail
     }
@@ -36,9 +47,15 @@ public struct NativeOperationFailure: Equatable, Sendable {
     static func fromRuntimeMap(_ map: [String: Any], fallback: String) -> NativeOperationFailure? {
         let errorMap = map["error"] as? [String: Any]
         let errorString = map["error"] as? String
-        guard errorMap != nil || errorString != nil || map["success"] as? Bool == false else {
+        guard errorMap != nil
+            || errorString != nil
+            || map["success"] as? Bool == false
+            || map["ok"] as? Bool == false else {
             return nil
         }
+        let code = (errorMap?["code"] as? String)
+            ?? (map["code"] as? String)
+            ?? "UNKNOWN"
         let rawReason = (errorMap?["reason"] ?? map["reason"]) as? String
         let reason = rawReason.flatMap(NativeFailureReason.init(rawValue:)) ?? .unknown
         let message = (errorMap?["message"] as? String)
@@ -46,10 +63,13 @@ public struct NativeOperationFailure: Equatable, Sendable {
             ?? errorString
             ?? fallback
         let retryAfter = ((errorMap?["retry_after_ms"] ?? map["retry_after_ms"]) as? NSNumber)?.intValue
+        let retryable = (errorMap?["retryable"] ?? map["retryable"]) as? Bool
         let detailValue = errorMap?["detail"] ?? map["detail"]
         return NativeOperationFailure(
+            code: code,
             reason: reason,
             message: message,
+            retryable: retryable,
             retryAfterMs: retryAfter,
             detail: stringify(detailValue)
         )
@@ -169,4 +189,3 @@ public struct DeviceRegistrationResult: Equatable, Sendable {
         self.failure = failure
     }
 }
-

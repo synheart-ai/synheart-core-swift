@@ -3,6 +3,25 @@ import Combine
 import SynheartAuth
 @_exported import SynheartSession // re-exports SessionEvent, SessionConfig, etc.
 
+enum RuntimeVersionResolver {
+    static func resolve(
+        buildInfo: [String: Any]?,
+        diagnostics: [String: Any]?
+    ) -> String? {
+        let candidates = [
+            buildInfo?["core_runtime"] as? String,
+            buildInfo?["runtime_version"] as? String,
+            buildInfo?["version"] as? String,
+            diagnostics?["version"] as? String,
+        ]
+
+        return candidates.compactMap { candidate in
+            let normalized = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return normalized?.isEmpty == false ? normalized : nil
+        }.first
+    }
+}
+
 /**
  * Synheart Core SDK - Main Entry Point
  *
@@ -59,6 +78,8 @@ public class Synheart {
     private var lastUploadAt: Date?
     private var lastUploadAttemptAt: Date?
     private var lastUploadFailure: NativeOperationFailure?
+    private var _lastSessionStopReport: RuntimeSessionStopReport?
+    private var _lastSessionStopPhase = "idle"
 
     private var _currentSessionHandle: SessionHandle?
     private var _synheartConfig: SynheartConfig?
@@ -124,6 +145,18 @@ public class Synheart {
     /// Whether the SDK is currently running.
     public static var isRunning: Bool {
         shared.isRunning
+    }
+
+    /// Diagnostics from the most recent native stop or abort operation.
+    public static var lastSessionStopReport: RuntimeSessionStopReport? {
+        shared._lastSessionStopReport
+    }
+
+    /// Last completed checkpoint in the session-stop path. This is intended
+    /// for integration diagnostics when UI, Swift, and native lifecycle state
+    /// disagree on a physical device.
+    public static var lastSessionStopPhase: String {
+        shared._lastSessionStopPhase
     }
 
     /// Collection modules that could not start in the current session. Healthy
@@ -636,9 +669,23 @@ public class Synheart {
     }
 
     private func _ensureDeviceAuthRegistered() async -> DeviceRegistrationResult {
+        await _registerDevice(force: false)
+    }
+
+    /// Force a fresh native registration even when a secure local device record
+    /// says this device is already registered. Use this only as a user-initiated
+    /// repair after the server has lost or revoked the corresponding record.
+    /// Local sessions, consent choices, baselines, and upload data are preserved.
+    @discardableResult
+    public static func reregisterDeviceAuth() async -> DeviceRegistrationResult {
+        await shared._registerDevice(force: true)
+    }
+
+    private func _registerDevice(force: Bool) async -> DeviceRegistrationResult {
         guard _synheartConfig?.deviceAuthConfig != nil,
               let bridge = coreRuntime?.bridge else {
             let failure = NativeOperationFailure(
+                code: "DEVICE_AUTH_NOT_CONFIGURED",
                 reason: .misconfigured,
                 message: "DeviceAuthConfig is required before registering a device"
             )
@@ -648,13 +695,14 @@ public class Synheart {
                 failure: failure
             )
         }
-        if let existing = Self.deviceAuthStatus, existing.isRegistered {
+        if !force, let existing = Self.deviceAuthStatus, existing.isRegistered {
             return DeviceRegistrationResult(success: true, status: existing)
         }
         guard let clientId = subjectId, !clientId.isEmpty,
               let json = await RuntimeWorkExecutor.run({ bridge.registerDevice(clientId: clientId) }),
               let map = parseDict(json) else {
             let failure = NativeOperationFailure(
+                code: "DEVICE_REGISTRATION_NO_RESULT",
                 reason: .unknown,
                 message: "Native device registration returned no result"
             )
@@ -793,20 +841,7 @@ public class Synheart {
         // Native consent persistence depends on host storage/crypto callbacks.
         // Install them before reading the authoritative consent snapshot.
         if let bridge = coreRuntime?.bridge {
-            let storageRc = bridge.setStorageCallbacks()
-            if storageRc != 0 {
-                SynheartLogger.log("[Synheart] set_storage_callbacks rc=\(storageRc); state will not persist")
-            }
-            let cryptoRc = bridge.setSdkCryptoCallbacks()
-            if cryptoRc != 0 {
-                SynheartLogger.log("[Synheart] set_crypto_callbacks rc=\(cryptoRc); device auth unavailable")
-            }
-            if resolvedConfig.consentConfig != nil || resolvedConfig.cloudConfig != nil {
-                _ = bridge.consentConfigureCloud(
-                    baseUrl: endpoints.consentBaseURL,
-                    appId: resolvedConfig.appId
-                )
-            }
+            _configureNativeBridge(bridge, config: resolvedConfig, endpoints: endpoints)
         }
 
         capabilityModule = CapabilityModule(bridge: coreRuntime?.bridge)
@@ -915,15 +950,7 @@ public class Synheart {
             // derive may have changed it) so SDK subject checks match native.
             syncSubjectFromNative()
 
-            bridge.setHsiCallback { [weak self] json in
-                guard let self = self else { return }
-                guard let consent = self._effectiveConsent(),
-                      consent.biosignals || consent.behavior || consent.phoneContext else { return }
-                guard self.hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
-                let typed = HSIState.fromJson(json, subjectId: self.subjectId ?? "")
-                self.typedHsiSubject.send(typed)
-                self.hsiSubject.send(json)
-            }
+            _installHSICallback(on: bridge)
 
             // Self-heal: if cloud upload is already in the effective state (e.g. a
             // persisted grant), re-ensure a token for the current subject. Best-effort.
@@ -937,6 +964,39 @@ public class Synheart {
         isConfigured = true
 
         SynheartLogger.log("[Synheart] Initialization complete. Call startSession() to begin.")
+    }
+
+    private func _configureNativeBridge(
+        _ bridge: CoreRuntimeBridge,
+        config: SynheartConfig,
+        endpoints: ServiceEndpoints
+    ) {
+        let storageRc = bridge.setStorageCallbacks()
+        if storageRc != 0 {
+            SynheartLogger.log("[Synheart] set_storage_callbacks rc=\(storageRc); state will not persist")
+        }
+        let cryptoRc = bridge.setSdkCryptoCallbacks()
+        if cryptoRc != 0 {
+            SynheartLogger.log("[Synheart] set_crypto_callbacks rc=\(cryptoRc); device auth unavailable")
+        }
+        if config.consentConfig != nil || config.cloudConfig != nil {
+            _ = bridge.consentConfigureCloud(
+                baseUrl: endpoints.consentBaseURL,
+                appId: config.appId
+            )
+        }
+    }
+
+    private func _installHSICallback(on bridge: CoreRuntimeBridge) {
+        bridge.setHsiCallback { [weak self] json in
+            guard let self = self else { return }
+            guard let consent = self._effectiveConsent(),
+                  consent.biosignals || consent.behavior || consent.phoneContext else { return }
+            guard self.hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
+            let typed = HSIState.fromJson(json, subjectId: self.subjectId ?? "")
+            self.typedHsiSubject.send(typed)
+            self.hsiSubject.send(json)
+        }
     }
 
     /// Clears every partially-created component so a failed initialization can
@@ -1012,8 +1072,15 @@ public class Synheart {
         guard let cr = coreRuntime, cr.isAvailable else {
             throw SynheartError.notInitialized
         }
+        let dependencyDiagnostics = CoreRuntimeBridge.dependencyDiagnostics
+        guard dependencyDiagnostics.isCompatible else {
+            throw SynheartError.runtimeDependencyMissing(
+                dependencies: dependencyDiagnostics.missingRequiredDependencies
+            )
+        }
 
         SynheartLogger.log("[Synheart] Starting session...")
+        _lastSessionStopReport = nil
         collectionModuleFailures = [:]
         hsiDeliveryDeduplicator.reset()
         hsiSubject.send(nil)
@@ -1095,20 +1162,86 @@ public class Synheart {
     }
 
     private func _stopSession() async throws {
-        guard isRunning else { return }
+        _lastSessionStopPhase = "request_received"
+
+        let nativeRunning = coreRuntime?.isRunning ?? false
+        let nativeSession = coreRuntime?.currentSession
+        guard isRunning || nativeRunning || _currentSessionHandle != nil || nativeSession != nil else {
+            _lastSessionStopPhase = "ignored_no_active_session"
+            return
+        }
 
         SynheartLogger.log("[Synheart] Stopping session...")
 
+        let stoppedSessionHandle = _currentSessionHandle ?? nativeSession
+        var nativeResolution: SessionStopResolution?
         if let cr = coreRuntime, cr.isAvailable {
-            let resolution = await RuntimeWorkExecutor.run {
+            // The native runtime owns the authoritative engine, artifact
+            // pipeline, and session catalog. Stop it before awaiting any Swift
+            // collector teardown so a slow or suspended module can never
+            // prevent the catalog from closing. The state-safe v2 runtime
+            // guarantees collection is off before it attempts fallible
+            // finalization, and the coordinator invokes native abort when
+            // repair is required.
+            _lastSessionStopPhase = "native_stop_started"
+            nativeResolution = await RuntimeWorkExecutor.run {
                 SessionStopCoordinator.stop(cr)
             }
-            if !resolution.mayClearLocalState {
-                _currentSessionHandle = resolution.activeSession ?? _currentSessionHandle
-                isRunning = true
-                throw SynheartError.runtimeOperationFailed("Native session stop failed")
-            }
+            _lastSessionStopPhase = "native_stop_returned"
         }
+
+        // Native input is now rejected. Tear down the composed Swift session
+        // and collectors, then publish the local stopped state. This ordering
+        // also prevents SessionModule completion from racing a still-running
+        // native pipeline.
+        _lastSessionStopPhase = "local_teardown_started"
+        await _finishLocalSessionStop()
+        _lastSessionStopPhase = "local_teardown_returned"
+
+        if let resolution = nativeResolution {
+            _lastSessionStopReport = resolution.effectiveReport
+            if !resolution.mayClearLocalState {
+                _lastSessionStopPhase = "native_shutdown_failed"
+                let details = resolution.effectiveReport.failures
+                    .map { "\($0.stage): \($0.error)" }
+                    .joined(separator: "; ")
+                throw SynheartError.runtimeOperationFailed(
+                    details.isEmpty
+                        ? "Native session shutdown and abort both failed"
+                        : "Native session shutdown failed (\(details))"
+                )
+            }
+
+            let warnings = (resolution.stopReport.failures
+                + (resolution.abortReport?.failures ?? []))
+                .map { "\($0.stage): \($0.error)" }
+                .joined(separator: "; ")
+            if !warnings.isEmpty {
+                SynheartLogger.log("[Synheart] Session stopped with native warnings: \(warnings)")
+            }
+
+            if let piConfig = _synheartConfig?.labIngestConfig,
+               piConfig.autoIngest,
+               resolution.stopReport.finalized,
+               resolution.effectiveReport.catalogClosed,
+               let handle = stoppedSessionHandle {
+                await _autoIngestSession(handle)
+            }
+            SynheartLogger.log("[Synheart] Session stopped (\(resolution.effectiveReport.status))")
+            _lastSessionStopPhase = "completed_\(resolution.effectiveReport.status)"
+            return
+        }
+
+        if let piConfig = _synheartConfig?.labIngestConfig,
+           piConfig.autoIngest,
+           let handle = stoppedSessionHandle {
+            await _autoIngestSession(handle)
+        }
+        SynheartLogger.log("[Synheart] Session stopped")
+        _lastSessionStopPhase = "completed_without_native_runtime"
+    }
+
+    private func _finishLocalSessionStop() async {
         isRunning = false
         collectionModuleFailures = [:]
 
@@ -1118,15 +1251,10 @@ public class Synheart {
         sessionSubscription?.cancel()
         sessionSubscription = nil
 
-        if let piConfig = _synheartConfig?.labIngestConfig, piConfig.autoIngest, let handle = _currentSessionHandle {
-            await _autoIngestSession(handle)
-        }
-
         _currentSessionHandle = nil
 
-        _reevaluateAllFeatures()
         await moduleManager.stopAll()
-        SynheartLogger.log("[Synheart] Session stopped")
+        _reevaluateAllFeatures()
     }
 
     private func _autoIngestSession(_: SessionHandle) async {
@@ -1532,11 +1660,21 @@ public class Synheart {
         shared.coreRuntime?.bridge?.loadSrmSnapshot(json: json) ?? false
     }
 
-    /// Get the native synheart-engine version, or `nil` if unavailable.
+    /// Get the native core runtime version, or `nil` if unavailable.
+    ///
+    /// Build metadata is authoritative. Diagnostics is retained as a fallback
+    /// for older runtimes that exposed the version only in that payload.
     public static var runtimeVersion: String? {
-        guard let diag = shared.coreRuntime?.diagnostics(),
-              let version = diag["version"] as? String else { return nil }
-        return version
+        RuntimeVersionResolver.resolve(
+            buildInfo: runtimeBuildInfo,
+            diagnostics: shared.coreRuntime?.diagnostics()
+        )
+    }
+
+    /// Exact native runtime build provenance when supported by the linked ABI.
+    public static var runtimeBuildInfo: [String: Any]? {
+        guard let json = shared.coreRuntime?.bridge?.buildInfo() else { return nil }
+        return shared.parseDict(json)
     }
 
     // MARK: - Sensor Push
@@ -1711,9 +1849,38 @@ public enum SynheartError: Error {
     case alreadyConfigured
     case runtimeIncompatible(missingSymbols: [String])
     case runtimeCreationFailed(message: String?)
+    case runtimeDependencyMissing(dependencies: [String])
     case invalidArgument(String)
     case runtimeOperationFailed(String)
     case consentRequired(String)
     case notImplemented(String)
     case capabilityTokenRequired
+}
+
+extension SynheartError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .notInitialized:
+            return "Synheart is not initialized"
+        case .alreadyConfigured:
+            return "Synheart is already configured"
+        case let .runtimeIncompatible(missingSymbols):
+            return "Native runtime is missing required symbols: \(missingSymbols.joined(separator: ", "))"
+        case let .runtimeCreationFailed(message):
+            return message.map { "Native runtime initialization failed: \($0)" }
+                ?? "Native runtime initialization failed"
+        case let .runtimeDependencyMissing(dependencies):
+            return "Native runtime dependency is missing: \(dependencies.joined(separator: ", ")). Link and force-load it in the host app before starting a session."
+        case let .invalidArgument(message):
+            return "Invalid argument: \(message)"
+        case let .runtimeOperationFailed(message):
+            return message
+        case let .consentRequired(message):
+            return message
+        case let .notImplemented(message):
+            return "Not implemented: \(message)"
+        case .capabilityTokenRequired:
+            return "A verified capability token or device authentication is required"
+        }
+    }
 }

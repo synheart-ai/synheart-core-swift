@@ -1,5 +1,82 @@
 import Foundation
 
+/// One native stage that failed after or during a session stop.
+public struct RuntimeSessionStopFailure: Codable, Equatable, Sendable {
+    public let stage: String
+    public let error: String
+}
+
+/// Structured native session-stop result.
+///
+/// `collectionStopped` is the lifecycle authority. A report may contain
+/// finalization failures while still guaranteeing that collectors are off and
+/// the native runtime no longer accepts session samples.
+public struct RuntimeSessionStopReport: Codable, Equatable, Sendable {
+    public let status: String
+    public let sessionId: String?
+    public let collectionStopped: Bool
+    public let finalized: Bool
+    public let catalogClosed: Bool
+    public let failures: [RuntimeSessionStopFailure]
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case sessionId = "session_id"
+        case collectionStopped = "collection_stopped"
+        case finalized
+        case catalogClosed = "catalog_closed"
+        case failures
+    }
+
+    static func legacy(
+        succeeded: Bool,
+        isRunning: Bool,
+        sessionId: String?
+    ) -> RuntimeSessionStopReport {
+        if succeeded {
+            return RuntimeSessionStopReport(
+                status: "stopped",
+                sessionId: sessionId,
+                collectionStopped: true,
+                finalized: true,
+                catalogClosed: true,
+                failures: []
+            )
+        }
+
+        let collectionStopped = !isRunning
+        return RuntimeSessionStopReport(
+            status: collectionStopped ? "stopped_with_unknown_error" : "failed",
+            sessionId: sessionId,
+            collectionStopped: collectionStopped,
+            finalized: false,
+            catalogClosed: false,
+            failures: [
+                RuntimeSessionStopFailure(
+                    stage: "legacy_stop",
+                    error: "The linked runtime exposes only the legacy integer stop result"
+                )
+            ]
+        )
+    }
+
+    static func unavailable(sessionId: String?) -> RuntimeSessionStopReport {
+        RuntimeSessionStopReport(
+            status: "failed",
+            sessionId: sessionId,
+            collectionStopped: false,
+            finalized: false,
+            catalogClosed: false,
+            failures: [
+                RuntimeSessionStopFailure(
+                    stage: "abort",
+                    error: "The linked runtime does not expose native session abort"
+                )
+            ]
+        )
+    }
+}
+
 /// Bridge to `libsynheart_core_runtime` via C ABI / dlsym.
 ///
 /// This replaces the Swift-native storage, crypto, sync, consent, and pipeline
@@ -17,7 +94,7 @@ public final class CoreRuntimeBridge {
 
     // MARK: - Opaque handle
 
-    private var handle: OpaquePointer
+    private let handle: OpaquePointer
 
     /// Retained box holding the HSI callback closure. `Unmanaged.passRetained`
     /// adds +1 to the closure's refcount so the runtime's C user_data pointer
@@ -32,10 +109,13 @@ public final class CoreRuntimeBridge {
     private typealias FreeFn              = @convention(c) (OpaquePointer?) -> Void
     private typealias FreeStringFn        = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
     private typealias LastInitErrorFn     = @convention(c) () -> UnsafeMutablePointer<CChar>?
+    private typealias BuildInfoFn         = @convention(c) () -> UnsafeMutablePointer<CChar>?
 
     // Session
     private typealias StartSessionFn      = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias StopSessionFn       = @convention(c) (OpaquePointer?) -> Int32
+    private typealias StopSessionV2Fn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias AbortSessionFn      = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
     private typealias CurrentSessionFn    = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias IsRunningFn         = @convention(c) (OpaquePointer?) -> Int32
 
@@ -148,10 +228,13 @@ public final class CoreRuntimeBridge {
     private static let _free:          FreeFn?            = sym("synheart_core_free")
     private static let _freeString:    FreeStringFn?      = sym("synheart_core_free_string")
     private static let _lastInitError: LastInitErrorFn?   = sym("synheart_core_last_error")
+    private static let _buildInfo:     BuildInfoFn?        = sym("synheart_core_build_info")
 
     // Session
     private static let _startSession:  StartSessionFn?    = sym("synheart_core_start_session")
     private static let _stopSession:   StopSessionFn?     = sym("synheart_core_stop_session")
+    private static let _stopSessionV2: StopSessionV2Fn?   = sym("synheart_core_stop_session_v2")
+    private static let _abortSession:  AbortSessionFn?    = sym("synheart_core_abort_session")
     private static let _curSession:    CurrentSessionFn?   = sym("synheart_core_current_session")
     private static let _isRunning:     IsRunningFn?       = sym("synheart_core_is_running")
 
@@ -250,6 +333,25 @@ public final class CoreRuntimeBridge {
         return RuntimeSymbolManifest.audit(resolvedSymbols: resolved)
     }()
 
+    /// Audit of host-provided native dependencies needed by the linked runtime.
+    /// Stable/lab iOS runtimes require the app to link and force-load
+    /// `onnxruntime-c`; edge runtimes do not.
+    public static let dependencyDiagnostics: RuntimeDependencyDiagnostics = {
+        #if os(iOS)
+        RuntimeDependencyManifest.audit(
+            runtimeEntrypointFound: hasSymbol("synheart_core_start_session"),
+            edgeRuntimeFound: hasSymbol(RuntimeDependencyManifest.edgeRuntimeMarker),
+            onnxRuntimeEntrypointFound: hasSymbol(RuntimeDependencyManifest.onnxRuntimeEntrypoint)
+        )
+        #else
+        RuntimeDependencyDiagnostics(
+            requiresExternalONNXRuntime: false,
+            onnxRuntimeEntrypointFound: hasSymbol(RuntimeDependencyManifest.onnxRuntimeEntrypoint),
+            missingRequiredDependencies: []
+        )
+        #endif
+    }()
+
     /// Whether the linked runtime satisfies the SDK's minimum ABI contract.
     public static var isAvailable: Bool {
         symbolDiagnostics.isCompatible
@@ -299,18 +401,76 @@ public final class CoreRuntimeBridge {
         consumeCString(_lastInitError?())
     }
 
+    /// Version, exact source commit, build profile, and compiled feature set.
+    public func buildInfo() -> String? {
+        Self.consumeCString(Self._buildInfo?())
+    }
+
     // MARK: - Session Lifecycle
 
     /// Start a new session. Returns session handle JSON, or nil on failure.
     ///
     /// JSON: `{ "session_id": "...", "started_at_ms": 123, "mode": "personal" }`
     public func startSession() -> String? {
-        consumeCString(Self._startSession?(handle))
+        // Calling an ONNX-backed runtime without OrtGetApiBase jumps through a
+        // null function pointer inside `ort::setup_api`. Refuse the call so a
+        // packaging mistake is reported as an SDK error instead of terminating
+        // the host app.
+        guard Self.dependencyDiagnostics.isCompatible else { return nil }
+        return consumeCString(Self._startSession?(handle))
     }
 
     /// Stop the current session. Returns true on success.
     public func stopSession() -> Bool {
-        (Self._stopSession?(handle) ?? 1) == 0
+        let report = stopSessionDetailed()
+        return report.collectionStopped && report.failures.isEmpty
+    }
+
+    /// Stop and retain native stage-level diagnostics when the linked runtime
+    /// supports the v2 ABI. Older runtimes are represented honestly using the
+    /// legacy integer result plus their post-stop running state.
+    public func stopSessionDetailed() -> RuntimeSessionStopReport {
+        let sessionId = currentSession().flatMap(Self.sessionId(from:))
+        if let stopV2 = Self._stopSessionV2,
+           let json = consumeCString(stopV2(handle)),
+           let data = json.data(using: .utf8),
+           let report = try? JSONDecoder().decode(RuntimeSessionStopReport.self, from: data) {
+            return report
+        }
+
+        let succeeded = (Self._stopSession?(handle) ?? 1) == 0
+        return .legacy(
+            succeeded: succeeded,
+            isRunning: isRunning(),
+            sessionId: sessionId
+        )
+    }
+
+    /// Force an idempotent native shutdown and retry catalog closure.
+    public func abortSession(sessionId: String?) -> RuntimeSessionStopReport {
+        guard let abort = Self._abortSession else {
+            return .unavailable(sessionId: sessionId)
+        }
+        let json: String?
+        if let sessionId {
+            json = sessionId.withCString { consumeCString(abort(handle, $0)) }
+        } else {
+            json = consumeCString(abort(handle, nil))
+        }
+        guard let json,
+              let data = json.data(using: .utf8),
+              let report = try? JSONDecoder().decode(RuntimeSessionStopReport.self, from: data) else {
+            return .unavailable(sessionId: sessionId)
+        }
+        return report
+    }
+
+    private static func sessionId(from sessionJson: String) -> String? {
+        guard let data = sessionJson.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return value["session_id"] as? String
     }
 
     /// Get the current session as JSON, or nil if none.

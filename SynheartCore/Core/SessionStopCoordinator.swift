@@ -1,7 +1,8 @@
 import Foundation
 
 protocol NativeSessionStopping: AnyObject {
-    func stopSession() -> Bool
+    func stopSessionDetailed() -> RuntimeSessionStopReport
+    func abortSession(sessionId: String?) -> RuntimeSessionStopReport
     var isRunning: Bool { get }
     var currentSession: SessionHandle? { get }
 }
@@ -10,17 +11,37 @@ extension SynheartCoreShim: NativeSessionStopping {}
 
 struct SessionStopResolution {
     let mayClearLocalState: Bool
-    let activeSession: SessionHandle?
+    let stopReport: RuntimeSessionStopReport
+    let abortReport: RuntimeSessionStopReport?
+
+    var effectiveReport: RuntimeSessionStopReport {
+        abortReport ?? stopReport
+    }
 }
 
 enum SessionStopCoordinator {
     static func stop(_ runtime: NativeSessionStopping) -> SessionStopResolution {
-        if runtime.stopSession() || !runtime.isRunning {
-            return SessionStopResolution(mayClearLocalState: true, activeSession: nil)
+        let lastKnownSessionId = runtime.currentSession?.sessionId
+        let stopReport = runtime.stopSessionDetailed()
+        let needsAbort = !stopReport.collectionStopped
+            || runtime.isRunning
+            || !stopReport.catalogClosed
+
+        guard needsAbort else {
+            return SessionStopResolution(
+                mayClearLocalState: true,
+                stopReport: stopReport,
+                abortReport: nil
+            )
         }
+
+        let abortReport = runtime.abortSession(
+            sessionId: stopReport.sessionId ?? lastKnownSessionId
+        )
         return SessionStopResolution(
-            mayClearLocalState: false,
-            activeSession: runtime.currentSession
+            mayClearLocalState: abortReport.collectionStopped && !runtime.isRunning,
+            stopReport: stopReport,
+            abortReport: abortReport
         )
     }
 }

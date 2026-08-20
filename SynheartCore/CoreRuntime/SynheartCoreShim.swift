@@ -80,6 +80,14 @@ public final class SynheartCoreShim {
         bridge?.stopSession() ?? false
     }
 
+    public func stopSessionDetailed() -> RuntimeSessionStopReport {
+        bridge?.stopSessionDetailed() ?? .unavailable(sessionId: currentSession?.sessionId)
+    }
+
+    public func abortSession(sessionId: String?) -> RuntimeSessionStopReport {
+        bridge?.abortSession(sessionId: sessionId) ?? .unavailable(sessionId: sessionId)
+    }
+
     /// Get the current session handle, or nil.
     public var currentSession: SessionHandle? {
         guard let json = bridge?.currentSession() else { return nil }
