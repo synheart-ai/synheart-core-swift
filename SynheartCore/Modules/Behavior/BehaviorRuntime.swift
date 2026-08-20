@@ -11,7 +11,6 @@ public enum RuntimeBehaviorEvent: Int32, Sendable {
     case swipe = 6
     case call = 7
 }
-
 protocol BehaviorRuntimeSinking: AnyObject {
     func pushBehavior(tsMs: Int64, eventType: Int32, value: Double)
 }
@@ -56,4 +55,3 @@ enum BehaviorRuntimeMapping {
         return nil
     }
 }
-

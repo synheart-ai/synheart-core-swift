@@ -42,4 +42,3 @@ public struct MetaState: Codable {
         self.baselineSessions = baselineSessions
     }
 }
-

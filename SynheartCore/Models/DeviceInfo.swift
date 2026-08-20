@@ -34,4 +34,3 @@ public struct DeviceInfo: Codable {
         #endif
     }
 }
-
