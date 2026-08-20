@@ -144,6 +144,12 @@ public class Synheart {
             ?? Empty<BehaviorEvent, Never>().eraseToAnyPublisher()
     }
 
+    /// Real, consent-filtered phone motion samples forwarded to the native runtime.
+    public static var onPhoneMotionSample: AnyPublisher<MotionData, Never> {
+        shared.phoneModule?.motionSamples
+            ?? Empty<MotionData, Never>().eraseToAnyPublisher()
+    }
+
     /// Get the current HSI state as a typed object.
     public static var currentHSIState: HSIState? {
         guard let json = shared.hsiSubject.value else { return nil }
@@ -650,7 +656,8 @@ public class Synheart {
         )
         phoneModule = PhoneModule(
             capabilities: capabilityModule!,
-            consent: consentModule!
+            consent: consentModule!,
+            runtimeSink: coreRuntime
         )
         behaviorModule = BehaviorModule(
             capabilities: capabilityModule!,

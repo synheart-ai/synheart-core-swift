@@ -10,13 +10,21 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
     private let appTracker: any AppFocusTracking
     private let notificationTracker: any NotificationTracking
     private let cache = PhoneCache()
+    private weak var runtimeSink: (any PhoneRuntimeSinking)?
 
     private let capabilities: CapabilityProvider
     private let consent: ConsentProvider
 
     private var cancellables = Set<AnyCancellable>()
+    private var isAcceptingSamples = false
+    private let motionSampleSubject = PassthroughSubject<MotionData, Never>()
 
-    public init(
+    /// Real, consent-filtered CoreMotion samples accepted for native ingest.
+    public var motionSamples: AnyPublisher<MotionData, Never> {
+        motionSampleSubject.eraseToAnyPublisher()
+    }
+
+    public convenience init(
         capabilities: CapabilityProvider,
         consent: ConsentProvider,
         motionCollector: any MotionCollecting = CoreMotionCollector(),
@@ -24,12 +32,33 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
         appTracker: any AppFocusTracking = NoOpAppFocusTracker(),
         notificationTracker: any NotificationTracking = NoOpNotificationTracker()
     ) {
+        self.init(
+            capabilities: capabilities,
+            consent: consent,
+            motionCollector: motionCollector,
+            screenTracker: screenTracker,
+            appTracker: appTracker,
+            notificationTracker: notificationTracker,
+            runtimeSink: nil
+        )
+    }
+
+    init(
+        capabilities: CapabilityProvider,
+        consent: ConsentProvider,
+        motionCollector: any MotionCollecting = CoreMotionCollector(),
+        screenTracker: any ScreenStateTracking = IOSScreenStateTracker(),
+        appTracker: any AppFocusTracking = NoOpAppFocusTracker(),
+        notificationTracker: any NotificationTracking = NoOpNotificationTracker(),
+        runtimeSink: (any PhoneRuntimeSinking)?
+    ) {
         self.capabilities = capabilities
         self.consent = consent
         self.motionCollector = motionCollector
         self.screenTracker = screenTracker
         self.appTracker = appTracker
         self.notificationTracker = notificationTracker
+        self.runtimeSink = runtimeSink
         super.init(moduleId: "phone")
     }
 
@@ -61,6 +90,7 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
             SynheartLogger.log("[PhoneModule] Phone-context consent is not granted; collection remains stopped")
             return
         }
+        isAcceptingSamples = true
 
         motionCollector.motionStream
             .sink(
@@ -126,8 +156,15 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
     }
 
     func cacheMotionIfConsented(_ motion: MotionData) {
-        guard consent.current().phoneContext else { return }
+        guard isAcceptingSamples, consent.current().phoneContext else { return }
         cache.addMotionData(motion)
+        runtimeSink?.pushAccel(
+            tsMs: Int64(motion.timestamp.timeIntervalSince1970 * 1_000),
+            x: motion.x,
+            y: motion.y,
+            z: motion.z
+        )
+        motionSampleSubject.send(motion)
     }
 
     private func cacheScreenStateIfConsented(_ state: ScreenState, timestamp: Date) {
@@ -147,6 +184,7 @@ public class PhoneModule: BaseSynheartModule, RawPhoneDataProvider {
 
     public override func onStop() async throws {
         SynheartLogger.log("[PhoneModule] Stopping phone data collection...")
+        isAcceptingSamples = false
 
         cancellables.removeAll()
 
