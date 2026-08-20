@@ -61,13 +61,13 @@ jobs:
                 return;
               } else if (resp.status === 404) {
                 core.info(`@${login} is not a member of ${context.repo.owner}`);
-              } else if (resp.status === 302) {
-                core.warning(`ORG_READ_TOKEN cannot view membership for @${login} (302). Treating as external.`);
               } else {
-                core.warning(`Membership check for @${login} errored: HTTP ${resp.status}. Treating as external.`);
+                core.warning(`Membership check for @${login} was inconclusive: HTTP ${resp.status}. Leaving the PR open.`);
+                return;
               }
             } else {
-              core.warning("ORG_READ_TOKEN secret is not set; private org members will be misclassified as external. Add a PAT with read:org scope.");
+              core.warning("ORG_READ_TOKEN is not set, so private membership cannot be verified. Leaving the PR open.");
+              return;
             }
 
             core.info(`Closing PR #${pr.number} from external author @${login} (association=${association})`);

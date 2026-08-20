@@ -24,6 +24,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check source package artifacts
+        run: bash scripts/check-source-package.sh
       - name: Build
         run: swift build -c release
       - name: Test

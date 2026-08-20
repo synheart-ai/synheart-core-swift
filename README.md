@@ -158,7 +158,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.1.0")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.2.0")
 ]
 ```
 
@@ -170,9 +170,10 @@ visible through `CoreRuntimeBridge.symbolDiagnostics` for support diagnostics.
 ### Runnable iOS example
 
 Open [`ExampleApp/SynheartExample.xcodeproj`](ExampleApp/SynheartExample.xcodeproj)
-to run the SwiftUI integration app. It demonstrates configuration, consent,
-native session lifecycle, live typed/raw HSI 1.3 delivery, storage, sync, orphan
-repair, and copyable runtime ABI diagnostics. The project references this
+to run the SwiftUI integration app. It demonstrates local-only initialization,
+requested versus runtime-enforced consent, real collection counters, typed/raw
+HSI 1.3 delivery, upload queue/device-auth state, storage, orphan repair, and
+copyable runtime ABI diagnostics. The project references this
 repository as a local Swift package, so local SDK changes are reflected
 immediately.
 
@@ -288,7 +289,7 @@ do {
 } catch SynheartError.alreadyConfigured {
     print("SDK already initialized")
 } catch SynheartError.capabilityTokenRequired {
-    print("Provide a valid capability token or set allowUnsignedCapabilities: true")
+    print("Configure device auth, or enable unsigned capabilities for Debug-only local use")
 } catch SynheartError.notInitialized {
     print("Call initialize() first")
 } catch {

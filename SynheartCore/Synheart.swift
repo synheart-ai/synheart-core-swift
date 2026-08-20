@@ -786,7 +786,7 @@ public class Synheart {
         )
         let endpoints = ServiceEndpointResolver.resolve(resolvedConfig)
 
-        if !resolvedConfig.appId.isEmpty {
+        if resolvedConfig.deviceAuthConfig != nil {
             SynheartAuth.shared.configure(baseUrl: endpoints.authBaseURL)
         }
 
@@ -801,10 +801,12 @@ public class Synheart {
             if cryptoRc != 0 {
                 SynheartLogger.log("[Synheart] set_crypto_callbacks rc=\(cryptoRc); device auth unavailable")
             }
-            _ = bridge.consentConfigureCloud(
-                baseUrl: endpoints.consentBaseURL,
-                appId: resolvedConfig.appId
-            )
+            if resolvedConfig.consentConfig != nil || resolvedConfig.cloudConfig != nil {
+                _ = bridge.consentConfigureCloud(
+                    baseUrl: endpoints.consentBaseURL,
+                    appId: resolvedConfig.appId
+                )
+            }
         }
 
         capabilityModule = CapabilityModule(bridge: coreRuntime?.bridge)
@@ -813,8 +815,8 @@ public class Synheart {
             // the native runtime. Defaults are provisional SDK-side gates until
             // that runtime authority is established.
             capabilityModule!.loadDefaults()
-        } else if let token = resolvedConfig.capabilityToken,
-           let secret = resolvedConfig.capabilitySecret {
+        } else if let token = resolvedConfig.legacyCapabilityToken,
+           let secret = resolvedConfig.legacyCapabilitySecret {
             try capabilityModule!.loadVerifiedToken(token, secret: secret)
         } else if resolvedConfig.allowUnsignedCapabilities {
             SynheartLogger.log("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")

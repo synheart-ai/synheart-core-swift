@@ -86,11 +86,15 @@ public struct SynheartConfig {
     ///
     /// Prefer `deviceAuthConfig`. The static bundle-token path is retained for
     /// migration compatibility and is always verified by the native runtime.
-    public let capabilityToken: CapabilityToken?
+    @available(*, deprecated, message: "Use deviceAuthConfig; static capability tokens are migration-only")
+    public var capabilityToken: CapabilityToken? { legacyCapabilityToken }
+    let legacyCapabilityToken: CapabilityToken?
 
     /// Legacy HMAC secret paired with `capabilityToken`.
     /// Prefer `deviceAuthConfig`; bundle secrets should not be used by new apps.
-    public let capabilitySecret: String?
+    @available(*, deprecated, message: "Use deviceAuthConfig; never embed a capability secret in a new app")
+    public var capabilitySecret: String? { legacyCapabilitySecret }
+    let legacyCapabilitySecret: String?
 
     /// When true, allows SDK to run with default capabilities and no signed token (debug only)
     public let allowUnsignedCapabilities: Bool
@@ -136,8 +140,8 @@ public struct SynheartConfig {
         self.labIngestConfig = labIngestConfig
         self.consentConfig = consentConfig
         self.deviceAuthConfig = deviceAuthConfig
-        self.capabilityToken = capabilityToken
-        self.capabilitySecret = capabilitySecret
+        self.legacyCapabilityToken = capabilityToken
+        self.legacyCapabilitySecret = capabilitySecret
         self.allowUnsignedCapabilities = allowUnsignedCapabilities
     }
 
@@ -250,8 +254,11 @@ public struct ConsentConfig {
     /// App ID for consent service
     public let appId: String?
 
-    /// App API key for consent service authentication
-    public let appApiKey: String?
+    /// Legacy app API key for consent service authentication.
+    /// New apps authenticate through `DeviceAuthConfig` and must not embed it.
+    @available(*, deprecated, message: "Use DeviceAuthConfig and verified device consent")
+    public var appApiKey: String? { legacyAppApiKey }
+    let legacyAppApiKey: String?
 
     /// Device ID (UUID for this device, auto-generated if not provided)
     public let deviceId: String?
@@ -276,7 +283,7 @@ public struct ConsentConfig {
     ) {
         self.consentServiceUrl = consentServiceUrl
         self.appId = appId
-        self.appApiKey = appApiKey
+        self.legacyAppApiKey = appApiKey
         self.deviceId = deviceId
         self.platform = platform
         self.userId = userId
@@ -285,6 +292,6 @@ public struct ConsentConfig {
 
     /// Check if consent service is configured
     public var isConfigured: Bool {
-        appId != nil && appApiKey != nil
+        appId != nil && legacyAppApiKey != nil
     }
 }

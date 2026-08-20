@@ -28,6 +28,9 @@ jobs:
       - name: Resolve dependencies
         run: swift package resolve
 
+      - name: Check source package artifacts
+        run: bash scripts/check-source-package.sh
+
       - name: Build
         run: swift build -v
 
@@ -59,9 +62,4 @@ jobs:
       - name: Install SwiftLint
         run: brew install swiftlint
       - name: SwiftLint
-        run: |
-          if [ -f ".swiftlint.yml" ]; then
-            swiftlint --strict
-          else
-            echo "No .swiftlint.yml — skipping"
-          fi
+        run: swiftlint lint --strict --config .swiftlint.yml

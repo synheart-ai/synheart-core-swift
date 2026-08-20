@@ -18,8 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime-backed session catalog, HSI-window, storage-usage, retention,
   orphan-repair, sync-status, and sync-conflict handling.
 - A runnable SwiftUI iOS example app covering configuration, consent/session
-  lifecycle, live HSI 1.3 state, storage, sync, and runtime ABI diagnostics.
-  CI builds the example against the local package on an iOS simulator target.
+  lifecycle, real collection evidence, live HSI 1.3 state, native upload queue,
+  device registration, storage, and runtime ABI diagnostics. CI builds the
+  example against the local package on an iOS simulator target.
+- Typed editable/effective consent models, collector startup reports, real
+  behavior/motion publishers, and upload/device-auth diagnostic results.
 
 ### Changed
 - Account deletion (`requestAccountDeletion` / `cancelAccountDeletion`) now goes
@@ -58,7 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state machine instead of bypassing it.
 - Wear collection no longer injects a mock source in production by default.
 - HSI 1.3 payloads parse canonical domain arrays, IDs, timestamps, modalities,
-  and tiers; duplicate native deliveries are suppressed by HSI ID.
+  and tiers; duplicate native deliveries are suppressed by HSI ID. Typed state
+  is parsed once per delivery and malformed JSON is reported explicitly.
+- Independent collectors now start resiliently: one failed collector is
+  reported without stopping healthy siblings.
+- Local-only initialization no longer configures cloud auth/consent clients.
 - Sync and privacy APIs no longer report placeholder or successful outcomes
   when the native operation failed.
 - Legacy capability tokens are rejected when expired, not yet valid,
@@ -72,8 +79,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Failed native session stops preserve the active Swift/native session handle.
 - HSI 1.3 digital axes (`focus_quality`, `interruption_pressure`, and
   `interaction_mode`) are available as typed values.
+- The external-PR membership check leaves PRs open when private membership
+  cannot be verified. CI now runs a real SwiftLint config and rejects binary or
+  oversized artifacts from the source package.
 
 ### Removed
+- The production mock wearable source and its random physiological samples.
 - **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` aliases —
   use `deviceMotion` / `systemState`.
 - Internal migration stubs (stub `SynheartAuth` / `SignedHeadersStub` /

@@ -15,7 +15,7 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
     private let sessionIdProvider: () -> String?
 
     private var eventSubscription: AnyCancellable?
-    private var cleanupTimer: Timer?
+    private var cleanupTimer: AnyCancellable?
     private let capturedEventSubject = PassthroughSubject<BehaviorEvent, Never>()
 
     /// Consent-filtered interaction events that were accepted for native ingest.
@@ -92,9 +92,9 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
         }
         try collector?.start(sessionId: sessionIdProvider())
 
-        cleanupTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
-            self?.aggregator.cleanOldWindows()
-        }
+        cleanupTimer = Timer.publish(every: 60.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in self?.aggregator.cleanOldWindows() }
 
         SynheartLogger.log("[BehaviorModule] Behavior tracking started")
     }
@@ -105,7 +105,7 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
         eventSubscription?.cancel()
         eventSubscription = nil
 
-        cleanupTimer?.invalidate()
+        cleanupTimer?.cancel()
         cleanupTimer = nil
 
         collector?.onEvent = nil

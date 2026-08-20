@@ -145,10 +145,6 @@ public class WearModule: BaseSynheartModule, RawWearDataProvider {
                     }
                 )
                 .store(in: &cancellables)
-
-            if let mockSource = source as? MockWearSourceHandler {
-                mockSource.startGenerating()
-            }
         }
 
         SynheartLogger.log("[WearModule] Started \(cancellables.count) wear sources")

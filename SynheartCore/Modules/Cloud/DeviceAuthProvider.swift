@@ -75,7 +75,7 @@ public class DeviceAuthProvider: AuthProvider {
            let ts = Double(serverTs) {
             let semaphore = DispatchSemaphore(value: 0)
             var handled = false
-            Task.detached(priority: .userInitiated) { [auth, appId] in
+            Task.detached(priority: .userInitiated) { [auth] in
                 do {
                     try await auth.correctClockSkew(ts)
                     SynheartLogger.log("[DeviceAuth] Clock skew corrected, retrying")
