@@ -7,6 +7,7 @@ import Foundation
 public enum ApiEndpoints {
     // MARK: - Base URLs (defaults)
     public static let defaultCloudBaseUrl = "https://api.synheart.ai"
+    public static let defaultAuthBaseUrl = "https://api.synheart.ai"
 
     // MARK: - Cloud / HSI Ingest
     public static let ingestPath = "/v1/hsi/ingest"

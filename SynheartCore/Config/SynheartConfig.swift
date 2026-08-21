@@ -14,9 +14,39 @@ public struct StorageConfig {
 /// Sync sub-configuration.
 public struct SyncConfig {
     public let enabled: Bool
+    /// Base URL used by the native Synsync client.
+    public let baseUrl: String
 
-    public init(enabled: Bool = false) {
+    public init(
+        enabled: Bool = false,
+        baseUrl: String = ApiEndpoints.defaultAuthBaseUrl
+    ) {
         self.enabled = enabled
+        self.baseUrl = baseUrl
+    }
+}
+
+/// Hardware-backed device authentication configuration.
+public struct DeviceAuthConfig {
+    /// Device-auth service origin.
+    public let authBaseUrl: String
+
+    /// Bundle identifier bound to the device registration.
+    public let packageName: String
+
+    /// Allow registration without an App Attest claim in development builds.
+    /// The runtime still creates a real device key and the server must also
+    /// explicitly permit development registration for this app id.
+    public let allowUnattestedDevRegistration: Bool
+
+    public init(
+        authBaseUrl: String,
+        packageName: String = "",
+        allowUnattestedDevRegistration: Bool = false
+    ) {
+        self.authBaseUrl = authBaseUrl
+        self.packageName = packageName
+        self.allowUnattestedDevRegistration = allowUnattestedDevRegistration
     }
 }
 
@@ -50,12 +80,21 @@ public struct SynheartConfig {
     public let cloudConfig: CloudConfig?
     public let labIngestConfig: LabIngestConfig?
     public let consentConfig: ConsentConfig?
+    public let deviceAuthConfig: DeviceAuthConfig?
 
-    /// Server-signed capability token for feature gating
-    public let capabilityToken: CapabilityToken?
+    /// Legacy server-signed capability token for feature gating.
+    ///
+    /// Prefer `deviceAuthConfig`. The static bundle-token path is retained for
+    /// migration compatibility and is always verified by the native runtime.
+    @available(*, deprecated, message: "Use deviceAuthConfig; static capability tokens are migration-only")
+    public var capabilityToken: CapabilityToken? { legacyCapabilityToken }
+    let legacyCapabilityToken: CapabilityToken?
 
-    /// HMAC secret for verifying the capability token signature
-    public let capabilitySecret: String?
+    /// Legacy HMAC secret paired with `capabilityToken`.
+    /// Prefer `deviceAuthConfig`; bundle secrets should not be used by new apps.
+    @available(*, deprecated, message: "Use deviceAuthConfig; never embed a capability secret in a new app")
+    public var capabilitySecret: String? { legacyCapabilitySecret }
+    let legacyCapabilitySecret: String?
 
     /// When true, allows SDK to run with default capabilities and no signed token (debug only)
     public let allowUnsignedCapabilities: Bool
@@ -78,6 +117,7 @@ public struct SynheartConfig {
         cloudConfig: CloudConfig? = nil,
         labIngestConfig: LabIngestConfig? = nil,
         consentConfig: ConsentConfig? = nil,
+        deviceAuthConfig: DeviceAuthConfig? = nil,
         capabilityToken: CapabilityToken? = nil,
         capabilitySecret: String? = nil,
         allowUnsignedCapabilities: Bool = false
@@ -99,8 +139,9 @@ public struct SynheartConfig {
         self.cloudConfig = cloudConfig
         self.labIngestConfig = labIngestConfig
         self.consentConfig = consentConfig
-        self.capabilityToken = capabilityToken
-        self.capabilitySecret = capabilitySecret
+        self.deviceAuthConfig = deviceAuthConfig
+        self.legacyCapabilityToken = capabilityToken
+        self.legacyCapabilitySecret = capabilitySecret
         self.allowUnsignedCapabilities = allowUnsignedCapabilities
     }
 
@@ -117,6 +158,13 @@ public struct SynheartConfig {
         }
         guard !subjectId.contains("|") else {
             throw SynheartCoreError.invalidMode("subjectId must not contain pipe character")
+        }
+        if let retentionDays = storage.retentionDays {
+            guard (0...Int(Int32.max)).contains(retentionDays) else {
+                throw SynheartCoreError.notConfigured(
+                    "storage.retentionDays must be between 0 and \(Int32.max)"
+                )
+            }
         }
     }
 }
@@ -150,6 +198,9 @@ public struct CloudConfig {
     /// Instance ID (UUID for this SDK instance)
     public let instanceId: String
 
+    /// Organization identifier required by native cloud ingest.
+    public let orgId: String?
+
     /// Max upload queue size (default: 100)
     public let maxQueueSize: Int
 
@@ -169,6 +220,7 @@ public struct CloudConfig {
         authProvider: AuthProvider? = nil,
         subjectId: String,
         instanceId: String = UUID().uuidString,
+        orgId: String? = nil,
         baseUrl: String = ApiEndpoints.defaultCloudBaseUrl,
         subjectType: String = "pseudonymous_user",
         maxQueueSize: Int = 100,
@@ -180,6 +232,7 @@ public struct CloudConfig {
         self.authProvider = authProvider
         self.subjectId = subjectId
         self.instanceId = instanceId
+        self.orgId = orgId
         self.baseUrl = baseUrl
         self.subjectType = subjectType
         self.maxQueueSize = maxQueueSize
@@ -201,8 +254,11 @@ public struct ConsentConfig {
     /// App ID for consent service
     public let appId: String?
 
-    /// App API key for consent service authentication
-    public let appApiKey: String?
+    /// Legacy app API key for consent service authentication.
+    /// New apps authenticate through `DeviceAuthConfig` and must not embed it.
+    @available(*, deprecated, message: "Use DeviceAuthConfig and verified device consent")
+    public var appApiKey: String? { legacyAppApiKey }
+    let legacyAppApiKey: String?
 
     /// Device ID (UUID for this device, auto-generated if not provided)
     public let deviceId: String?
@@ -227,7 +283,7 @@ public struct ConsentConfig {
     ) {
         self.consentServiceUrl = consentServiceUrl
         self.appId = appId
-        self.appApiKey = appApiKey
+        self.legacyAppApiKey = appApiKey
         self.deviceId = deviceId
         self.platform = platform
         self.userId = userId
@@ -236,6 +292,6 @@ public struct ConsentConfig {
 
     /// Check if consent service is configured
     public var isConfigured: Bool {
-        appId != nil && appApiKey != nil
+        appId != nil && legacyAppApiKey != nil
     }
 }

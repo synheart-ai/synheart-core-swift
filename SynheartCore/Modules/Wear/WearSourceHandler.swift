@@ -9,7 +9,6 @@ public enum WearSourceType: String {
     case garmin
     case mock
 }
-
 /// Raw wear sample from a data source
 public struct WearSample {
     public let timestamp: Date
@@ -58,4 +57,3 @@ public protocol WearSourceHandler: AnyObject {
     /// Stop and cleanup
     func dispose() async throws
 }
-

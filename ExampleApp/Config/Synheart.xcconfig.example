@@ -1,0 +1,17 @@
+// Copy to Synheart.local.xcconfig and fill the values. The checked-in Debug
+// and Release wrappers include the local copy automatically. The copy is ignored.
+
+DEVELOPMENT_TEAM = YOUR_APPLE_TEAM_ID
+
+SYNHEART_APP_ID = app_your_development_app_id
+SYNHEART_BASE_URL = https:/$()/api.synheart.ai
+SYNHEART_AUTH_URL = $(SYNHEART_BASE_URL)
+// Backward-compatible alias for older example schemes.
+SYNHEART_AUTH_BASE_URL = $(SYNHEART_AUTH_URL)
+SYNHEART_CONSENT_BASE_URL = $(SYNHEART_BASE_URL)
+SYNHEART_INGEST_BASE_URL = $(SYNHEART_BASE_URL)
+SYNHEART_ORG_ID = org_your_organization_id
+SYNHEART_PACKAGE_NAME = ai.synheart.core.example
+// Informational in the current SDK; useful when comparing platform credentials.
+SYNHEART_TENANT_ID = ten_your_tenant_id
+SYNHEART_PROJECT_ID = prj_your_project_id

@@ -1,5 +1,82 @@
 import Foundation
 
+/// One native stage that failed after or during a session stop.
+public struct RuntimeSessionStopFailure: Codable, Equatable, Sendable {
+    public let stage: String
+    public let error: String
+}
+
+/// Structured native session-stop result.
+///
+/// `collectionStopped` is the lifecycle authority. A report may contain
+/// finalization failures while still guaranteeing that collectors are off and
+/// the native runtime no longer accepts session samples.
+public struct RuntimeSessionStopReport: Codable, Equatable, Sendable {
+    public let status: String
+    public let sessionId: String?
+    public let collectionStopped: Bool
+    public let finalized: Bool
+    public let catalogClosed: Bool
+    public let failures: [RuntimeSessionStopFailure]
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case sessionId = "session_id"
+        case collectionStopped = "collection_stopped"
+        case finalized
+        case catalogClosed = "catalog_closed"
+        case failures
+    }
+
+    static func legacy(
+        succeeded: Bool,
+        isRunning: Bool,
+        sessionId: String?
+    ) -> RuntimeSessionStopReport {
+        if succeeded {
+            return RuntimeSessionStopReport(
+                status: "stopped",
+                sessionId: sessionId,
+                collectionStopped: true,
+                finalized: true,
+                catalogClosed: true,
+                failures: []
+            )
+        }
+
+        let collectionStopped = !isRunning
+        return RuntimeSessionStopReport(
+            status: collectionStopped ? "stopped_with_unknown_error" : "failed",
+            sessionId: sessionId,
+            collectionStopped: collectionStopped,
+            finalized: false,
+            catalogClosed: false,
+            failures: [
+                RuntimeSessionStopFailure(
+                    stage: "legacy_stop",
+                    error: "The linked runtime exposes only the legacy integer stop result"
+                )
+            ]
+        )
+    }
+
+    static func unavailable(sessionId: String?) -> RuntimeSessionStopReport {
+        RuntimeSessionStopReport(
+            status: "failed",
+            sessionId: sessionId,
+            collectionStopped: false,
+            finalized: false,
+            catalogClosed: false,
+            failures: [
+                RuntimeSessionStopFailure(
+                    stage: "abort",
+                    error: "The linked runtime does not expose native session abort"
+                )
+            ]
+        )
+    }
+}
+
 /// Bridge to `libsynheart_core_runtime` via C ABI / dlsym.
 ///
 /// This replaces the Swift-native storage, crypto, sync, consent, and pipeline
@@ -17,7 +94,7 @@ public final class CoreRuntimeBridge {
 
     // MARK: - Opaque handle
 
-    private var handle: OpaquePointer
+    private let handle: OpaquePointer
 
     /// Retained box holding the HSI callback closure. `Unmanaged.passRetained`
     /// adds +1 to the closure's refcount so the runtime's C user_data pointer
@@ -31,15 +108,19 @@ public final class CoreRuntimeBridge {
     private typealias NewFn               = @convention(c) (UnsafePointer<CChar>?) -> OpaquePointer?
     private typealias FreeFn              = @convention(c) (OpaquePointer?) -> Void
     private typealias FreeStringFn        = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
+    private typealias LastInitErrorFn     = @convention(c) () -> UnsafeMutablePointer<CChar>?
+    private typealias BuildInfoFn         = @convention(c) () -> UnsafeMutablePointer<CChar>?
 
     // Session
     private typealias StartSessionFn      = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias StopSessionFn       = @convention(c) (OpaquePointer?) -> Int32
+    private typealias StopSessionV2Fn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias AbortSessionFn      = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
     private typealias CurrentSessionFn    = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias IsRunningFn         = @convention(c) (OpaquePointer?) -> Int32
 
     // Sensor push
-    private typealias PushRrFn            = @convention(c) (OpaquePointer?, Int64, Double) -> Void
+    private typealias PushRrFn            = @convention(c) (OpaquePointer?, Int64, Double, UnsafePointer<CChar>?) -> Void
     private typealias PushHrFn            = @convention(c) (OpaquePointer?, Int64, Double) -> Void
     private typealias PushAccelFn         = @convention(c) (OpaquePointer?, Int64, Double, Double, Double) -> Void
     private typealias PushBehaviorFn      = @convention(c) (OpaquePointer?, Int64, Int32, Double) -> Void
@@ -71,12 +152,14 @@ public final class CoreRuntimeBridge {
 
     // Deletion
     private typealias DeleteSessionFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
+    private typealias CloseOrphanSessionFn = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
     private typealias WipeLocalDataFn     = @convention(c) (OpaquePointer?) -> Int32
     private typealias SetRetentionDaysFn  = @convention(c) (OpaquePointer?, Int32) -> Int64
 
     // Sync
     private typealias SetSyncEnabledFn    = @convention(c) (OpaquePointer?, Int32) -> Void
     private typealias SyncNowFn           = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias SyncStatusFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
 
     // SRM / Baselines
     private typealias BaselinesJsonFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
@@ -135,14 +218,23 @@ public final class CoreRuntimeBridge {
         return unsafeBitCast(p, to: T.self)
     }
 
+    private static func hasSymbol(_ name: String) -> Bool {
+        guard let lib else { return false }
+        return dlsym(lib, name) != nil
+    }
+
     // Lifecycle
     private static let _new:           NewFn?             = sym("synheart_core_new")
     private static let _free:          FreeFn?            = sym("synheart_core_free")
     private static let _freeString:    FreeStringFn?      = sym("synheart_core_free_string")
+    private static let _lastInitError: LastInitErrorFn?   = sym("synheart_core_last_error")
+    private static let _buildInfo:     BuildInfoFn?        = sym("synheart_core_build_info")
 
     // Session
     private static let _startSession:  StartSessionFn?    = sym("synheart_core_start_session")
     private static let _stopSession:   StopSessionFn?     = sym("synheart_core_stop_session")
+    private static let _stopSessionV2: StopSessionV2Fn?   = sym("synheart_core_stop_session_v2")
+    private static let _abortSession:  AbortSessionFn?    = sym("synheart_core_abort_session")
     private static let _curSession:    CurrentSessionFn?   = sym("synheart_core_current_session")
     private static let _isRunning:     IsRunningFn?       = sym("synheart_core_is_running")
 
@@ -184,12 +276,14 @@ public final class CoreRuntimeBridge {
 
     // Deletion
     private static let _deleteSession: DeleteSessionFn?   = sym("synheart_core_delete_session")
+    private static let _closeOrphan:   CloseOrphanSessionFn? = sym("synheart_core_close_orphan_session")
     private static let _wipeLocal:     WipeLocalDataFn?   = sym("synheart_core_wipe_local_data")
     private static let _setRetention:  SetRetentionDaysFn? = sym("synheart_core_set_retention_days")
 
     // Sync
     private static let _setSyncOn:     SetSyncEnabledFn?  = sym("synheart_core_set_sync_enabled")
     private static let _syncNow:       SyncNowFn?         = sym("synheart_core_sync_now")
+    private static let _syncStatus:    SyncStatusFn?      = sym("synheart_core_sync_status")
 
     // SRM / Baselines
     private static let _baselines:     BaselinesJsonFn?   = sym("synheart_core_baselines_json")
@@ -202,6 +296,9 @@ public final class CoreRuntimeBridge {
     private static let _uploadQLen:    UploadQueueLenFn?  = sym("synheart_core_upload_queue_length")
     private static let _flushUploads:  FlushUploadsFn?    = sym("synheart_core_flush_uploads")
     private static let _uploadMeta:    UploadMetadataFn?  = sym("synheart_core_upload_metadata")
+    private typealias LastIngestSuccessAtMsFn = @convention(c) (OpaquePointer?) -> Int64
+    private static let _lastIngestSuccessAtMs: LastIngestSuccessAtMsFn? =
+        sym("synheart_core_last_ingest_success_at_ms")
 
     // Wellness Score
     private static let _wellnessJson:  DiagnosticsFn?     = sym("synheart_core_wellness_json")
@@ -217,9 +314,9 @@ public final class CoreRuntimeBridge {
     private static let _cancelAcctDel: CancelAcctDelFn?   = sym("synheart_core_cancel_account_deletion")
 
     // Wearable SRM (longitudinal)
-    private static let _pushWearDaily: PushWearDailyFn?     = sym("synheart_core_push_wearable_daily_value")
-    private static let _triggerWearRe: TriggerWearRecompFn? = sym("synheart_core_trigger_wearable_recompute")
-    private static let _getWearRef:    GetWearRefFn?        = sym("synheart_core_get_wearable_reference")
+    private static let _pushWearDaily: PushWearDailyFn?     = sym("synheart_core_srm_push_wearable_daily")
+    private static let _triggerWearRe: TriggerWearRecompFn? = sym("synheart_core_srm_trigger_wearable_recompute")
+    private static let _getWearRef:    GetWearRefFn?        = sym("synheart_core_wearable_reference_json")
 
     // Priority + Resilience (handle-less, read by per-module utilities)
     internal static let _prioritySetProvider:       PrioritySetProviderFn?       = sym("synheart_core_priority_set_provider")
@@ -230,9 +327,34 @@ public final class CoreRuntimeBridge {
 
     // MARK: - Availability check
 
-    /// Whether the core runtime library is linked and the `synheart_core_new` symbol is resolved.
+    /// Full audit of the required and optional symbols exported by the runtime.
+    public static let symbolDiagnostics: RuntimeSymbolDiagnostics = {
+        let resolved = Set(RuntimeSymbolManifest.all.filter(hasSymbol))
+        return RuntimeSymbolManifest.audit(resolvedSymbols: resolved)
+    }()
+
+    /// Audit of host-provided native dependencies needed by the linked runtime.
+    /// Stable/lab iOS runtimes require the app to link and force-load
+    /// `onnxruntime-c`; edge runtimes do not.
+    public static let dependencyDiagnostics: RuntimeDependencyDiagnostics = {
+        #if os(iOS)
+        RuntimeDependencyManifest.audit(
+            runtimeEntrypointFound: hasSymbol("synheart_core_start_session"),
+            edgeRuntimeFound: hasSymbol(RuntimeDependencyManifest.edgeRuntimeMarker),
+            onnxRuntimeEntrypointFound: hasSymbol(RuntimeDependencyManifest.onnxRuntimeEntrypoint)
+        )
+        #else
+        RuntimeDependencyDiagnostics(
+            requiresExternalONNXRuntime: false,
+            onnxRuntimeEntrypointFound: hasSymbol(RuntimeDependencyManifest.onnxRuntimeEntrypoint),
+            missingRequiredDependencies: []
+        )
+        #endif
+    }()
+
+    /// Whether the linked runtime satisfies the SDK's minimum ABI contract.
     public static var isAvailable: Bool {
-        _new != nil
+        symbolDiagnostics.isCompatible
     }
 
     // MARK: - Init / Deinit
@@ -245,12 +367,14 @@ public final class CoreRuntimeBridge {
     /// `device_id`, `app_version`, `platform`, `storage`, `sync`, `privacy`,
     /// `capability_token`, `capability_secret`.
     public init?(configJson: String) {
+        guard Self.isAvailable else { return nil }
         guard let newFn = Self._new else { return nil }
         guard let ptr = configJson.withCString({ newFn($0) }) else { return nil }
         self.handle = ptr
     }
 
     deinit {
+        Self._clearHsiCb?(handle)
         hsiCallbackBox?.release()
         Self._free?(handle)
     }
@@ -272,18 +396,81 @@ public final class CoreRuntimeBridge {
         return result
     }
 
+    /// Human-readable reason from the most recent `synheart_core_new` failure.
+    public static func lastInitializationError() -> String? {
+        consumeCString(_lastInitError?())
+    }
+
+    /// Version, exact source commit, build profile, and compiled feature set.
+    public func buildInfo() -> String? {
+        Self.consumeCString(Self._buildInfo?())
+    }
+
     // MARK: - Session Lifecycle
 
     /// Start a new session. Returns session handle JSON, or nil on failure.
     ///
     /// JSON: `{ "session_id": "...", "started_at_ms": 123, "mode": "personal" }`
     public func startSession() -> String? {
-        consumeCString(Self._startSession?(handle))
+        // Calling an ONNX-backed runtime without OrtGetApiBase jumps through a
+        // null function pointer inside `ort::setup_api`. Refuse the call so a
+        // packaging mistake is reported as an SDK error instead of terminating
+        // the host app.
+        guard Self.dependencyDiagnostics.isCompatible else { return nil }
+        return consumeCString(Self._startSession?(handle))
     }
 
     /// Stop the current session. Returns true on success.
     public func stopSession() -> Bool {
-        (Self._stopSession?(handle) ?? 1) == 0
+        let report = stopSessionDetailed()
+        return report.collectionStopped && report.failures.isEmpty
+    }
+
+    /// Stop and retain native stage-level diagnostics when the linked runtime
+    /// supports the v2 ABI. Older runtimes are represented honestly using the
+    /// legacy integer result plus their post-stop running state.
+    public func stopSessionDetailed() -> RuntimeSessionStopReport {
+        let sessionId = currentSession().flatMap(Self.sessionId(from:))
+        if let stopV2 = Self._stopSessionV2,
+           let json = consumeCString(stopV2(handle)),
+           let data = json.data(using: .utf8),
+           let report = try? JSONDecoder().decode(RuntimeSessionStopReport.self, from: data) {
+            return report
+        }
+
+        let succeeded = (Self._stopSession?(handle) ?? 1) == 0
+        return .legacy(
+            succeeded: succeeded,
+            isRunning: isRunning(),
+            sessionId: sessionId
+        )
+    }
+
+    /// Force an idempotent native shutdown and retry catalog closure.
+    public func abortSession(sessionId: String?) -> RuntimeSessionStopReport {
+        guard let abort = Self._abortSession else {
+            return .unavailable(sessionId: sessionId)
+        }
+        let json: String?
+        if let sessionId {
+            json = sessionId.withCString { consumeCString(abort(handle, $0)) }
+        } else {
+            json = consumeCString(abort(handle, nil))
+        }
+        guard let json,
+              let data = json.data(using: .utf8),
+              let report = try? JSONDecoder().decode(RuntimeSessionStopReport.self, from: data) else {
+            return .unavailable(sessionId: sessionId)
+        }
+        return report
+    }
+
+    private static func sessionId(from sessionJson: String) -> String? {
+        guard let data = sessionJson.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return value["session_id"] as? String
     }
 
     /// Get the current session as JSON, or nil if none.
@@ -299,8 +486,8 @@ public final class CoreRuntimeBridge {
     // MARK: - Sensor Push
 
     /// Push an RR-interval sample.
-    public func pushRr(tsMs: Int64, rrMs: Double) {
-        Self._pushRr?(handle, tsMs, rrMs)
+    public func pushRr(tsMs: Int64, rrMs: Double, provider: String = "default_sensor") {
+        provider.withCString { Self._pushRr?(handle, tsMs, rrMs, $0) }
     }
 
     /// Push a heart-rate sample.
@@ -456,6 +643,11 @@ public final class CoreRuntimeBridge {
         sessionId.withCString { (Self._deleteSession?(handle, $0) ?? 1) == 0 }
     }
 
+    /// Mark a stranded active session as closed. This is idempotent.
+    public func closeOrphanSession(sessionId: String) -> Bool {
+        sessionId.withCString { (Self._closeOrphan?(handle, $0) ?? -1) == 0 }
+    }
+
     /// Wipe all local data. Returns true on success.
     public func wipeLocalData() -> Bool {
         (Self._wipeLocal?(handle) ?? 1) == 0
@@ -478,6 +670,11 @@ public final class CoreRuntimeBridge {
     /// JSON: `{ "pushed": N, "pulled": N, "errors": [...] }`
     public func syncNow() -> String? {
         consumeCString(Self._syncNow?(handle))
+    }
+
+    /// Current native sync-engine state as JSON.
+    public func syncStatus() -> String? {
+        consumeCString(Self._syncStatus?(handle))
     }
 
     // MARK: - SRM / Baselines
@@ -526,6 +723,14 @@ public final class CoreRuntimeBridge {
     /// Get upload metadata summary as JSON.
     public func uploadMetadata() -> String? {
         consumeCString(Self._uploadMeta?(handle))
+    }
+
+    /// Unix milliseconds of the most recent successful automatic or manual
+    /// ingest upload, or nil when unavailable/never uploaded.
+    public func lastIngestSuccessAtMs() -> Int64? {
+        guard let fn = Self._lastIngestSuccessAtMs else { return nil }
+        let value = fn(handle)
+        return value > 0 ? value : nil
     }
 
     // MARK: - Wellness Score
@@ -597,7 +802,7 @@ public final class CoreRuntimeBridge {
     private typealias LabSetOverridesFn  = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Int32
     private typealias LabFinalizeFn      = @convention(c) (OpaquePointer?, Int64) -> UnsafeMutablePointer<CChar>?
 
-    private static let _labAvail:        LabAvailFn?        = sym("synheart_core_lab_available")
+    private static let _labAvail:        LabAvailFn?        = sym("synheart_core_is_lab_available")
     private static let _labStart:        LabStartFn?        = sym("synheart_core_lab_start")
     private static let _labOpenWin:      LabOpenWindowFn?   = sym("synheart_core_lab_open_window")
     private static let _labCloseWin:     LabCloseWindowFn?  = sym("synheart_core_lab_close_window")
@@ -734,23 +939,26 @@ public final class CoreRuntimeBridge {
     /// The callback fires on a background thread. Dispatch to main thread
     /// if updating UI.
     public func setHsiCallback(_ callback: @escaping (String) -> Void) {
-        // Release any previous callback's retained box before installing the
-        // new one — otherwise each setHsiCallback call leaks the prior
-        // closure (and anything it captures) for the lifetime of the bridge.
-        hsiCallbackBox?.release()
-
+        let previousBox = hsiCallbackBox
         let box = Unmanaged.passRetained(callback as AnyObject)
-        hsiCallbackBox = box
         let ud = box.toOpaque()
 
         let cCallback: @convention(c) (UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void = { jsonPtr, userData in
-            guard let jsonPtr = jsonPtr, let userData = userData else { return }
+            guard let jsonPtr else { return }
+            defer {
+                CoreRuntimeBridge._freeString?(
+                    UnsafeMutablePointer(mutating: jsonPtr)
+                )
+            }
+            guard let userData else { return }
             let json = String(cString: jsonPtr)
             let cb = Unmanaged<AnyObject>.fromOpaque(userData).takeUnretainedValue() as! (String) -> Void
             cb(json)
         }
 
         Self._setHsiCb?(handle, cCallback, ud)
+        hsiCallbackBox = box
+        previousBox?.release()
     }
 
     /// Unregister the HSI callback.

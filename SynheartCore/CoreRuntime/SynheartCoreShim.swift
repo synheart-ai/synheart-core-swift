@@ -27,6 +27,7 @@ public final class SynheartCoreShim {
     public let onStateUpdate: AnyPublisher<HSIState, Never>
 
     private let hsiSubject = PassthroughSubject<HSIState, Never>()
+    private let hsiDeliveryDeduplicator = HSIDeliveryDeduplicator()
 
     // MARK: - Init
 
@@ -34,17 +35,26 @@ public final class SynheartCoreShim {
     ///
     /// Serializes the config to JSON and passes it to `synheart_core_new`.
     /// Throws `SynheartError.notInitialized` if the runtime library is not linked.
-    public init(config: SynheartConfig) throws {
+    public init(config: SynheartConfig, dataDir: String? = nil) throws {
         self.onStateUpdate = hsiSubject.eraseToAnyPublisher()
 
-        let configDict = Self.configToDict(config)
+        let symbolDiagnostics = CoreRuntimeBridge.symbolDiagnostics
+        guard symbolDiagnostics.isCompatible else {
+            throw SynheartError.runtimeIncompatible(
+                missingSymbols: symbolDiagnostics.missingRequiredSymbols
+            )
+        }
+
+        let configDict = RuntimeConfigBuilder.build(config, dataDir: dataDir)
         guard let jsonData = try? JSONSerialization.data(withJSONObject: configDict),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
             throw SynheartError.notInitialized
         }
 
         guard let b = CoreRuntimeBridge(configJson: jsonString) else {
-            throw SynheartError.notInitialized
+            throw SynheartError.runtimeCreationFailed(
+                message: CoreRuntimeBridge.lastInitializationError()
+            )
         }
         self.bridge = b
     }
@@ -70,6 +80,14 @@ public final class SynheartCoreShim {
         bridge?.stopSession() ?? false
     }
 
+    public func stopSessionDetailed() -> RuntimeSessionStopReport {
+        bridge?.stopSessionDetailed() ?? .unavailable(sessionId: currentSession?.sessionId)
+    }
+
+    public func abortSession(sessionId: String?) -> RuntimeSessionStopReport {
+        bridge?.abortSession(sessionId: sessionId) ?? .unavailable(sessionId: sessionId)
+    }
+
     /// Get the current session handle, or nil.
     public var currentSession: SessionHandle? {
         guard let json = bridge?.currentSession() else { return nil }
@@ -83,8 +101,8 @@ public final class SynheartCoreShim {
 
     // MARK: - Sensor Push
 
-    public func pushRr(tsMs: Int64, rrMs: Double) {
-        bridge?.pushRr(tsMs: tsMs, rrMs: rrMs)
+    public func pushRr(tsMs: Int64, rrMs: Double, provider: String = "default_sensor") {
+        bridge?.pushRr(tsMs: tsMs, rrMs: rrMs, provider: provider)
     }
 
     public func pushHr(tsMs: Int64, bpm: Double) {
@@ -107,7 +125,9 @@ public final class SynheartCoreShim {
     public func ingestBatch(batchJson: String, nowMs: Int64) -> HSIState? {
         guard let json = bridge?.ingestBatch(batchJson: batchJson, nowMs: nowMs) else { return nil }
         let state = HSIState.fromJson(json)
-        hsiSubject.send(state)
+        if hsiDeliveryDeduplicator.shouldDeliver(json: json) {
+            hsiSubject.send(state)
+        }
         return state
     }
 
@@ -201,7 +221,10 @@ public final class SynheartCoreShim {
             endMs: endMs,
             limit: limit
         ) else { return [] }
-        return parseJsonArray(json)
+        return RuntimePayloadDecoder.dictionaryArray(
+            json,
+            acceptingJSONStringElements: true
+        )
     }
 
     /// Storage usage summary.
@@ -210,8 +233,7 @@ public final class SynheartCoreShim {
               let dict = parseJsonDict(json) else {
             return StorageUsage(totalBytes: 0, bySessionBytes: [:])
         }
-        let totalBytes = (dict["total_bytes"] as? NSNumber)?.int64Value ?? 0
-        return StorageUsage(totalBytes: totalBytes, bySessionBytes: [:])
+        return StorageUsage(runtimeMap: dict)
     }
 
     // MARK: - Metrics
@@ -238,6 +260,11 @@ public final class SynheartCoreShim {
     }
 
     @discardableResult
+    public func closeOrphanSession(_ sessionId: String) -> Bool {
+        bridge?.closeOrphanSession(sessionId: sessionId) ?? false
+    }
+
+    @discardableResult
     public func wipeLocalData() -> Bool {
         bridge?.wipeLocalData() ?? false
     }
@@ -254,15 +281,18 @@ public final class SynheartCoreShim {
     }
 
     /// Run a push/pull sync cycle. Returns a `SyncResult`.
-    public func syncNow() -> SyncResult {
+    public func syncNow() -> SyncResult? {
         guard let json = bridge?.syncNow(), let dict = parseJsonDict(json) else {
-            return SyncResult()
+            return nil
         }
-        return SyncResult(
-            pushed: (dict["pushed"] as? Int) ?? 0,
-            pulled: (dict["pulled"] as? Int) ?? 0,
-            errors: (dict["errors"] as? [String]) ?? []
-        )
+        return SyncResult(runtimeMap: dict)
+    }
+
+    public func syncStatus() -> SyncStatus? {
+        guard let json = bridge?.syncStatus(), let dict = parseJsonDict(json) else {
+            return nil
+        }
+        return SyncStatus(runtimeMap: dict)
     }
 
     // MARK: - SRM / Baselines
@@ -337,14 +367,11 @@ public final class SynheartCoreShim {
     // MARK: - JSON Parsing Helpers
 
     private func parseJsonDict(_ json: String) -> [String: Any]? {
-        guard let data = json.data(using: .utf8) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        RuntimePayloadDecoder.dictionary(json)
     }
 
     private func parseJsonArray(_ json: String) -> [[String: Any]] {
-        guard let data = json.data(using: .utf8),
-              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
-        return arr
+        RuntimePayloadDecoder.dictionaryArray(json)
     }
 
     private func parseSessionHandle(_ json: String) -> SessionHandle? {
@@ -356,37 +383,4 @@ public final class SynheartCoreShim {
         return SessionHandle(sessionId: sessionId, startedAtMs: startedAtMs, mode: mode)
     }
 
-    // MARK: - Config Serialization
-
-    private static func configToDict(_ config: SynheartConfig) -> [String: Any] {
-        var dict: [String: Any] = [
-            "app_id": config.appId,
-            "subject_id": config.subjectId,
-            "mode": config.mode.rawValue,
-            "device_id": config.deviceId,
-            "app_version": config.appVersion,
-            "platform": config.platform,
-            "storage": [
-                "enabled": config.storage.enabled,
-            ],
-            "sync": [
-                "enabled": config.sync.enabled,
-            ],
-            "privacy": [
-                "allow_research": config.privacy.allowResearch,
-            ],
-            // Base URL for the runtime's cloud consent + upload clients. Without
-            // it those clients are unconfigured and uploads no-op.
-            "api_base_url": config.cloudConfig?.baseUrl ?? ApiEndpoints.defaultCloudBaseUrl,
-        ]
-        if let token = config.capabilityToken,
-           let tokenData = try? JSONEncoder().encode(token),
-           let tokenStr = String(data: tokenData, encoding: .utf8) {
-            dict["capability_token"] = tokenStr
-        }
-        if let secret = config.capabilitySecret {
-            dict["capability_secret"] = secret
-        }
-        return dict
-    }
 }

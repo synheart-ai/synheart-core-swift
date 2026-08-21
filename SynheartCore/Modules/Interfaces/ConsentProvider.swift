@@ -2,7 +2,7 @@ import Foundation
 import Combine
 
 /// Consent tier indicating the scope of data sharing
-public enum ConsentTier: String, Codable {
+public enum ConsentTier: String, Codable, Sendable {
     /// Data stays on device only
     case local
     /// Data may be synced to cloud

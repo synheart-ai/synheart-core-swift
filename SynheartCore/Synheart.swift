@@ -3,6 +3,25 @@ import Combine
 import SynheartAuth
 @_exported import SynheartSession // re-exports SessionEvent, SessionConfig, etc.
 
+enum RuntimeVersionResolver {
+    static func resolve(
+        buildInfo: [String: Any]?,
+        diagnostics: [String: Any]?
+    ) -> String? {
+        let candidates = [
+            buildInfo?["core_runtime"] as? String,
+            buildInfo?["runtime_version"] as? String,
+            buildInfo?["version"] as? String,
+            diagnostics?["version"] as? String,
+        ]
+
+        return candidates.compactMap { candidate in
+            let normalized = candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return normalized?.isEmpty == false ? normalized : nil
+        }.first
+    }
+}
+
 /**
  * Synheart Core SDK - Main Entry Point
  *
@@ -29,6 +48,8 @@ import SynheartAuth
  *     .sink { state in print("State: \(state)") }
  *     .store(in: &cancellables)
  *
+ * try await Synheart.grantConsent("biosignals")
+ * Synheart.activate(.wear)
  * try await Synheart.startSession()
  * try await Synheart.syncNow()
  * ```
@@ -38,6 +59,7 @@ public class Synheart {
 
     private var coreRuntime: SynheartCoreShim?
     private let moduleManager = ModuleManager()
+    private let initializationGate = InitializationGate()
 
     private var capabilityModule: CapabilityModule?
     private var consentModule: ConsentModule?
@@ -49,8 +71,15 @@ public class Synheart {
 
     private var isConfigured = false
     private var isRunning = false
+    private var collectionModuleFailures: [String: String] = [:]
     private var userId: String?
     private var previousConsent: ConsentSnapshot?
+    private var lastUploadBatchId: String?
+    private var lastUploadAt: Date?
+    private var lastUploadAttemptAt: Date?
+    private var lastUploadFailure: NativeOperationFailure?
+    private var _lastSessionStopReport: RuntimeSessionStopReport?
+    private var _lastSessionStopPhase = "idle"
 
     private var _currentSessionHandle: SessionHandle?
     private var _synheartConfig: SynheartConfig?
@@ -60,6 +89,8 @@ public class Synheart {
     private var hsiToSessionCancellable: AnyCancellable?
 
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
+    private let typedHsiSubject = CurrentValueSubject<HSIState?, Never>(nil)
+    private let hsiDeliveryDeduplicator = HSIDeliveryDeduplicator()
     private var cancellables = Set<AnyCancellable>()
 
     /// Subject the most recently issued cloud consent token was minted for.
@@ -116,6 +147,24 @@ public class Synheart {
         shared.isRunning
     }
 
+    /// Diagnostics from the most recent native stop or abort operation.
+    public static var lastSessionStopReport: RuntimeSessionStopReport? {
+        shared._lastSessionStopReport
+    }
+
+    /// Last completed checkpoint in the session-stop path. This is intended
+    /// for integration diagnostics when UI, Swift, and native lifecycle state
+    /// disagree on a physical device.
+    public static var lastSessionStopPhase: String {
+        shared._lastSessionStopPhase
+    }
+
+    /// Collection modules that could not start in the current session. Healthy
+    /// independent modules remain operational when this dictionary is non-empty.
+    public static var collectionStartupFailures: [String: String] {
+        shared.collectionModuleFailures
+    }
+
     /// Stream of HSI JSON frames produced by synheart-engine.
     public static var onHSIUpdate: AnyPublisher<String, Never> {
         shared.hsiSubject
@@ -127,16 +176,27 @@ public class Synheart {
 
     /// Stream of typed HSIState updates.
     public static var onStateUpdate: AnyPublisher<HSIState, Never> {
-        shared.hsiSubject
+        shared.typedHsiSubject
             .compactMap { $0 }
-            .map { HSIState.fromJson($0, subjectId: shared._synheartConfig?.subjectId ?? shared.userId ?? "") }
             .eraseToAnyPublisher()
+    }
+
+    /// Consent-filtered interaction events accepted by the behavior module and
+    /// forwarded to the native runtime during an active behavior session.
+    public static var onBehaviorEvent: AnyPublisher<BehaviorEvent, Never> {
+        shared.behaviorModule?.capturedEvents
+            ?? Empty<BehaviorEvent, Never>().eraseToAnyPublisher()
+    }
+
+    /// Real, consent-filtered phone motion samples forwarded to the native runtime.
+    public static var onPhoneMotionSample: AnyPublisher<MotionData, Never> {
+        shared.phoneModule?.motionSamples
+            ?? Empty<MotionData, Never>().eraseToAnyPublisher()
     }
 
     /// Get the current HSI state as a typed object.
     public static var currentHSIState: HSIState? {
-        guard let json = shared.hsiSubject.value else { return nil }
-        return HSIState.fromJson(json, subjectId: shared._synheartConfig?.subjectId ?? shared.userId ?? "")
+        shared.typedHsiSubject.value
     }
 
     // MARK: - Metrics API
@@ -200,28 +260,56 @@ public class Synheart {
 
     /// List stored sessions with optional filters.
     public static func listSessions(range: SessionRange? = nil) throws -> [SessionRecord] {
-        guard let cr = shared.coreRuntime, cr.isAvailable else { return [] }
-        let dicts = cr.listSessions()
-        return dicts.compactMap { dict in
-            guard let sessionId = dict["session_id"] as? String else { return nil }
-            return SessionRecord(
-                sessionId: sessionId,
-                subjectId: (dict["subject_id"] as? String) ?? "",
-                mode: (dict["mode"] as? String) ?? "personal",
-                createdAtUtc: (dict["created_at_utc"] as? NSNumber)?.int64Value ?? 0,
-                startUtc: (dict["start_utc"] as? NSNumber)?.int64Value ?? 0,
-                appId: (dict["app_id"] as? String) ?? "",
-                appVersion: (dict["app_version"] as? String) ?? "",
-                deviceId: (dict["device_id"] as? String) ?? "",
-                platform: (dict["platform"] as? String) ?? "ios"
-            )
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
         }
+        return cr.listSessions()
+            .compactMap(SessionRecord.init(runtimeMap:))
+            .filter { session in
+                if let startMs = range?.startMs, session.startUtc < startMs { return false }
+                if let endMs = range?.endMs, session.startUtc > endMs { return false }
+                if let mode = range?.mode, session.mode != mode { return false }
+                return true
+            }
     }
 
     /// Get a session summary (decrypted) for the given session.
     public static func getSessionSummary(_ sessionId: String) throws -> [String: Any]? {
-        guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
         return cr.getSessionSummary(sessionId)
+    }
+
+    /// Mark a stranded active session as closed without replaying the normal
+    /// stop-session lifecycle. The native operation is idempotent.
+    @discardableResult
+    public static func closeOrphanSession(_ sessionId: String) throws -> Bool {
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        return cr.closeOrphanSession(sessionId)
+    }
+
+    /// Close active catalog sessions older than the supplied interval. Call at
+    /// app startup to repair sessions stranded by process termination.
+    @discardableResult
+    public static func sweepOrphanSessions(
+        olderThan: TimeInterval = 6 * 60 * 60,
+        now: Date = Date()
+    ) throws -> Int {
+        guard olderThan >= 0 else {
+            throw SynheartError.invalidArgument("Orphan-session age must be non-negative")
+        }
+        let cutoffMs = Int64((now.timeIntervalSince1970 - olderThan) * 1_000)
+        let orphans = try listSessions().filter {
+            $0.isActive && $0.startUtc > 0 && $0.startUtc < cutoffMs
+        }
+        return try orphans.reduce(into: 0) { closed, session in
+            if try closeOrphanSession(session.sessionId) {
+                closed += 1
+            }
+        }
     }
 
     // MARK: - Research Studies
@@ -230,22 +318,26 @@ public class Synheart {
     /// Enrolment rides the device's signed cloud credential — no tokens are
     /// handled by the caller. Returns the service response (enrolment on success,
     /// or an `error` key), or nil if the runtime is unavailable.
-    public static func enrolResearchStudy(accessCode: String, studyCode: String) throws -> [String: Any]? {
+    public static func enrolResearchStudy(accessCode: String, studyCode: String) async throws -> [String: Any]? {
         guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
-        return cr.enrolResearchStudy(accessCode: accessCode, studyCode: studyCode)
+        return await RuntimeWorkExecutor.run {
+            cr.enrolResearchStudy(accessCode: accessCode, studyCode: studyCode)
+        }
     }
 
     /// Preview an access + study code pair without redeeming the code.
-    public static func validateResearchStudyCodes(accessCode: String, studyCode: String) throws -> [String: Any]? {
+    public static func validateResearchStudyCodes(accessCode: String, studyCode: String) async throws -> [String: Any]? {
         guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
-        return cr.validateResearchStudyCodes(accessCode: accessCode, studyCode: studyCode)
+        return await RuntimeWorkExecutor.run {
+            cr.validateResearchStudyCodes(accessCode: accessCode, studyCode: studyCode)
+        }
     }
 
     /// Withdraw from the device's active research study for this app. No codes —
     /// the participant + app come from the device's signed credential. Idempotent.
-    public static func withdrawResearchStudy() throws -> [String: Any]? {
+    public static func withdrawResearchStudy() async throws -> [String: Any]? {
         guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
-        return cr.withdrawResearchStudy()
+        return await RuntimeWorkExecutor.run { cr.withdrawResearchStudy() }
     }
 
     /// Request erasure of the data the participant contributed to their study for
@@ -254,14 +346,19 @@ public class Synheart {
     /// credential. When `dryRun` is true the response is an inventory preview and
     /// nothing is deleted; a real request is accepted asynchronously and carries a
     /// `request_id`. Idempotent. Returns nil if the runtime is unavailable.
-    public static func requestStudyDataDeletion(dryRun: Bool = false) throws -> [String: Any]? {
+    public static func requestStudyDataDeletion(dryRun: Bool = false) async throws -> [String: Any]? {
         guard let cr = shared.coreRuntime, cr.isAvailable else { return nil }
-        return cr.requestStudyDataDeletion(dryRun: dryRun)
+        return await RuntimeWorkExecutor.run {
+            cr.requestStudyDataDeletion(dryRun: dryRun)
+        }
     }
 
     /// Get decrypted HSI window artifacts for a session.
     public static func getHSIWindows(_ sessionId: String, range: WindowRange? = nil) throws -> [[String: Any]] {
-        return []
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        return cr.getHSIWindows(sessionId, range: range)
     }
 
     // MARK: - Storage & Retention
@@ -269,46 +366,78 @@ public class Synheart {
     /// Get storage usage statistics.
     public static func getStorageUsage() throws -> StorageUsage {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
-            return StorageUsage(totalBytes: 0, bySessionBytes: [:])
+            throw SynheartError.notInitialized
         }
         return cr.getStorageUsage()
     }
 
-    /// Set retention policy. Deletes sessions older than the given number of days.
+    /// Set retention policy. Nil leaves the existing native policy unchanged.
     public static func setRetentionDays(_ days: Int?) throws {
+        guard let days else { return }
+        guard days >= 0, days <= Int(Int32.max) else {
+            throw SynheartError.invalidArgument("Retention days must be between 0 and \(Int32.max)")
+        }
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        guard cr.setRetentionDays(days) >= 0 else {
+            throw SynheartError.runtimeOperationFailed("Unable to apply retention policy")
+        }
     }
 
     // MARK: - Deletion API
 
     /// Delete a session and all its artifacts locally.
     public static func deleteLocalSession(_ sessionId: String) throws {
-        guard let cr = shared.coreRuntime, cr.isAvailable else { return }
-        let _ = cr.deleteSession(sessionId)
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        guard cr.deleteSession(sessionId) else {
+            throw SynheartError.runtimeOperationFailed("Unable to delete local session \(sessionId)")
+        }
     }
 
     /// Wipe all local data.
     public static func wipeLocalData() async throws {
-        if let cr = shared.coreRuntime, cr.isAvailable {
-            let _ = cr.wipeLocalData()
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
         }
         if shared.isRunning {
             try await shared._stopSession()
         }
-        shared.coreRuntime = nil
+        let wiped = await RuntimeWorkExecutor.run { cr.wipeLocalData() }
+        guard wiped else {
+            throw SynheartError.runtimeOperationFailed("Unable to wipe local data")
+        }
         shared._currentSessionHandle = nil
         shared.isRunning = false
+        shared.collectionModuleFailures = [:]
+        shared.resetUploadDiagnostics()
+        shared.hsiSubject.send(nil)
+        shared.typedHsiSubject.send(nil)
     }
 
     /// Request account deletion -- requests server-side deletion (device-signed
     /// by the runtime) and wipes local data.
     public static func requestAccountDeletion() async throws -> DeletionRequestResult {
-        // The runtime owns the device-signed account-deletion request.
-        let serverResult = shared.coreRuntime?.requestAccountDeletion()
-        try await wipeLocalData()
-        if let serverResult = serverResult, serverResult.status == "accepted" {
-            return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion requested.")
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
         }
-        return DeletionRequestResult(status: "accepted", message: "Local data wiped. Server deletion pending.")
+        let serverAccepted = await RuntimeWorkExecutor.run {
+            cr.requestAccountDeletion().status == "accepted"
+        }
+        let localWiped: Bool
+        do {
+            try await wipeLocalData()
+            localWiped = true
+        } catch {
+            SynheartLogger.log("[Synheart] Account deletion local wipe failed: \(error)")
+            localWiped = false
+        }
+        return DeletionOutcome.accountResult(
+            serverAccepted: serverAccepted,
+            localWiped: localWiped
+        )
     }
 
     /// Cancel a pending account deletion request (device-signed by the runtime).
@@ -316,32 +445,290 @@ public class Synheart {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
             return DeletionRequestResult(status: "error", message: "Runtime unavailable; cannot cancel deletion.")
         }
-        if cr.cancelAccountDeletion() {
-            return DeletionRequestResult(status: "cancelled", message: "Account deletion cancelled.")
+        if await RuntimeWorkExecutor.run({ cr.cancelAccountDeletion() }) {
+            return DeletionRequestResult(
+                status: "cancelled",
+                message: "Account deletion cancelled."
+            )
         }
         return DeletionRequestResult(status: "error", message: "Cancel request failed.")
     }
 
-    /// Log out -- revoke consent.
-    public static func logout() {
-        try? shared.consentModule?.revokeConsent()
+    /// Log out by revoking native consent, clearing the persisted native token,
+    /// and only then updating the Swift consent snapshot.
+    public static func logout() async throws {
+        try await shared._logout()
+    }
+
+    private func _logout() async throws {
+        guard let consentModule, let coreRuntime, coreRuntime.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+
+        let current = consentModule.current()
+        let nativeRevoked = current.copyWith(
+            biosignals: false,
+            behavior: false,
+            phoneContext: false,
+            cloudUpload: false,
+            syni: false,
+            focusEstimation: false,
+            emotionEstimation: false,
+            vendorSync: false
+        )
+        if let error = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.apply(nativeRevoked, replacing: current, through: coreRuntime)
+        }) {
+            throw error
+        }
+        guard await RuntimeWorkExecutor.run({ coreRuntime.clearStoredConsent() }) else {
+            _ = await RuntimeWorkExecutor.run {
+                ConsentRuntimeCoordinator.apply(current, replacing: nativeRevoked, through: coreRuntime)
+            }
+            throw SynheartError.runtimeOperationFailed("Native consent token cleanup failed")
+        }
+
+        try await consentModule.updateConsent(.none())
+        currentTokenSubject = nil
     }
 
     // MARK: - Sync API
 
     /// Enable or disable sync.
     public static func setSyncEnabled(_ enabled: Bool) async throws {
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        let status = await RuntimeWorkExecutor.run {
+            cr.setSyncEnabled(enabled)
+            return cr.syncStatus()
+        }
+        guard let status else {
+            throw SynheartError.runtimeOperationFailed("Unable to read sync status")
+        }
+        guard status.enabled == enabled else {
+            throw SynheartError.runtimeOperationFailed(
+                enabled ? "Native sync prerequisites are not satisfied" : "Unable to disable native sync"
+            )
+        }
     }
 
     /// Execute a sync cycle (push + pull).
     public static func syncNow() async throws -> SyncResult {
-        guard let cr = shared.coreRuntime, cr.isAvailable else { return SyncResult() }
-        return cr.syncNow()
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        let result = await RuntimeWorkExecutor.run { cr.syncNow() }
+        guard let result else {
+            throw SynheartError.runtimeOperationFailed("Native sync cycle failed")
+        }
+        return result
     }
 
     /// Get current sync status.
     public static func getSyncStatus() throws -> SyncStatus {
-        return SyncStatus(enabled: false)
+        guard let cr = shared.coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        guard let status = cr.syncStatus() else {
+            throw SynheartError.runtimeOperationFailed("Unable to read sync status")
+        }
+        return status
+    }
+
+    // MARK: - Cloud Ingestion & Device Auth
+
+    /// Observable outbound HSI queue state. The native runtime automatically
+    /// enqueues closed HSI windows; hosts should not enqueue every callback again.
+    public static var uploadQueueStatus: UploadQueueStatus {
+        shared._uploadQueueStatus()
+    }
+
+    public static var uploadQueueLength: Int {
+        shared.coreRuntime?.uploadQueueLength ?? 0
+    }
+
+    private func _uploadQueueStatus() -> UploadQueueStatus {
+        guard let runtime = coreRuntime, runtime.isAvailable else {
+            return UploadQueueStatus(
+                state: .localOnly,
+                queueLength: 0,
+                lastUploadBatchId: lastUploadBatchId,
+                lastUploadAt: lastUploadAt,
+                lastUploadAttemptAt: lastUploadAttemptAt,
+                lastFailure: lastUploadFailure
+            )
+        }
+        let queueLength = runtime.uploadQueueLength
+        let nativeSuccess = runtime.bridge?.lastIngestSuccessAtMs().map {
+            Date(timeIntervalSince1970: TimeInterval($0) / 1_000)
+        }
+        let resolvedLastUpload = nativeSuccess ?? lastUploadAt
+        let cloudChosen = _effectiveConsent()?.cloudUpload == true
+        let cloudEnforceable = runtime.hasConsent(ConsentType.cloudUpload.rawValue)
+        let state: CloudSyncState
+        if !cloudChosen {
+            state = .localOnly
+        } else if !cloudEnforceable {
+            state = .blocked
+        } else if queueLength > 0 {
+            state = .syncing
+        } else if resolvedLastUpload != nil {
+            state = .synced
+        } else {
+            state = .pending
+        }
+        return UploadQueueStatus(
+            state: state,
+            queueLength: queueLength,
+            lastUploadBatchId: lastUploadBatchId,
+            lastUploadAt: resolvedLastUpload,
+            lastUploadAttemptAt: lastUploadAttemptAt,
+            lastFailure: lastUploadFailure
+        )
+    }
+
+    /// Force the native runtime to flush its automatically-managed HSI queue.
+    @discardableResult
+    public static func flushUploads(requireConsent: Bool = true) async -> UploadFlushResult {
+        await shared._flushUploads(requireConsent: requireConsent)
+    }
+
+    private func _flushUploads(requireConsent: Bool) async -> UploadFlushResult {
+        lastUploadAttemptAt = Date()
+        guard let runtime = coreRuntime, runtime.isAvailable else {
+            return recordUploadFailure(.init(
+                reason: .misconfigured,
+                message: "Core runtime bridge is unavailable"
+            ))
+        }
+        if requireConsent && !runtime.hasConsent(ConsentType.cloudUpload.rawValue) {
+            let locallyChosen = _effectiveConsent()?.cloudUpload == true
+            return recordUploadFailure(.init(
+                reason: .policy,
+                message: locallyChosen
+                    ? "Cloud upload is selected, but the runtime gate is closed. Check device registration and consent-token issuance."
+                    : "Cloud upload consent is not granted"
+            ))
+        }
+        guard let map = await RuntimeWorkExecutor.run({ runtime.flushUploads() }) else {
+            return recordUploadFailure(.init(
+                reason: .unknown,
+                message: "Native upload flush returned no result"
+            ))
+        }
+        let result = UploadFlushResult(runtimeMap: map)
+        if let failure = result.failure {
+            lastUploadFailure = failure
+            return result
+        }
+        lastUploadFailure = nil
+        if result.uploaded > 0 {
+            let now = Date()
+            lastUploadAt = now
+            lastUploadBatchId = result.batchId
+                ?? "flush_\(Int64(now.timeIntervalSince1970 * 1_000))"
+        }
+        return result
+    }
+
+    private func recordUploadFailure(_ failure: NativeOperationFailure) -> UploadFlushResult {
+        lastUploadFailure = failure
+        return UploadFlushResult(success: false, failure: failure)
+    }
+
+    private func resetUploadDiagnostics() {
+        lastUploadBatchId = nil
+        lastUploadAt = nil
+        lastUploadAttemptAt = nil
+        lastUploadFailure = nil
+    }
+
+    /// Native device-auth status, including the separate attestation provenance
+    /// claim (`attested`, `unattested`, or `unknown`).
+    public static var deviceAuthAvailable: Bool {
+        let required = Set([
+            "synheart_core_sdk_set_crypto_callbacks",
+            "synheart_core_set_storage_callbacks",
+            "synheart_core_sdk_register_device",
+            "synheart_core_sdk_device_auth_status",
+        ])
+        return required.isDisjoint(with: CoreRuntimeBridge.symbolDiagnostics.missingOptionalSymbols)
+    }
+
+    public static var deviceAuthStatus: DeviceAuthStatus? {
+        guard let json = shared.coreRuntime?.bridge?.deviceAuthStatus(),
+              let map = shared.parseDict(json) else { return nil }
+        return DeviceAuthStatus(runtimeMap: map)
+    }
+
+    /// Idempotently register the configured device through the native runtime.
+    @discardableResult
+    public static func ensureDeviceAuthRegistered() async -> DeviceRegistrationResult {
+        await shared._ensureDeviceAuthRegistered()
+    }
+
+    private func _ensureDeviceAuthRegistered() async -> DeviceRegistrationResult {
+        await _registerDevice(force: false)
+    }
+
+    /// Force a fresh native registration even when a secure local device record
+    /// says this device is already registered. Use this only as a user-initiated
+    /// repair after the server has lost or revoked the corresponding record.
+    /// Local sessions, consent choices, baselines, and upload data are preserved.
+    @discardableResult
+    public static func reregisterDeviceAuth() async -> DeviceRegistrationResult {
+        await shared._registerDevice(force: true)
+    }
+
+    private func _registerDevice(force: Bool) async -> DeviceRegistrationResult {
+        guard _synheartConfig?.deviceAuthConfig != nil,
+              let bridge = coreRuntime?.bridge else {
+            let failure = NativeOperationFailure(
+                code: "DEVICE_AUTH_NOT_CONFIGURED",
+                reason: .misconfigured,
+                message: "DeviceAuthConfig is required before registering a device"
+            )
+            return DeviceRegistrationResult(
+                success: false,
+                status: DeviceAuthStatus(status: "not_configured"),
+                failure: failure
+            )
+        }
+        if !force, let existing = Self.deviceAuthStatus, existing.isRegistered {
+            return DeviceRegistrationResult(success: true, status: existing)
+        }
+        guard let clientId = subjectId, !clientId.isEmpty,
+              let json = await RuntimeWorkExecutor.run({ bridge.registerDevice(clientId: clientId) }),
+              let map = parseDict(json) else {
+            let failure = NativeOperationFailure(
+                code: "DEVICE_REGISTRATION_NO_RESULT",
+                reason: .unknown,
+                message: "Native device registration returned no result"
+            )
+            return DeviceRegistrationResult(
+                success: false,
+                status: DeviceAuthStatus(status: "failed"),
+                failure: failure
+            )
+        }
+        if let failure = NativeOperationFailure.fromRuntimeMap(map, fallback: "Device registration failed") {
+            return DeviceRegistrationResult(
+                success: false,
+                status: DeviceAuthStatus(runtimeMap: map),
+                failure: failure
+            )
+        }
+        let status = Self.deviceAuthStatus
+            ?? DeviceAuthStatus(
+                status: "registered",
+                deviceId: map["device_id"] as? String,
+                attestation: map["attestation"] as? String ?? "unknown"
+            )
+        if status.isRegistered {
+            _ = await _ensureCloudConsentReady()
+        }
+        return DeviceRegistrationResult(success: status.isRegistered, status: status)
     }
 
     // MARK: - Activation API
@@ -374,7 +761,8 @@ public class Synheart {
     /**
      * Initialize Synheart Core SDK.
      *
-     * Must be called before any other operations. Throws if already initialized.
+     * Must be called before any other operations. Repeated calls after a
+     * successful initialization are safe no-ops.
      *
      * Example:
      * ```swift
@@ -395,11 +783,13 @@ public class Synheart {
         }
         let resolvedUserId = userId ?? config?.subjectId ?? ""
         let appKey = config?.appId ?? "default"
-        try await shared._initialize(
-            userId: resolvedUserId,
-            config: config,
-            appKey: appKey
-        )
+        try await shared.initializationGate.run {
+            try await shared._initialize(
+                userId: resolvedUserId,
+                config: config,
+                appKey: appKey
+            )
+        }
         if autoStart {
             try await shared._startSession()
         }
@@ -410,19 +800,59 @@ public class Synheart {
         config: SynheartConfig?,
         appKey: String
     ) async throws {
-        if isConfigured {
-            throw SynheartError.alreadyConfigured
+        guard !isConfigured else { return }
+
+        do {
+            try await _performInitialization(
+                userId: userId,
+                config: config,
+                appKey: appKey
+            )
+        } catch {
+            await _resetAfterInitializationFailure()
+            throw error
         }
+    }
+
+    private func _performInitialization(
+        userId: String,
+        config: SynheartConfig?,
+        appKey: String
+    ) async throws {
 
         self.userId = userId
+        let resolvedConfig = config ?? SynheartConfig()
 
         SynheartLogger.log("[Synheart] Initializing...")
 
-        capabilityModule = CapabilityModule()
-        let resolvedConfig = config ?? SynheartConfig()
-        if let token = resolvedConfig.capabilityToken,
-           let secret = resolvedConfig.capabilitySecret {
-            try capabilityModule!.loadFromToken(token, secret: secret)
+        // Create the native runtime before accepting any legacy capability
+        // token so signature verification can never be silently skipped.
+        let dataDirectory = try RuntimeDataDirectory.prepare()
+        self.coreRuntime = try SynheartCoreShim(
+            config: resolvedConfig,
+            dataDir: dataDirectory
+        )
+        let endpoints = ServiceEndpointResolver.resolve(resolvedConfig)
+
+        if resolvedConfig.deviceAuthConfig != nil {
+            SynheartAuth.shared.configure(baseUrl: endpoints.authBaseURL)
+        }
+
+        // Native consent persistence depends on host storage/crypto callbacks.
+        // Install them before reading the authoritative consent snapshot.
+        if let bridge = coreRuntime?.bridge {
+            _configureNativeBridge(bridge, config: resolvedConfig, endpoints: endpoints)
+        }
+
+        capabilityModule = CapabilityModule(bridge: coreRuntime?.bridge)
+        if resolvedConfig.deviceAuthConfig != nil {
+            // Device-auth registrations and verified consent tokens are owned by
+            // the native runtime. Defaults are provisional SDK-side gates until
+            // that runtime authority is established.
+            capabilityModule!.loadDefaults()
+        } else if let token = resolvedConfig.legacyCapabilityToken,
+           let secret = resolvedConfig.legacyCapabilitySecret {
+            try capabilityModule!.loadVerifiedToken(token, secret: secret)
         } else if resolvedConfig.allowUnsignedCapabilities {
             SynheartLogger.log("[Synheart] WARNING: Running with unsigned default capabilities. Do not use in production.")
             capabilityModule!.loadDefaults()
@@ -430,7 +860,7 @@ public class Synheart {
             throw SynheartError.capabilityTokenRequired
         }
 
-        consentModule = ConsentModule()
+        consentModule = ConsentModule(bridge: coreRuntime?.bridge)
 
         let capturedAppId = resolvedConfig.appId
         consentModule!.setDeviceSigner { method, path, bodyData in
@@ -456,11 +886,14 @@ public class Synheart {
         )
         phoneModule = PhoneModule(
             capabilities: capabilityModule!,
-            consent: consentModule!
+            consent: consentModule!,
+            runtimeSink: coreRuntime
         )
         behaviorModule = BehaviorModule(
             capabilities: capabilityModule!,
-            consent: consentModule!
+            consent: consentModule!,
+            runtimeSink: coreRuntime,
+            sessionIdProvider: { [weak self] in self?._currentSessionHandle?.sessionId }
         )
 
         try moduleManager.registerModule(wearModule!, dependsOn: ["capabilities", "consent"])
@@ -468,6 +901,18 @@ public class Synheart {
         try moduleManager.registerModule(behaviorModule!, dependsOn: ["capabilities", "consent"])
 
         try await moduleManager.initializeAll()
+
+        if let restored = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.restore(from: self.coreRuntime!)
+        }) {
+            try await consentModule!.updateConsent(restored)
+        }
+
+        // The editable/current snapshot represents what was requested. Modules
+        // and sessions consume the runtime's policy-intersected effective state.
+        if let effective = _effectiveConsent() {
+            try await consentModule!.updateConsent(effective.snapshot)
+        }
 
         previousConsent = consentModule!.current()
         consentModule!.addListener { [weak self] newConsent in
@@ -498,13 +943,6 @@ public class Synheart {
 
         _synheartConfig = resolvedConfig
 
-        if !resolvedConfig.appId.isEmpty {
-            SynheartAuth.shared.configure(baseUrl: "https://api.synheart.ai/auth")
-        }
-
-        isConfigured = true
-
-        self.coreRuntime = try? SynheartCoreShim(config: resolvedConfig)
         if let cr = coreRuntime, let bridge = cr.bridge {
             SynheartLogger.log("[Synheart] Core runtime bridge loaded")
 
@@ -512,29 +950,7 @@ public class Synheart {
             // derive may have changed it) so SDK subject checks match native.
             syncSubjectFromNative()
 
-            bridge.setHsiCallback { [weak self] json in
-                guard let self = self else { return }
-                guard self.consentModule?.current().biosignals == true else { return }
-                self.hsiSubject.send(json)
-            }
-
-            // Device auth: hand the runtime its secure-storage + Secure Enclave
-            // crypto callbacks before any registration so consent tokens persist
-            // and can be minted. Best-effort: a build lacking the symbols just
-            // means minting stays unavailable (logged), not a crash.
-            let storageRc = bridge.setStorageCallbacks()
-            if storageRc != 0 {
-                SynheartLogger.log("[Synheart] set_storage_callbacks rc=\(storageRc); state will not persist")
-            }
-            let cryptoRc = bridge.setSdkCryptoCallbacks()
-            if cryptoRc != 0 {
-                SynheartLogger.log("[Synheart] set_crypto_callbacks rc=\(cryptoRc); device auth unavailable")
-            }
-
-            // Configure the cloud consent client so a subject-scoped token can be
-            // minted; without a base URL the cloud clients are unconfigured.
-            let cloudBaseUrl = resolvedConfig.cloudConfig?.baseUrl ?? ApiEndpoints.defaultCloudBaseUrl
-            _ = bridge.consentConfigureCloud(baseUrl: cloudBaseUrl, appId: resolvedConfig.appId)
+            _installHSICallback(on: bridge)
 
             // Self-heal: if cloud upload is already in the effective state (e.g. a
             // persisted grant), re-ensure a token for the current subject. Best-effort.
@@ -545,7 +961,78 @@ public class Synheart {
             }
         }
 
+        isConfigured = true
+
         SynheartLogger.log("[Synheart] Initialization complete. Call startSession() to begin.")
+    }
+
+    private func _configureNativeBridge(
+        _ bridge: CoreRuntimeBridge,
+        config: SynheartConfig,
+        endpoints: ServiceEndpoints
+    ) {
+        let storageRc = bridge.setStorageCallbacks()
+        if storageRc != 0 {
+            SynheartLogger.log("[Synheart] set_storage_callbacks rc=\(storageRc); state will not persist")
+        }
+        let cryptoRc = bridge.setSdkCryptoCallbacks()
+        if cryptoRc != 0 {
+            SynheartLogger.log("[Synheart] set_crypto_callbacks rc=\(cryptoRc); device auth unavailable")
+        }
+        if config.consentConfig != nil || config.cloudConfig != nil {
+            _ = bridge.consentConfigureCloud(
+                baseUrl: endpoints.consentBaseURL,
+                appId: config.appId
+            )
+        }
+    }
+
+    private func _installHSICallback(on bridge: CoreRuntimeBridge) {
+        bridge.setHsiCallback { [weak self] json in
+            guard let self = self else { return }
+            guard let consent = self._effectiveConsent(),
+                  consent.biosignals || consent.behavior || consent.phoneContext else { return }
+            guard self.hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
+            let typed = HSIState.fromJson(json, subjectId: self.subjectId ?? "")
+            self.typedHsiSubject.send(typed)
+            self.hsiSubject.send(json)
+        }
+    }
+
+    /// Clears every partially-created component so a failed initialization can
+    /// be retried without duplicate module registrations or stale callbacks.
+    private func _resetAfterInitializationFailure() async {
+        await moduleManager.disposeAll()
+
+        sessionModule?.dispose()
+        sessionModule = nil
+        sessionSubscription?.cancel()
+        sessionSubscription = nil
+        hsiToSessionCancellable?.cancel()
+        hsiToSessionCancellable = nil
+        cancellables.removeAll()
+
+        coreRuntime?.bridge?.clearHsiCallback()
+        coreRuntime = nil
+
+        capabilityModule = nil
+        consentModule = nil
+        wearModule = nil
+        phoneModule = nil
+        behaviorModule = nil
+        _activationManager = nil
+        previousConsent = nil
+        _synheartConfig = nil
+        nativeSubjectIdOverride = nil
+        currentTokenSubject = nil
+        userId = nil
+        hsiDeliveryDeduplicator.reset()
+        hsiSubject.send(nil)
+        typedHsiSubject.send(nil)
+        isConfigured = false
+        isRunning = false
+        collectionModuleFailures = [:]
+        resetUploadDiagnostics()
     }
 
     // MARK: - Session Lifecycle
@@ -565,17 +1052,46 @@ public class Synheart {
             throw SynheartError.notInitialized
         }
         guard !isRunning else { return }
-
-        SynheartLogger.log("[Synheart] Starting session...")
-
-        if let cr = coreRuntime, cr.isAvailable {
-            if let handle = cr.startSession() {
-                _currentSessionHandle = handle
+        guard let consent = _effectiveConsent() else {
+            throw SynheartError.runtimeOperationFailed(
+                "Native runtime did not provide an effective consent state"
+            )
+        }
+        let collectionFeatures = SessionStartPolicy.operationalCollectionFeatures(
+            consent: consent,
+            activated: _activationManager?.activatedFeatures() ?? [],
+            capabilityAllowed: { [weak self] feature in
+                self?._isCapabilityAllowed(feature) ?? false
             }
+        )
+        guard !collectionFeatures.isEmpty else {
+            throw SynheartError.consentRequired(
+                "Activate at least one capable collection feature and grant its matching consent before starting a session"
+            )
+        }
+        guard let cr = coreRuntime, cr.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        let dependencyDiagnostics = CoreRuntimeBridge.dependencyDiagnostics
+        guard dependencyDiagnostics.isCompatible else {
+            throw SynheartError.runtimeDependencyMissing(
+                dependencies: dependencyDiagnostics.missingRequiredDependencies
+            )
         }
 
-        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let sessionId = _currentSessionHandle?.sessionId ?? "core_\(nowMs)"
+        SynheartLogger.log("[Synheart] Starting session...")
+        _lastSessionStopReport = nil
+        collectionModuleFailures = [:]
+        hsiDeliveryDeduplicator.reset()
+        hsiSubject.send(nil)
+        typedHsiSubject.send(nil)
+
+        guard let nativeHandle = cr.startSession() else {
+            throw SynheartError.runtimeOperationFailed("Native session creation failed")
+        }
+        _currentSessionHandle = nativeHandle
+
+        let sessionId = nativeHandle.sessionId
         let durationSec = 86400
 
         let config = SessionConfig(
@@ -584,33 +1100,45 @@ public class Synheart {
             durationSec: durationSec
         )
 
-        if let module = sessionModule {
-            let stream = module.startSession(config: config)
-            sessionSubscription = stream
-                .sink(
-                    receiveCompletion: { [weak self] _ in
-                        guard let self = self else { return }
-                        if self.isRunning {
-                            self.isRunning = false
-                            self._reevaluateAllFeatures()
-                            Task { try? await self.moduleManager.stopAll() }
-                            SynheartLogger.log("[Synheart] Main session ended (duration or stream closed)")
-                        }
-                    },
-                    receiveValue: { _ in }
+        do {
+            if let module = sessionModule {
+                let stream = module.startSession(config: config)
+                sessionSubscription = stream
+                    .sink(
+                        receiveCompletion: { [weak self] _ in
+                            guard let self = self else { return }
+                            if self.isRunning {
+                                Task { try? await self._stopSession() }
+                                SynheartLogger.log("[Synheart] Main session ended (duration or stream closed)")
+                            }
+                        },
+                        receiveValue: { _ in }
+                    )
+            }
+
+            let requestedModuleIds = Set(collectionFeatures.map(moduleId))
+            let report = try await moduleManager.startModulesResiliently(requestedModuleIds)
+            collectionModuleFailures = report.failures.filter { requestedModuleIds.contains($0.key) }
+            let runningCollectors = report.runningModuleIds.intersection(requestedModuleIds)
+            guard !runningCollectors.isEmpty else {
+                let detail = collectionModuleFailures
+                    .sorted { $0.key < $1.key }
+                    .map { "\($0.key): \($0.value)" }
+                    .joined(separator: "; ")
+                throw SynheartError.runtimeOperationFailed(
+                    detail.isEmpty
+                        ? "No requested collection module became operational"
+                        : "No requested collection module became operational (\(detail))"
                 )
+            }
+            isRunning = true
+            if !collectionModuleFailures.isEmpty {
+                SynheartLogger.log("[Synheart] Session started with degraded collectors: \(collectionModuleFailures)")
+            }
+            SynheartLogger.log("[Synheart] Session started")
+        } catch {
+            try await _handleFailedSessionStart(error, runtime: cr)
         }
-
-        try await moduleManager.startAll()
-
-        if _currentSessionHandle == nil {
-            let mode = _synheartConfig?.mode ?? .personal
-            _currentSessionHandle = SessionHandle(sessionId: sessionId, startedAtMs: nowMs, mode: mode)
-        }
-
-        isRunning = true
-        _reevaluateAllFeatures()
-        SynheartLogger.log("[Synheart] Session started")
     }
 
     /**
@@ -622,14 +1150,153 @@ public class Synheart {
         try await shared._stopSession()
     }
 
-    private func _stopSession() async throws {
-        guard isRunning else { return }
+    private func _stopSession(using runtimeOverride: NativeSessionStopping? = nil) async throws {
+        _lastSessionStopPhase = "request_received"
+
+        let stateRuntime = runtimeOverride ?? coreRuntime
+        let nativeRunning = stateRuntime?.isRunning ?? false
+        let nativeSession = stateRuntime?.currentSession
+        guard isRunning || nativeRunning || _currentSessionHandle != nil || nativeSession != nil else {
+            _lastSessionStopPhase = "ignored_no_active_session"
+            return
+        }
 
         SynheartLogger.log("[Synheart] Stopping session...")
 
-        if let cr = coreRuntime, cr.isAvailable {
-            let _ = cr.stopSession()
+        let stoppedSessionHandle = _currentSessionHandle ?? nativeSession
+        let nativeStopper: NativeSessionStopping?
+        if let runtimeOverride {
+            nativeStopper = runtimeOverride
+        } else if let cr = coreRuntime, cr.isAvailable {
+            nativeStopper = cr
+        } else {
+            nativeStopper = nil
         }
+
+        var nativeResolution: SessionStopResolution?
+        if let nativeStopper {
+            // The native runtime owns the authoritative engine, artifact
+            // pipeline, and session catalog. Stop it before awaiting any Swift
+            // collector teardown so a slow or suspended module can never
+            // prevent the catalog from closing. The state-safe v2 runtime
+            // guarantees collection is off before it attempts fallible
+            // finalization, and the coordinator invokes native abort when
+            // repair is required.
+            _lastSessionStopPhase = "native_stop_started"
+            nativeResolution = await RuntimeWorkExecutor.run {
+                SessionStopCoordinator.stop(nativeStopper)
+            }
+            _lastSessionStopPhase = "native_stop_returned"
+        }
+
+        if let resolution = nativeResolution {
+            _lastSessionStopReport = resolution.effectiveReport
+            if !resolution.mayClearLocalState {
+                _lastSessionStopPhase = "native_shutdown_failed"
+                throw SynheartError.runtimeOperationFailed(
+                    "Native session shutdown failed (\(nativeShutdownFailureDescription(resolution))). "
+                        + "The active session was preserved so shutdown can be retried."
+                )
+            }
+
+            // Only publish a stopped local state after the native coordinator
+            // proves that collection is off. A failed stop/abort must retain
+            // the handle and collectors so callers can see and retry the
+            // still-active session.
+            _lastSessionStopPhase = "local_teardown_started"
+            await _finishLocalSessionStop()
+            _lastSessionStopPhase = "local_teardown_returned"
+
+            let warnings = (resolution.stopReport.failures
+                + (resolution.abortReport?.failures ?? []))
+                .map { "\($0.stage): \($0.error)" }
+                .joined(separator: "; ")
+            if !warnings.isEmpty {
+                SynheartLogger.log("[Synheart] Session stopped with native warnings: \(warnings)")
+            }
+
+            if let piConfig = _synheartConfig?.labIngestConfig,
+               piConfig.autoIngest,
+               resolution.stopReport.finalized,
+               resolution.effectiveReport.catalogClosed,
+               let handle = stoppedSessionHandle {
+                await _autoIngestSession(handle)
+            }
+            SynheartLogger.log("[Synheart] Session stopped (\(resolution.effectiveReport.status))")
+            _lastSessionStopPhase = "completed_\(resolution.effectiveReport.status)"
+            return
+        }
+
+        _lastSessionStopPhase = "local_teardown_started"
+        await _finishLocalSessionStop()
+        _lastSessionStopPhase = "local_teardown_returned"
+
+        if let piConfig = _synheartConfig?.labIngestConfig,
+           piConfig.autoIngest,
+           let handle = stoppedSessionHandle {
+            await _autoIngestSession(handle)
+        }
+        SynheartLogger.log("[Synheart] Session stopped")
+        _lastSessionStopPhase = "completed_without_native_runtime"
+    }
+
+    private func _handleFailedSessionStart(
+        _ startupError: Error,
+        runtime: NativeSessionStopping
+    ) async throws -> Never {
+        // A failed facade startup can still leave a native session alive.
+        // Stop partial Swift collectors first, then use the same native
+        // stop/abort coordinator as the public stop path.
+        if let activeId = sessionModule?.currentSessionId {
+            sessionModule?.stopSession(sessionId: activeId)
+        }
+        sessionSubscription?.cancel()
+        sessionSubscription = nil
+        await moduleManager.stopAll()
+
+        _lastSessionStopPhase = "startup_rollback_native_stop_started"
+        let resolution = await RuntimeWorkExecutor.run {
+            SessionStopCoordinator.stop(runtime)
+        }
+        _lastSessionStopReport = resolution.effectiveReport
+        _lastSessionStopPhase = "startup_rollback_native_stop_returned"
+
+        guard resolution.mayClearLocalState else {
+            // Native ownership is unresolved. Preserve the handle and report
+            // the session as active even though partial Swift collectors were
+            // stopped, allowing stopSession() to retry native shutdown.
+            isRunning = true
+            _lastSessionStopPhase = "startup_rollback_native_shutdown_failed"
+            throw SynheartError.runtimeOperationFailed(
+                "Session startup failed (\(startupError.localizedDescription)); "
+                    + "native rollback also failed (\(nativeShutdownFailureDescription(resolution))). "
+                    + "The native session remains active and stopSession() must be retried."
+            )
+        }
+
+        _currentSessionHandle = nil
+        isRunning = false
+        collectionModuleFailures = [:]
+        _reevaluateAllFeatures()
+        _lastSessionStopPhase = "startup_rollback_completed"
+        throw startupError
+    }
+
+    private func nativeShutdownFailureDescription(_ resolution: SessionStopResolution) -> String {
+        var parts = ["stop=\(resolution.stopReport.status)"]
+        if let abortReport = resolution.abortReport {
+            parts.append("abort=\(abortReport.status)")
+        }
+        let failures = (resolution.stopReport.failures
+            + (resolution.abortReport?.failures ?? []))
+            .map { "\($0.stage): \($0.error)" }
+        parts.append(contentsOf: failures)
+        return parts.joined(separator: "; ")
+    }
+
+    private func _finishLocalSessionStop() async {
+        isRunning = false
+        collectionModuleFailures = [:]
 
         if let activeId = sessionModule?.currentSessionId {
             sessionModule?.stopSession(sessionId: activeId)
@@ -637,20 +1304,42 @@ public class Synheart {
         sessionSubscription?.cancel()
         sessionSubscription = nil
 
-        if let piConfig = _synheartConfig?.labIngestConfig, piConfig.autoIngest, let handle = _currentSessionHandle {
-            await _autoIngestSession(handle)
-        }
-
         _currentSessionHandle = nil
 
-        isRunning = false
+        await moduleManager.stopAll()
         _reevaluateAllFeatures()
-        try await moduleManager.stopAll()
-        SynheartLogger.log("[Synheart] Session stopped")
     }
 
-    private func _autoIngestSession(_ session: SessionHandle) async {
-        coreRuntime?.bridge?.flushUploads()
+    private func _autoIngestSession(_: SessionHandle) async {
+        _ = await _flushUploads(requireConsent: true)
+    }
+
+    // Internal facade hooks keep failure-path tests at the public state
+    // boundary without exposing test controls as SDK API.
+    static func _setSessionStateForTesting(handle: SessionHandle?, running: Bool) {
+        shared._currentSessionHandle = handle
+        shared.isRunning = running
+        shared._lastSessionStopReport = nil
+        shared._lastSessionStopPhase = "idle"
+    }
+
+    static func _resetSessionStateForTesting() {
+        shared._currentSessionHandle = nil
+        shared.isRunning = false
+        shared._lastSessionStopReport = nil
+        shared._lastSessionStopPhase = "idle"
+        shared.collectionModuleFailures = [:]
+    }
+
+    static func _stopSessionForTesting(using runtime: NativeSessionStopping) async throws {
+        try await shared._stopSession(using: runtime)
+    }
+
+    static func _failSessionStartForTesting(
+        _ error: Error,
+        runtime: NativeSessionStopping
+    ) async throws {
+        try await shared._handleFailedSessionStart(error, runtime: runtime)
     }
 
     // MARK: - Session Module Access
@@ -676,16 +1365,10 @@ public class Synheart {
     }
 
     private func _hasConsent(_ consentType: String) async -> Bool {
-        guard let consentModule = consentModule else { return false }
-
-        let consent = consentModule.current()
-        switch consentType {
-        case "biosignals":  return consent.biosignals
-        case "behavior":    return consent.behavior
-        case "phoneContext": return consent.phoneContext
-        case "cloudUpload": return consent.cloudUpload
-        default:            return false
-        }
+        guard let type = nativeConsentType(for: consentType),
+              let runtime = coreRuntime,
+              runtime.isAvailable else { return false }
+        return runtime.hasConsent(type.rawValue)
     }
 
     /// Grant consent for a specific data type.
@@ -703,6 +1386,10 @@ public class Synheart {
         guard let consentModule = consentModule else {
             throw SynheartError.notInitialized
         }
+        guard nativeConsentType(for: consentType) != nil else { return }
+        guard let coreRuntime, coreRuntime.isAvailable else {
+            throw SynheartError.notInitialized
+        }
 
         let current = consentModule.current()
         let updated: ConsentSnapshot
@@ -716,12 +1403,18 @@ public class Synheart {
         default:            updated = current
         }
 
-        try await consentModule.updateConsent(updated)
+        if let error = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.apply(updated, replacing: current, through: coreRuntime)
+        }) {
+            throw error
+        }
+        try await _refreshEffectiveConsent()
 
         // Granting cloud upload should immediately mint a consent token for the
         // current subject so pending data can flush. Best-effort.
         if consentType == "cloudUpload" {
             _ = await _ensureCloudConsentReady()
+            try await _refreshEffectiveConsent()
         }
     }
 
@@ -741,6 +1434,10 @@ public class Synheart {
         guard let consentModule = consentModule else {
             throw SynheartError.notInitialized
         }
+        guard nativeConsentType(for: consentType) != nil else { return }
+        guard let coreRuntime, coreRuntime.isAvailable else {
+            throw SynheartError.notInitialized
+        }
 
         let current = consentModule.current()
         let updated: ConsentSnapshot
@@ -754,7 +1451,23 @@ public class Synheart {
         default:            updated = current
         }
 
-        try await consentModule.updateConsent(updated)
+        if let error = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.apply(updated, replacing: current, through: coreRuntime)
+        }) {
+            throw error
+        }
+        try await _refreshEffectiveConsent()
+    }
+
+    private func nativeConsentType(for publicName: String) -> ConsentType? {
+        switch publicName {
+        case "biosignals": return .biosignals
+        case "behavior": return .behavior
+        case "phoneContext": return .phoneContext
+        case "cloudUpload": return .cloudUpload
+        case "syni": return .syni
+        default: return nil
+        }
     }
 
     // MARK: - Cloud Consent Token
@@ -893,12 +1606,116 @@ public class Synheart {
         shared.consentModule?.current()
     }
 
-    /// Update consent.
-    public static func updateConsent(_ consent: ConsentSnapshot) async throws {
-        guard let consentModule = shared.consentModule else {
+    /// Runtime-owned editable consent form. Hosts should edit this value and
+    /// submit it with ``submitConsentForm(_:deviceId:platform:userId:)``.
+    public static var editableConsentForm: ConsentForm? {
+        guard let json = shared.coreRuntime?.bridge?.consentEditableForm(),
+              let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ConsentForm.self, from: data)
+    }
+
+    /// Consent state currently enforced by the native runtime after local
+    /// choices, app policy, and any cloud token are reconciled.
+    public static var effectiveConsent: ConsentEffectiveState? {
+        shared._effectiveConsent()
+    }
+
+    private func _effectiveConsent() -> ConsentEffectiveState? {
+        guard let json = coreRuntime?.bridge?.consentEffectiveState(),
+              let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ConsentEffectiveState.self, from: data)
+    }
+
+    private func _refreshEffectiveConsent() async throws {
+        guard let consentModule else { throw SynheartError.notInitialized }
+        guard let effective = _effectiveConsent() else {
+            try await consentModule.updateConsent(.none())
+            throw SynheartError.runtimeOperationFailed(
+                "Native runtime did not provide an effective consent state"
+            )
+        }
+        try await consentModule.updateConsent(effective.snapshot)
+    }
+
+    /// Submit a category-level consent form using the native runtime's
+    /// offline-first flow, then refresh the Swift consent snapshot from the
+    /// runtime's effective state.
+    @discardableResult
+    public static func submitConsentForm(
+        _ form: ConsentForm,
+        deviceId: String? = nil,
+        platform: String? = nil,
+        userId: String? = nil
+    ) async throws -> ConsentSubmissionResult {
+        try await shared._submitConsentForm(
+            form,
+            deviceId: deviceId,
+            platform: platform,
+            userId: userId
+        )
+    }
+
+    private func _submitConsentForm(
+        _ form: ConsentForm,
+        deviceId: String?,
+        platform: String?,
+        userId: String?
+    ) async throws -> ConsentSubmissionResult {
+        guard let bridge = coreRuntime?.bridge, consentModule != nil else {
             throw SynheartError.notInitialized
         }
-        try await consentModule.updateConsent(consent)
+        if form.allowCloud, _synheartConfig?.deviceAuthConfig != nil {
+            let registration = await _ensureDeviceAuthRegistered()
+            if !registration.success {
+                SynheartLogger.log(
+                    "[Synheart] Cloud consent saved locally; device registration is not ready: "
+                        + (registration.failure?.message ?? registration.status.status)
+                )
+            }
+        }
+        let data = try JSONEncoder().encode(form)
+        guard let formJSON = String(data: data, encoding: .utf8) else {
+            throw SynheartError.invalidArgument("Consent form could not be encoded")
+        }
+        let configuredConsent = _synheartConfig?.consentConfig
+        let resolvedDeviceId = deviceId ?? configuredConsent?.deviceId ?? _synheartConfig?.deviceId
+        let resolvedPlatform = platform ?? configuredConsent?.platform ?? _synheartConfig?.platform ?? "ios"
+        let resolvedUserId = userId ?? configuredConsent?.userId ?? subjectId
+
+        guard let resultJSON = await RuntimeWorkExecutor.run({
+            bridge.consentSubmitForm(
+                deviceId: resolvedDeviceId,
+                platform: resolvedPlatform,
+                userId: resolvedUserId,
+                formJson: formJSON
+            )
+        }) else {
+            throw SynheartError.runtimeOperationFailed("Native consent submission returned no result")
+        }
+        let result = try ConsentSubmissionResult(json: resultJSON)
+        if let error = result.error {
+            throw SynheartError.runtimeOperationFailed("Native consent submission failed: \(error)")
+        }
+        try await _refreshEffectiveConsent()
+        return result
+    }
+
+    /// Update consent.
+    public static func updateConsent(_ consent: ConsentSnapshot) async throws {
+        try await shared._updateConsent(consent)
+    }
+
+    private func _updateConsent(_ consent: ConsentSnapshot) async throws {
+        guard let consentModule, let coreRuntime, coreRuntime.isAvailable else {
+            throw SynheartError.notInitialized
+        }
+        let current = consentModule.current()
+        if let error = await RuntimeWorkExecutor.run({
+            ConsentRuntimeCoordinator.apply(consent, replacing: current, through: coreRuntime)
+        }) {
+            throw error
+        }
+        try await _refreshEffectiveConsent()
     }
 
     // MARK: - SRM API
@@ -924,18 +1741,32 @@ public class Synheart {
         shared.coreRuntime?.bridge?.loadSrmSnapshot(json: json) ?? false
     }
 
-    /// Get the native synheart-engine version, or `nil` if unavailable.
+    /// Get the native core runtime version, or `nil` if unavailable.
+    ///
+    /// Build metadata is authoritative. Diagnostics is retained as a fallback
+    /// for older runtimes that exposed the version only in that payload.
     public static var runtimeVersion: String? {
-        guard let diag = shared.coreRuntime?.diagnostics(),
-              let version = diag["version"] as? String else { return nil }
-        return version
+        RuntimeVersionResolver.resolve(
+            buildInfo: runtimeBuildInfo,
+            diagnostics: shared.coreRuntime?.diagnostics()
+        )
+    }
+
+    /// Exact native runtime build provenance when supported by the linked ABI.
+    public static var runtimeBuildInfo: [String: Any]? {
+        guard let json = shared.coreRuntime?.bridge?.buildInfo() else { return nil }
+        return shared.parseDict(json)
     }
 
     // MARK: - Sensor Push
 
-    /// Push an RR interval to the core runtime.
-    public static func pushRr(tsMs: Int64, rrMs: Double) {
-        shared.coreRuntime?.pushRr(tsMs: tsMs, rrMs: rrMs)
+    /// Push an RR interval to the core runtime with its sensor provider label.
+    public static func pushRr(
+        tsMs: Int64,
+        rrMs: Double,
+        provider: String = "default_sensor"
+    ) {
+        shared.coreRuntime?.pushRr(tsMs: tsMs, rrMs: rrMs, provider: provider)
     }
 
     /// Push a heart rate sample to the core runtime.
@@ -1004,18 +1835,21 @@ public class Synheart {
     }
 
     private func _hasConsentForFeature(_ feature: SynheartFeature) -> Bool {
-        guard let consent = consentModule?.current() else { return false }
+        guard let consent = _effectiveConsent() else { return false }
         switch feature.requiredConsent {
-        case "biosignals":  return consent.biosignals
-        case "behavior":    return consent.behavior
-        case "phoneContext": return consent.phoneContext
-        case "cloudUpload": return consent.cloudUpload
-        case "syni":        return consent.syni
+        case "biosignals":  return consent.allows(.biosignals)
+        case "behavior":    return consent.allows(.behavior)
+        case "phoneContext": return consent.allows(.phoneContext)
+        case "cloudUpload": return consent.allows(.cloudUpload)
+        case "syni":        return consent.allows(.syni)
         default:            return false
         }
     }
 
     private func _isCapabilityAllowed(_ feature: SynheartFeature) -> Bool {
+        guard _synheartConfig?.deviceRole.supportedFeatures.contains(feature) == true else {
+            return false
+        }
         guard let cap = capabilityModule else { return false }
         switch feature {
         case .wear:         return cap.capability(.wear) != .none
@@ -1023,6 +1857,16 @@ public class Synheart {
         case .phoneContext: return cap.capability(.phone) != .none
         case .cloud:        return cap.capability(.cloud) != .none
         case .syni:         return true
+        }
+    }
+
+    private func moduleId(for feature: SynheartFeature) -> String {
+        switch feature {
+        case .wear: return "wear"
+        case .behavior: return "behavior"
+        case .phoneContext: return "phone"
+        case .cloud: return "cloud"
+        case .syni: return "syni"
         }
     }
 
@@ -1040,7 +1884,7 @@ public class Synheart {
 
     private func _dispose() async throws {
         try await _stopSession()
-        try await moduleManager.disposeAll()
+        await moduleManager.disposeAll()
 
         sessionModule?.dispose()
         sessionModule = nil
@@ -1059,6 +1903,10 @@ public class Synheart {
         coreRuntime?.bridge?.clearHsiCallback()
         coreRuntime = nil
 
+        hsiDeliveryDeduplicator.reset()
+        hsiSubject.send(nil)
+        typedHsiSubject.send(nil)
+
         consentModule = nil
         capabilityModule = nil
         wearModule = nil
@@ -1068,6 +1916,8 @@ public class Synheart {
         previousConsent = nil
         isConfigured = false
         isRunning = false
+        collectionModuleFailures = [:]
+        resetUploadDiagnostics()
 
         SynheartLogger.log("[Synheart] Disposed")
     }
@@ -1078,6 +1928,40 @@ public class Synheart {
 public enum SynheartError: Error {
     case notInitialized
     case alreadyConfigured
+    case runtimeIncompatible(missingSymbols: [String])
+    case runtimeCreationFailed(message: String?)
+    case runtimeDependencyMissing(dependencies: [String])
+    case invalidArgument(String)
+    case runtimeOperationFailed(String)
+    case consentRequired(String)
     case notImplemented(String)
     case capabilityTokenRequired
+}
+
+extension SynheartError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .notInitialized:
+            return "Synheart is not initialized"
+        case .alreadyConfigured:
+            return "Synheart is already configured"
+        case let .runtimeIncompatible(missingSymbols):
+            return "Native runtime is missing required symbols: \(missingSymbols.joined(separator: ", "))"
+        case let .runtimeCreationFailed(message):
+            return message.map { "Native runtime initialization failed: \($0)" }
+                ?? "Native runtime initialization failed"
+        case let .runtimeDependencyMissing(dependencies):
+            return "Native runtime dependency is missing: \(dependencies.joined(separator: ", ")). Link and force-load it in the host app before starting a session."
+        case let .invalidArgument(message):
+            return "Invalid argument: \(message)"
+        case let .runtimeOperationFailed(message):
+            return message
+        case let .consentRequired(message):
+            return message
+        case let .notImplemented(message):
+            return "Not implemented: \(message)"
+        case .capabilityTokenRequired:
+            return "A verified capability token or device authentication is required"
+        }
+    }
 }

@@ -33,7 +33,9 @@ public class WearModule: BaseSynheartModule, RawWearDataProvider {
     ) {
         self.capabilities = capabilities
         self.consent = consent
-        self.sources = sources ?? [MockWearSourceHandler()]
+        // Production callers must explicitly provide real sources. Synthetic
+        // data is available only when a caller deliberately injects a mock.
+        self.sources = sources ?? []
         super.init(moduleId: "wear")
     }
 
@@ -94,7 +96,7 @@ public class WearModule: BaseSynheartModule, RawWearDataProvider {
 
     // MARK: - SynheartModule
 
-    public override func initialize() async throws {
+    public override func onInitialize() async throws {
         SynheartLogger.log("[WearModule] Initializing wear sources...")
 
         for source in sources {
@@ -109,8 +111,12 @@ public class WearModule: BaseSynheartModule, RawWearDataProvider {
         }
     }
 
-    public override func start() async throws {
+    public override func onStart() async throws {
         SynheartLogger.log("[WearModule] Starting wear data collection...")
+        guard consent.current().biosignals else {
+            SynheartLogger.log("[WearModule] Biosignal consent is not granted; collection remains stopped")
+            return
+        }
 
         // Track vendor sync consent changes
         consent.observe()
@@ -133,26 +139,23 @@ public class WearModule: BaseSynheartModule, RawWearDataProvider {
                         }
                     },
                     receiveValue: { [weak self] sample in
-                        self?.cache.addSample(sample)
-                        self?.rawSampleSubject.send(sample)
+                        guard let self, self.consent.current().biosignals else { return }
+                        self.cache.addSample(sample)
+                        self.rawSampleSubject.send(sample)
                     }
                 )
                 .store(in: &cancellables)
-
-            if let mockSource = source as? MockWearSourceHandler {
-                mockSource.startGenerating()
-            }
         }
 
         SynheartLogger.log("[WearModule] Started \(cancellables.count) wear sources")
     }
 
-    public override func stop() async throws {
+    public override func onStop() async throws {
         SynheartLogger.log("[WearModule] Stopping wear data collection...")
         cancellables.removeAll()
     }
 
-    public override func dispose() async throws {
+    public override func onDispose() async throws {
         SynheartLogger.log("[WearModule] Disposing wear module...")
         for source in sources {
             do {

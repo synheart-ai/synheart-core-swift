@@ -11,7 +11,7 @@ env:
 
 jobs:
   build-test:
-    name: Build & Test (${{ matrix.os }})
+    name: SwiftPM & Source-only Example (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,6 +28,9 @@ jobs:
       - name: Resolve dependencies
         run: swift package resolve
 
+      - name: Check source package artifacts
+        run: bash scripts/check-source-package.sh
+
       - name: Build
         run: swift build -v
 
@@ -39,6 +42,28 @@ jobs:
             echo "No Tests directory found, skipping"
           fi
 
+      - name: Prepare source-only iOS example app
+        run: |
+          # The native runtime is distributed out of band and intentionally is
+          # not present in a source checkout. Deintegrating the ignored local
+          # pod validates that the example still builds safely without it.
+          if ! command -v pod >/dev/null 2>&1; then
+            brew install cocoapods
+          fi
+          pod deintegrate ExampleApp/SynheartExample.xcodeproj
+
+      - name: Build source-only iOS example app
+        run: |
+          xcodebuild -quiet \
+            -project ExampleApp/SynheartExample.xcodeproj \
+            -scheme SynheartExample \
+            -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
   lint:
     name: Lint
     runs-on: macos-latest
@@ -47,9 +72,4 @@ jobs:
       - name: Install SwiftLint
         run: brew install swiftlint
       - name: SwiftLint
-        run: |
-          if [ -f ".swiftlint.yml" ]; then
-            swiftlint --strict
-          else
-            echo "No .swiftlint.yml — skipping"
-          fi
+        run: swiftlint lint --strict --config .swiftlint.yml

@@ -62,9 +62,9 @@ public class ConsentModule: BaseSynheartModule, ConsentProvider {
 
     public func updateConsentType(_ type: ConsentType, granted: Bool) async throws {
         if granted {
-            bridge?.grantConsent(type: type.rawValue)
+            _ = bridge?.grantConsent(type: type.rawValue)
         } else {
-            bridge?.revokeConsent(type: type.rawValue)
+            _ = bridge?.revokeConsent(type: type.rawValue)
         }
 
         if let json = bridge?.currentConsent(),

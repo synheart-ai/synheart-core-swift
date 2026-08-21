@@ -5,20 +5,86 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - Unreleased
 
 ### Added
 - **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
   `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
   consent token scoped to the current subject (configure-cloud on init,
   mint-on-grant, init self-heal) so uploads are attributed to that subject.
+- Runtime symbol diagnostics that distinguish required ABI symbols from
+  optional capabilities and fail initialization with an actionable
+  compatibility error when the linked runtime is incomplete.
+- Runtime-backed session catalog, HSI-window, storage-usage, retention,
+  orphan-repair, sync-status, and sync-conflict handling.
+- A runnable SwiftUI iOS example app covering configuration, consent/session
+  lifecycle, real collection evidence, live HSI 1.3 state, native upload queue,
+  device registration, storage, and runtime ABI diagnostics. CI builds the
+  example against the local package on an iOS simulator target.
+- Typed editable/effective consent models, collector startup reports, real
+  behavior/motion publishers, and upload/device-auth diagnostic results.
 
 ### Changed
 - Account deletion (`requestAccountDeletion` / `cancelAccountDeletion`) now goes
   through the native runtime's device-signed request instead of an in-process
   bearer token. Request signing is backed by `synheart-auth-swift`.
+- **BREAKING:** research-study enrolment, validation, withdrawal, and data
+  deletion methods are now `async`; their native network calls execute away
+  from the caller executor, matching the Flutter API contract.
+- Sync, upload flush, local wipe, and account-deletion runtime work now executes
+  on a serial utility queue instead of blocking the caller executor.
+- Native runtime configuration is built in one place and uses durable
+  application-support storage. Bundle secrets are no longer forwarded to the
+  native runtime.
+- Starting a session now requires collection consent and a real native session
+  handle. A runtime failure is no longer hidden by a synthetic handle.
+- **BREAKING:** session start now requires at least one collection feature with
+  matching developer activation, user consent, device-role support, and SDK
+  capability. Registered collectors are no longer started unconditionally.
+- Device-auth configuration now uses provisional SDK capability defaults while
+  the native runtime performs registration and consent-token enforcement. The
+  static bundle capability-token/secret path is deprecated for new apps.
+- **BREAKING:** `Synheart.logout()` is now `async throws`; it revokes native
+  grants and clears persisted consent tokens before changing Swift-visible state.
+- Phone collectors are injectable. Production defaults use CoreMotion and app
+  lifecycle notifications, while unavailable system-wide app/notification data
+  remains idle instead of being fabricated.
+
+### Fixed
+- Native FFI declarations and symbol names now match the current runtime ABI,
+  including RR providers, lab-window functions, wearable SRM functions, and
+  runtime-owned callback strings.
+- Initialization is concurrency-safe, retryable after failure, and reports
+  native creation errors truthfully.
+- Failed session/module starts roll back partially allocated resources and can
+  be retried. Wear, Phone, and Behavior now participate in the shared lifecycle
+  state machine instead of bypassing it.
+- Wear collection no longer injects a mock source in production by default.
+- HSI 1.3 payloads parse canonical domain arrays, IDs, timestamps, modalities,
+  and tiers; duplicate native deliveries are suppressed by HSI ID. Typed state
+  is parsed once per delivery and malformed JSON is reported explicitly.
+- Independent collectors now start resiliently: one failed collector is
+  reported without stopping healthy siblings.
+- Local-only initialization no longer configures cloud auth/consent clients.
+- Sync and privacy APIs no longer report placeholder or successful outcomes
+  when the native operation failed.
+- Legacy capability tokens are rejected when expired, not yet valid,
+  unverifiable, or rejected by the native signature verifier.
+- Phone and Wear callbacks recheck consent before caching or publishing data.
+- Consent updates are native-first, compensate partial failures, restore native
+  state during initialization, and never enable Swift collection after native
+  rejection.
+- Custom platform origins now configure native ingest/sync plus Swift auth and
+  consent consistently; storage retention is forwarded to the native runtime.
+- Failed native session stops preserve the active Swift/native session handle.
+- HSI 1.3 digital axes (`focus_quality`, `interruption_pressure`, and
+  `interaction_mode`) are available as typed values.
+- The external-PR membership check leaves PRs open when private membership
+  cannot be verified. CI now runs a real SwiftLint config and rejects binary or
+  oversized artifacts from the source package.
 
 ### Removed
+- The production mock wearable source and its random physiological samples.
 - **BREAKING:** deprecated `PhoneContextConsent.motion` / `.screenState` aliases —
   use `deviceMotion` / `systemState`.
 - Internal migration stubs (stub `SynheartAuth` / `SignedHeadersStub` /
@@ -157,6 +223,7 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.0.5...HEAD
+[0.2.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.1.0
 [0.0.5]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.0.5
 [0.0.4]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.0.4

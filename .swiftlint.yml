@@ -1,0 +1,18 @@
+included:
+  - SynheartCore
+  - Tests
+  - ExampleApp/SynheartExample
+
+excluded:
+  - .build
+  - ExampleApp/SynheartExample.xcodeproj
+
+only_rules:
+  - duplicate_imports
+  - empty_count
+  - empty_string
+  - trailing_newline
+  - unneeded_override
+  - unused_optional_binding
+
+reporter: xcode

@@ -2,6 +2,14 @@ import XCTest
 @testable import SynheartCore
 
 final class HSIStateTests: XCTestCase {
+    func testMalformedPayloadReportsParseErrorRatherThanLookingLikeEmptyEvidence() {
+        let state = HSIState.fromJson("not-json", subjectId: "subject")
+
+        XCTAssertNotNil(state.parseError)
+        XCTAssertEqual(state.subjectId, "subject")
+        XCTAssertNil(state.hsi.focus)
+    }
+
 
     func testParsesNestedHSIJson() {
         let json = """
@@ -46,5 +54,91 @@ final class HSIStateTests: XCTestCase {
         """
         let state = HSIState.fromJson(json)
         XCTAssertEqual(state.timestampMs, 1234567890000)
+    }
+
+    func testParsesCanonicalHSI13DomainsAndIdentity() {
+        let json = """
+        {
+          "hsi_version":"1.3",
+          "subject_id":"usr_v13",
+          "observed_at_utc":"2026-05-01T09:01:00Z",
+          "axes":{
+            "cognitive":[
+              {"name":"focus","score":0.71,"confidence":0.6},
+              {"name":"capacity","score":0.55,"confidence":0.58}
+            ],
+            "affective":[
+              {"name":"arousal","score":0.45,"confidence":0.5},
+              {"name":"stress","score":0.38,"confidence":0.55}
+            ],
+            "physiological":[
+              {"name":"sleep_score","score":0.42,"confidence":0.9}
+            ]
+          },
+          "meta":{
+            "ids":{"hsi_id":"window-v13"},
+            "provenance":{"sources":{
+              "watch":{"signals":["hrv","accel"],"source_tier":2},
+              "phone":{"signals":["touch"]}
+            }},
+            "synheart":{"tiers":{"kinematic":1,"digital":3}}
+          }
+        }
+        """
+
+        let state = HSIState.fromJson(json)
+
+        XCTAssertEqual(state.hsiVersion, "1.3")
+        XCTAssertEqual(state.hsiId, "window-v13")
+        XCTAssertEqual(state.subjectId, "usr_v13")
+        XCTAssertEqual(state.timestampMs, 1_777_626_060_000)
+        XCTAssertEqual(state.hsi.focus?.value, 0.71)
+        XCTAssertEqual(state.hsi.capacity?.value, 0.55)
+        XCTAssertEqual(state.hsi.arousal?.value, 0.45)
+        XCTAssertEqual(state.hsi.stress?.value, 0.38)
+        XCTAssertEqual(state.hsi.sleep?.value, 0.42)
+        XCTAssertTrue(state.modalities.physiological)
+        XCTAssertTrue(state.modalities.kinematic)
+        XCTAssertTrue(state.modalities.digital)
+        XCTAssertEqual(state.tiers.physiological, 2)
+        XCTAssertEqual(state.tiers.kinematic, 1)
+        XCTAssertEqual(state.tiers.digital, 3)
+    }
+
+    func testCanonicalNullScoreDoesNotBecomeZero() {
+        let json = """
+        {"hsi_version":"1.3","axes":{"cognitive":[
+          {"name":"focus","score":null,"confidence":0.5}
+        ]}}
+        """
+
+        XCTAssertNil(HSIState.fromJson(json).hsi.focus)
+    }
+
+    func testCanonicalPayloadNeverFallsBackToLegacyAxes() {
+        let json = """
+        {"hsi_version":"1.3","hsi":{"focus":{"value":0.99,"confidence":1}},
+         "axes":{"cognitive":[{"name":"focus","score":0.5,"confidence":0.4}]}}
+        """
+
+        XCTAssertEqual(HSIState.fromJson(json).hsi.focus?.value, 0.5)
+    }
+
+    func testParsesCanonicalHSI13DigitalOnlyAxes() {
+        let json = """
+        {"hsi_version":"1.3","axes":{"digital":[
+          {"name":"focus_quality","score":0.81,"confidence":0.7},
+          {"name":"interruption_pressure","score":0.36,"confidence":0.8},
+          {"name":"interaction_mode","score":0.62,"confidence":0.9}
+        ]}}
+        """
+
+        let axes = HSIState.fromJson(json).hsi
+
+        XCTAssertEqual(axes.focusQuality?.value, 0.81)
+        XCTAssertEqual(axes.interruptionPressure?.value, 0.36)
+        XCTAssertEqual(axes.interactionMode?.value, 0.62)
+        XCTAssertNil(axes.focus)
+        XCTAssertNil(axes.stress)
     }
 }
