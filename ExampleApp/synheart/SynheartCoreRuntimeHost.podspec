@@ -1,3 +1,21 @@
+runtime_relative_path = 'vendor/runtime/ios/SynheartCoreRuntime.xcframework'
+runtime_framework_path = File.expand_path(runtime_relative_path, __dir__)
+
+unless File.directory?(runtime_framework_path)
+  raise Pod::Informative, <<~MESSAGE
+    SynheartCoreRuntimeHost could not find the native runtime.
+
+    Expected:
+      #{runtime_framework_path}
+
+    From the synheart-core-swift repository root, install it with:
+      synheart runtime install --from /path/to/runtime-dist --project ExampleApp
+
+    Then run:
+      cd ExampleApp && pod install
+  MESSAGE
+end
+
 Pod::Spec.new do |s|
   s.name             = 'SynheartCoreRuntimeHost'
   s.version          = '0.2.0'
@@ -11,7 +29,7 @@ Pod::Spec.new do |s|
 
   # Installed by:
   #   synheart runtime install --from /path/to/runtime-dist --project ExampleApp
-  s.vendored_frameworks = 'vendor/runtime/ios/SynheartCoreRuntime.xcframework'
+  s.vendored_frameworks = runtime_relative_path
 
   s.user_target_xcconfig = {
     'STRIP_STYLE' => 'non-global',

@@ -10,29 +10,95 @@ important runtime boundaries visible:
 - native upload queue state, device registration, attestation, and flush errors;
 - runtime ABI, storage, session catalog, and orphan-session diagnostics.
 
+## Requirements
+
+- Xcode with an iOS 16 or newer SDK;
+- CocoaPods 1.16 or newer (`pod install` for native-runtime mode and
+  `pod deintegrate` for source-only mode);
+- Apple Silicon when running the native runtime in the iOS Simulator.
+
+The distributed runtime currently contains `arm64` device and `arm64`
+simulator slices. It can build for a physical iPhone from an Intel Mac, but its
+simulator framework does not contain an `x86_64` slice.
+
 ## Build and run
 
-1. Open `SynheartExample.xcodeproj` in Xcode.
+The example supports two intentionally different integration modes. Choose one
+before opening it in Xcode.
+
+### Native-runtime mode (recommended)
+
+Use this mode to initialize the SDK, collect data, generate HSI, and exercise
+local storage or cloud ingestion. From the repository root:
+
+```bash
+synheart runtime install --from /path/to/runtime-dist --project ExampleApp
+cd ExampleApp
+pod install
+```
+
+The CLI must install the framework at:
+
+```text
+ExampleApp/synheart/vendor/runtime/ios/SynheartCoreRuntime.xcframework
+```
+
+That exact path is consumed by `SynheartCoreRuntimeHost.podspec` and excluded
+from Git. If you copy a runtime manually, copy the complete XCFramework to that
+location; do not add it separately under **Frameworks, Libraries, and Embedded
+Content** because CocoaPods owns the embedding step.
+
+After `pod install`:
+
+1. Open `ExampleApp/SynheartExample.xcworkspace` in Xcode, not the
+   `.xcodeproj`.
 2. Select the `SynheartExample` scheme and an iOS 16+ simulator or device.
-3. Link/embed the current native runtime. Without it, the app still opens and
-   the Diagnostics tab lists the missing native symbols.
-4. Run the app and tap **Initialize SDK**.
+3. Run the app and tap **Initialize SDK**.
+
+The committed Xcode project contains the CocoaPods integration, while the
+generated `Pods/`, workspace, and native runtime remain ignored. A clean
+checkout must therefore install the runtime and run `pod install` before the
+workspace can be built.
+
+### Source-only diagnostic mode
+
+Use this mode to inspect the UI or verify that missing native dependencies are
+reported safely. Sessions, storage, HSI, and cloud ingestion are unavailable
+without the native runtime. This is the mode built by GitHub CI.
+
+On a disposable checkout, remove the committed CocoaPods integration and build
+the project directly:
+
+```bash
+pod deintegrate ExampleApp/SynheartExample.xcodeproj
+xcodebuild -quiet \
+  -project ExampleApp/SynheartExample.xcodeproj \
+  -scheme SynheartExample \
+  -destination 'generic/platform=iOS Simulator' \
+  ARCHS=arm64 \
+  ONLY_ACTIVE_ARCH=YES \
+  IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+`pod deintegrate` modifies the tracked Xcode project, which is why this command
+is intended for an ephemeral CI or disposable checkout rather than switching a
+working native-runtime checkout back and forth.
 
 The app persists one pseudonymous subject ID and one device ID in
 `UserDefaults`. They do not change every time the view or app is recreated.
 
-### Install a local native runtime
+The example's local pod embeds that XCFramework and installs
+`onnxruntime-c`. For stable/lab runtimes it also force-loads ONNX Runtime so
+`OrtGetApiBase` cannot be stripped from the app. Without this link step, older
+host packaging allowed initialization but crashed when a session first created
+the ONNX pipeline. The SDK now blocks that call and reports the missing host
+dependency in **Diagnostics**.
 
-Install a built distribution with the Synheart CLI:
-
-```bash
-synheart runtime install --from /path/to/runtime-dist --project ExampleApp
-```
-
-For sibling-repository development, build the XCFramework from the native
-runtime repository with `make ios`, add
-`build/ios-edge/SynheartCoreRuntime.xcframework` to **Frameworks, Libraries,
-and Embedded Content**, and use **Embed & Sign** for a physical device.
+An edge runtime does not use ONNX and is detected automatically, so it does not
+require `onnxruntime-c` at session start even though the example installation
+keeps the dependency available.
 
 ## Easy local ingestion test
 
@@ -66,22 +132,39 @@ Required values:
 ```text
 SYNHEART_APP_ID
 SYNHEART_BASE_URL
-SYNHEART_AUTH_BASE_URL
+SYNHEART_AUTH_URL
 SYNHEART_CONSENT_BASE_URL
 SYNHEART_ORG_ID
 SYNHEART_PACKAGE_NAME
 ```
 
+`SYNHEART_AUTH_BASE_URL` remains accepted as a compatibility alias.
+`SYNHEART_TENANT_ID` and `SYNHEART_PROJECT_ID` may also be supplied so the
+example can display the complete credentials context, but the current SDK does
+not send those two values to the runtime.
+
+The platform `app_…` identifier and `SYNHEART_PACKAGE_NAME` are different:
+the latter must equal the installed app's bundle identifier. Use a dedicated
+development app ID for Debug testing.
+
 Then:
 
 1. Add the **App Attest** capability under Signing & Capabilities.
-2. Initialize and confirm the app says **Cloud test**.
-3. Tap **Register Device** and inspect its registration and attestation state.
-4. Enable a collection category and **Cloud upload**.
-5. Start a session and wait for a closed HSI window.
-6. Open **Data**. The native queue should update automatically.
-7. Tap **Flush Upload Queue** and inspect uploaded/requeued counts or the typed
-   native failure reason.
+2. Open **Data** and follow the **Guided cloud ingestion test** card. Its single
+   action advances through SDK initialization, the cloud-upload choice that
+   triggers device registration, effective cloud authorization, Behavior
+   consent, real session collection, finalization, and queue flush.
+3. While collection is running, interact with the app for about 60 seconds.
+   Stop when HSI deliveries begin appearing so the runtime can finalize the
+   session artifacts.
+4. Confirm the card reaches **Cloud ingestion verified**. Expand **Technical
+   details** for queue state, timestamps, batch ID, upload counts, typed failure
+   information, and a copyable diagnostic report.
+
+The card reports local-only configuration as an informational state, identifies
+the exact blocked prerequisite, and never treats a successful zero-artifact
+flush as proof of ingestion. A new guided run must produce a newer successful
+upload before it is marked verified.
 
 Do not manually enqueue every HSI callback. The native runtime already enqueues
 closed HSI windows; doing it again duplicates uploads.
@@ -90,13 +173,22 @@ Development servers may explicitly allow unattested Debug registration.
 Release builds always disable that shortcut. Never add a private server secret,
 static capability secret, or API key to the app bundle.
 
+Client configuration alone is insufficient. The platform must also associate
+the development app ID with the exact bundle ID, enable development registration
+when App Attest is unavailable, permit upload in app policy, and assign a consent
+profile capable of issuing the verified cloud token. A policy refusal is
+permanent until that server configuration changes; repeatedly retrying the same
+request will not fix it.
+
 ## Command-line build
 
 ```bash
 xcodebuild \
-  -project ExampleApp/SynheartExample.xcodeproj \
+  -workspace ExampleApp/SynheartExample.xcworkspace \
   -scheme SynheartExample \
   -destination 'generic/platform=iOS Simulator' \
+  ARCHS=arm64 \
+  ONLY_ACTIVE_ARCH=YES \
   IPHONEOS_DEPLOYMENT_TARGET=16.0 \
   CODE_SIGNING_ALLOWED=NO \
   build

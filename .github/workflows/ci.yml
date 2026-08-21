@@ -11,7 +11,7 @@ env:
 
 jobs:
   build-test:
-    name: Build & Test (${{ matrix.os }})
+    name: SwiftPM & Source-only Example (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -44,6 +44,9 @@ jobs:
 
       - name: Prepare source-only iOS example app
         run: |
+          # The native runtime is distributed out of band and intentionally is
+          # not present in a source checkout. Deintegrating the ignored local
+          # pod validates that the example still builds safely without it.
           if ! command -v pod >/dev/null 2>&1; then
             brew install cocoapods
           fi

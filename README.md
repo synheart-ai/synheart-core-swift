@@ -167,9 +167,17 @@ required symbol is missing, initialization throws
 `SynheartError.runtimeIncompatible(missingSymbols:)`; optional symbols remain
 visible through `CoreRuntimeBridge.symbolDiagnostics` for support diagnostics.
 
+The stable/lab iOS runtime also requires the host app to link and force-load
+`onnxruntime-c`. The runnable example provides a CocoaPods integration that
+does this automatically. `CoreRuntimeBridge.dependencyDiagnostics` exposes the
+result, and `Synheart.startSession()` reports a missing dependency instead of
+entering an unsafe native call. Edge runtimes are detected automatically and
+do not require ONNX Runtime.
+
 ### Runnable iOS example
 
-Open [`ExampleApp/SynheartExample.xcodeproj`](ExampleApp/SynheartExample.xcodeproj)
+After installing its local runtime and running `pod install`, open
+`ExampleApp/SynheartExample.xcworkspace`
 to run the SwiftUI integration app. It demonstrates local-only initialization,
 requested versus runtime-enforced consent, real collection counters, typed/raw
 HSI 1.3 delivery, upload queue/device-auth state, storage, orphan repair, and
