@@ -1137,18 +1137,7 @@ public class Synheart {
             }
             SynheartLogger.log("[Synheart] Session started")
         } catch {
-            if let activeId = sessionModule?.currentSessionId {
-                sessionModule?.stopSession(sessionId: activeId)
-            }
-            sessionSubscription?.cancel()
-            sessionSubscription = nil
-            await moduleManager.stopAll()
-            _ = cr.stopSession()
-            _currentSessionHandle = nil
-            isRunning = false
-            collectionModuleFailures = [:]
-            _reevaluateAllFeatures()
-            throw error
+            try await _handleFailedSessionStart(error, runtime: cr)
         }
     }
 
@@ -1161,11 +1150,12 @@ public class Synheart {
         try await shared._stopSession()
     }
 
-    private func _stopSession() async throws {
+    private func _stopSession(using runtimeOverride: NativeSessionStopping? = nil) async throws {
         _lastSessionStopPhase = "request_received"
 
-        let nativeRunning = coreRuntime?.isRunning ?? false
-        let nativeSession = coreRuntime?.currentSession
+        let stateRuntime = runtimeOverride ?? coreRuntime
+        let nativeRunning = stateRuntime?.isRunning ?? false
+        let nativeSession = stateRuntime?.currentSession
         guard isRunning || nativeRunning || _currentSessionHandle != nil || nativeSession != nil else {
             _lastSessionStopPhase = "ignored_no_active_session"
             return
@@ -1174,8 +1164,17 @@ public class Synheart {
         SynheartLogger.log("[Synheart] Stopping session...")
 
         let stoppedSessionHandle = _currentSessionHandle ?? nativeSession
+        let nativeStopper: NativeSessionStopping?
+        if let runtimeOverride {
+            nativeStopper = runtimeOverride
+        } else if let cr = coreRuntime, cr.isAvailable {
+            nativeStopper = cr
+        } else {
+            nativeStopper = nil
+        }
+
         var nativeResolution: SessionStopResolution?
-        if let cr = coreRuntime, cr.isAvailable {
+        if let nativeStopper {
             // The native runtime owns the authoritative engine, artifact
             // pipeline, and session catalog. Stop it before awaiting any Swift
             // collector teardown so a slow or suspended module can never
@@ -1185,32 +1184,28 @@ public class Synheart {
             // repair is required.
             _lastSessionStopPhase = "native_stop_started"
             nativeResolution = await RuntimeWorkExecutor.run {
-                SessionStopCoordinator.stop(cr)
+                SessionStopCoordinator.stop(nativeStopper)
             }
             _lastSessionStopPhase = "native_stop_returned"
         }
-
-        // Native input is now rejected. Tear down the composed Swift session
-        // and collectors, then publish the local stopped state. This ordering
-        // also prevents SessionModule completion from racing a still-running
-        // native pipeline.
-        _lastSessionStopPhase = "local_teardown_started"
-        await _finishLocalSessionStop()
-        _lastSessionStopPhase = "local_teardown_returned"
 
         if let resolution = nativeResolution {
             _lastSessionStopReport = resolution.effectiveReport
             if !resolution.mayClearLocalState {
                 _lastSessionStopPhase = "native_shutdown_failed"
-                let details = resolution.effectiveReport.failures
-                    .map { "\($0.stage): \($0.error)" }
-                    .joined(separator: "; ")
                 throw SynheartError.runtimeOperationFailed(
-                    details.isEmpty
-                        ? "Native session shutdown and abort both failed"
-                        : "Native session shutdown failed (\(details))"
+                    "Native session shutdown failed (\(nativeShutdownFailureDescription(resolution))). "
+                        + "The active session was preserved so shutdown can be retried."
                 )
             }
+
+            // Only publish a stopped local state after the native coordinator
+            // proves that collection is off. A failed stop/abort must retain
+            // the handle and collectors so callers can see and retry the
+            // still-active session.
+            _lastSessionStopPhase = "local_teardown_started"
+            await _finishLocalSessionStop()
+            _lastSessionStopPhase = "local_teardown_returned"
 
             let warnings = (resolution.stopReport.failures
                 + (resolution.abortReport?.failures ?? []))
@@ -1232,6 +1227,10 @@ public class Synheart {
             return
         }
 
+        _lastSessionStopPhase = "local_teardown_started"
+        await _finishLocalSessionStop()
+        _lastSessionStopPhase = "local_teardown_returned"
+
         if let piConfig = _synheartConfig?.labIngestConfig,
            piConfig.autoIngest,
            let handle = stoppedSessionHandle {
@@ -1239,6 +1238,60 @@ public class Synheart {
         }
         SynheartLogger.log("[Synheart] Session stopped")
         _lastSessionStopPhase = "completed_without_native_runtime"
+    }
+
+    private func _handleFailedSessionStart(
+        _ startupError: Error,
+        runtime: NativeSessionStopping
+    ) async throws -> Never {
+        // A failed facade startup can still leave a native session alive.
+        // Stop partial Swift collectors first, then use the same native
+        // stop/abort coordinator as the public stop path.
+        if let activeId = sessionModule?.currentSessionId {
+            sessionModule?.stopSession(sessionId: activeId)
+        }
+        sessionSubscription?.cancel()
+        sessionSubscription = nil
+        await moduleManager.stopAll()
+
+        _lastSessionStopPhase = "startup_rollback_native_stop_started"
+        let resolution = await RuntimeWorkExecutor.run {
+            SessionStopCoordinator.stop(runtime)
+        }
+        _lastSessionStopReport = resolution.effectiveReport
+        _lastSessionStopPhase = "startup_rollback_native_stop_returned"
+
+        guard resolution.mayClearLocalState else {
+            // Native ownership is unresolved. Preserve the handle and report
+            // the session as active even though partial Swift collectors were
+            // stopped, allowing stopSession() to retry native shutdown.
+            isRunning = true
+            _lastSessionStopPhase = "startup_rollback_native_shutdown_failed"
+            throw SynheartError.runtimeOperationFailed(
+                "Session startup failed (\(startupError.localizedDescription)); "
+                    + "native rollback also failed (\(nativeShutdownFailureDescription(resolution))). "
+                    + "The native session remains active and stopSession() must be retried."
+            )
+        }
+
+        _currentSessionHandle = nil
+        isRunning = false
+        collectionModuleFailures = [:]
+        _reevaluateAllFeatures()
+        _lastSessionStopPhase = "startup_rollback_completed"
+        throw startupError
+    }
+
+    private func nativeShutdownFailureDescription(_ resolution: SessionStopResolution) -> String {
+        var parts = ["stop=\(resolution.stopReport.status)"]
+        if let abortReport = resolution.abortReport {
+            parts.append("abort=\(abortReport.status)")
+        }
+        let failures = (resolution.stopReport.failures
+            + (resolution.abortReport?.failures ?? []))
+            .map { "\($0.stage): \($0.error)" }
+        parts.append(contentsOf: failures)
+        return parts.joined(separator: "; ")
     }
 
     private func _finishLocalSessionStop() async {
@@ -1259,6 +1312,34 @@ public class Synheart {
 
     private func _autoIngestSession(_: SessionHandle) async {
         _ = await _flushUploads(requireConsent: true)
+    }
+
+    // Internal facade hooks keep failure-path tests at the public state
+    // boundary without exposing test controls as SDK API.
+    static func _setSessionStateForTesting(handle: SessionHandle?, running: Bool) {
+        shared._currentSessionHandle = handle
+        shared.isRunning = running
+        shared._lastSessionStopReport = nil
+        shared._lastSessionStopPhase = "idle"
+    }
+
+    static func _resetSessionStateForTesting() {
+        shared._currentSessionHandle = nil
+        shared.isRunning = false
+        shared._lastSessionStopReport = nil
+        shared._lastSessionStopPhase = "idle"
+        shared.collectionModuleFailures = [:]
+    }
+
+    static func _stopSessionForTesting(using runtime: NativeSessionStopping) async throws {
+        try await shared._stopSession(using: runtime)
+    }
+
+    static func _failSessionStartForTesting(
+        _ error: Error,
+        runtime: NativeSessionStopping
+    ) async throws {
+        try await shared._handleFailedSessionStart(error, runtime: runtime)
     }
 
     // MARK: - Session Module Access

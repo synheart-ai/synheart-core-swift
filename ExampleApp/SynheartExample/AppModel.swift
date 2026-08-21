@@ -493,17 +493,22 @@ final class AppModel: ObservableObject {
                 self.cloudTestHasFinalizedSession = false
                 self.lastFlushResult = nil
             }
+            // Reset the previous session's presentation state before starting
+            // collectors. Phone and behavior collectors can emit immediately;
+            // clearing these values after startSession() returns would discard
+            // legitimate callbacks from the new session.
+            self.rawFrameCount = 0
+            self.typedStateCount = 0
+            self.dataBearingStateCount = 0
+            self.behaviorEventCount = 0
+            self.motionSampleCount = 0
+
             if self.effectiveConsent?.biosignals == true { Synheart.activate(.wear) }
             if self.effectiveConsent?.behavior == true { Synheart.activate(.behavior) }
             if self.effectiveConsent?.phoneContext == true { Synheart.activate(.phoneContext) }
             if self.effectiveConsent?.cloudUpload == true { Synheart.activate(.cloud) }
 
             try await Synheart.startSession()
-            self.rawFrameCount = 0
-            self.typedStateCount = 0
-            self.dataBearingStateCount = 0
-            self.behaviorEventCount = 0
-            self.motionSampleCount = 0
             self.refreshPublicState()
             self.appendEvent("Session started: \(Synheart.currentSession?.sessionId ?? "unknown")")
         }
