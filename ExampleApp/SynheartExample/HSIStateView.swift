@@ -11,6 +11,7 @@ struct HSIStateView: View {
     @State private var showRawJSON = false
     @State private var showFormattedJSON = false
     @State private var copiedRawJSON = false
+    @State private var showHSICode = false
 
     var body: some View {
         NavigationStack {
@@ -140,6 +141,16 @@ struct HSIStateView: View {
                 }
             }
             .navigationTitle("Live HSI")
+            .sheet(isPresented: $showHSICode) {
+                SwiftCodeSheet(
+                    snippet: ExampleCodeSnippets.hsi(
+                        deliveries: model.typedStateCount,
+                        deliveriesWithData: model.dataBearingStateCount
+                    )
+                )
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -162,6 +173,12 @@ struct HSIStateView: View {
                     Text(summaryMessage)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                CodeSnippetButton(accessibilityLabel: "View HSI subscription code") {
+                    ExampleHaptics.selection()
+                    showHSICode = true
                 }
             }
 
@@ -189,10 +206,10 @@ struct HSIStateView: View {
             return "At least one state contains a real data basis. Axis values update as new states arrive."
         }
         if model.latestState != nil {
-            return "The runtime is delivering states, but the current axes do not yet have a measured basis."
+            return "The first window arrived without an axis basis. Keep interacting for the next window—normally about another 60 seconds."
         }
         if model.isRunning {
-            return "Keep the session running and interact with the app. Behavior-only HSI can take about 60 seconds."
+            return "Keep tapping and scrolling. The first delivery arrives around 60 seconds; behavior-derived axes normally appear in the following window."
         }
         return "Start a session from the Session tab to begin receiving HSI updates."
     }

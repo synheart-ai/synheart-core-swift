@@ -65,9 +65,9 @@ final class AppModel: ObservableObject {
             case .needsCollectionConsent:
                 return "The guided test uses real behavior events. Grant Behavior consent to produce test data."
             case .readyToCollect:
-                return "Start a session, interact with the app for about 60 seconds, then stop it to finalize its artifacts."
+                return "Start a session and interact through two processing windows. Behavior-derived HSI normally needs about 120 seconds."
             case .collecting:
-                return "Interact with the app for about 60 seconds. Stop the session when HSI deliveries begin appearing."
+                return "Keep interacting until HSI with data is greater than zero. The first delivery may be an empty window; behavior-derived axes normally arrive in the following window."
             case .readyToUpload:
                 return "The native runtime has finalized and queued artifacts. Flush the queue to test real cloud ingestion."
             case .uploadFailed:
@@ -108,6 +108,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var startActionPhase = "idle"
     @Published private(set) var stopActionPhase = "idle"
     @Published private(set) var requestedConsent: ConsentForm
+    @Published private(set) var isSavingConsent = false
     @Published private(set) var effectiveConsent: ConsentEffectiveState?
     @Published private(set) var currentSession: SessionHandle?
     @Published private(set) var collectionStartupFailures: [String: String] = [:]
@@ -139,6 +140,8 @@ final class AppModel: ObservableObject {
     private var cloudTestHasFinalizedSession = false
     private var automatedProbeHasRun = false
     private var automatedProbeTimeline: [[String: Any]] = []
+    private var confirmedRequestedConsent: ConsentForm
+    private var consentSaveWaiters: [CheckedContinuation<Void, Never>] = []
 
     init() {
         let defaults = UserDefaults.standard
@@ -155,7 +158,7 @@ final class AppModel: ObservableObject {
             ?? "ai.synheart.core.example"
         subjectId = storedSubject
         deviceId = storedDevice
-        requestedConsent = ConsentForm(
+        let initialConsent = ConsentForm(
             profileId: "example-local",
             biosignals: false,
             phoneContext: false,
@@ -165,6 +168,8 @@ final class AppModel: ObservableObject {
             allowResearch: false,
             allowVendorSync: false
         )
+        requestedConsent = initialConsent
+        confirmedRequestedConsent = initialConsent
 #if DEBUG
         allowUnsignedCapabilities = true
 #else
@@ -205,14 +210,20 @@ final class AppModel: ObservableObject {
         return effectiveConsent.biosignals || effectiveConsent.behavior || effectiveConsent.phoneContext
     }
 
+    var hasBehaviorConsent: Bool {
+        effectiveConsent?.behavior == true
+    }
+
     var canStartSession: Bool {
-        isInitialized && !isRunning && hasCollectionConsent && !isBusy
+        isInitialized && !isRunning && hasCollectionConsent && !isBusy && !isSavingConsent
     }
 
     var isStoppingSession: Bool { activeOperation == "Stop session" }
 
     var operationStateDescription: String {
-        activeOperation ?? (isBusy ? "Unknown operation" : "Idle")
+        activeOperation
+            ?? (isSavingConsent ? "Update data permissions" : nil)
+            ?? (isBusy ? "Unknown operation" : "Idle")
     }
 
     var cloudIngestionStage: CloudIngestionStage {
@@ -221,7 +232,7 @@ final class AppModel: ObservableObject {
         guard requestedConsent.allowCloud else { return .needsCloudConsent }
         guard deviceAuthStatus?.isRegistered == true else { return .needsDeviceRegistration }
         guard effectiveConsent?.cloudUpload == true else { return .needsCloudAuthorization }
-        guard hasCollectionConsent else { return .needsCollectionConsent }
+        guard hasBehaviorConsent else { return .needsCollectionConsent }
         if isRunning { return .collecting }
         if uploadStatus.lastFailure != nil || lastFlushResult?.failure != nil {
             return .uploadFailed
@@ -389,32 +400,89 @@ final class AppModel: ObservableObject {
     }
 
     func setConsent(_ kind: ConsentKind, enabled: Bool) async {
-        await perform("Update \(kind.title) consent") {
-            let form: ConsentForm
-            switch kind {
-            case .biosignals:
-                form = self.requestedConsent.copyWith(biosignals: enabled)
-            case .behavior:
-                form = self.requestedConsent.copyWith(behavior: enabled)
-            case .phoneContext:
-                form = self.requestedConsent.copyWith(phoneContext: enabled)
-            case .cloudUpload:
-                form = self.requestedConsent.copyWith(
-                    consentTier: enabled ? .cloud : .local,
-                    allowCloud: enabled
-                )
-            case .syni:
-                form = self.requestedConsent.copyWith(syni: enabled)
-            }
+        guard isInitialized else { return }
 
-            _ = try await Synheart.submitConsentForm(
-                form,
-                deviceId: self.deviceId,
-                platform: "ios",
-                userId: self.subjectId
+        let updated = consentForm(
+            requestedConsent,
+            setting: kind,
+            enabled: enabled
+        )
+        guard updated != requestedConsent else { return }
+
+        // Update SwiftUI immediately. Native persistence is serialized below,
+        // so rapid changes coalesce into the newest complete form rather than
+        // being dropped by the general SDK busy guard.
+        requestedConsent = updated
+        appendEvent("\(kind.title) requested: \(enabled ? "on" : "off")")
+
+        if isSavingConsent {
+            await withCheckedContinuation { continuation in
+                consentSaveWaiters.append(continuation)
+            }
+            return
+        }
+
+        await persistPendingConsent()
+    }
+
+    private func consentForm(
+        _ form: ConsentForm,
+        setting kind: ConsentKind,
+        enabled: Bool
+    ) -> ConsentForm {
+        switch kind {
+        case .biosignals:
+            return form.copyWith(biosignals: enabled)
+        case .behavior:
+            return form.copyWith(behavior: enabled)
+        case .phoneContext:
+            return form.copyWith(phoneContext: enabled)
+        case .cloudUpload:
+            return form.copyWith(
+                consentTier: enabled ? .cloud : .local,
+                allowCloud: enabled
             )
-            self.refreshPublicState()
-            self.appendEvent("\(kind.title) requested: \(enabled ? "on" : "off")")
+        case .syni:
+            return form.copyWith(syni: enabled)
+        }
+    }
+
+    private func persistPendingConsent() async {
+        isSavingConsent = true
+        lastError = nil
+        lastSuccess = nil
+        defer {
+            isSavingConsent = false
+            consentSaveWaiters.forEach { $0.resume() }
+            consentSaveWaiters.removeAll()
+        }
+
+        while requestedConsent != confirmedRequestedConsent {
+            let form = requestedConsent
+            do {
+                _ = try await Synheart.submitConsentForm(
+                    form,
+                    deviceId: deviceId,
+                    platform: "ios",
+                    userId: subjectId
+                )
+                confirmedRequestedConsent = Synheart.editableConsentForm ?? form
+                refreshPublicState()
+
+                // If no newer tap arrived during native I/O, display the
+                // runtime's canonical editable form. Otherwise the loop saves
+                // the newer local draft next.
+                if requestedConsent == form {
+                    requestedConsent = confirmedRequestedConsent
+                }
+                appendEvent("Data permissions saved")
+            } catch {
+                // The UI must never claim an unsaved choice. Restore the last
+                // native-confirmed form and clearly report the failure.
+                requestedConsent = confirmedRequestedConsent
+                report(error, operation: "Update data permissions")
+                return
+            }
         }
     }
 
@@ -790,7 +858,12 @@ final class AppModel: ObservableObject {
         isRunning = !stopConfirmed && Synheart.isRunning && sdkSession != nil
         currentSession = isRunning ? sdkSession : nil
         collectionStartupFailures = Synheart.collectionStartupFailures
-        requestedConsent = Synheart.editableConsentForm ?? requestedConsent
+        if let editableConsent = Synheart.editableConsentForm {
+            confirmedRequestedConsent = editableConsent
+            if !isSavingConsent {
+                requestedConsent = editableConsent
+            }
+        }
         effectiveConsent = Synheart.effectiveConsent
         refreshRuntimeData()
     }

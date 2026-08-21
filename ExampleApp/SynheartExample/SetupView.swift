@@ -8,6 +8,8 @@ struct SetupView: View {
     let continueToSession: () -> Void
 
     @State private var showTechnicalDetails = false
+    @State private var showInitializationCode = false
+    @State private var showTestingCode = false
     @State private var isContinuing = false
 
     private var deviceIsRegistered: Bool {
@@ -57,13 +59,42 @@ struct SetupView: View {
                     }
                 }
 
-                Section("Testing options") {
+                Section {
                     testingOptions
+                } header: {
+                    HStack {
+                        Text("Testing options")
+                        Spacer()
+                        CodeSnippetButton(accessibilityLabel: "View testing utility code") {
+                            ExampleHaptics.selection()
+                            showTestingCode = true
+                        }
+                    }
                 }
             }
             .navigationTitle("Synheart Core")
             .onChange(of: isReadyToTest) { ready in
                 if ready { ExampleHaptics.success() }
+            }
+            .sheet(isPresented: $showInitializationCode) {
+                SwiftCodeSheet(
+                    snippet: ExampleCodeSnippets.initialization(
+                        deviceAuthConfigured: model.isDeviceAuthConfigured,
+                        isInitialized: model.isInitialized
+                    )
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showTestingCode) {
+                SwiftCodeSheet(
+                    snippet: ExampleCodeSnippets.testingOptions(
+                        isInitialized: model.isInitialized,
+                        deviceAuthConfigured: model.isDeviceAuthConfigured
+                    )
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -84,6 +115,12 @@ struct SetupView: View {
                     Text(readinessMessage)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                CodeSnippetButton(accessibilityLabel: "View SDK initialization code") {
+                    ExampleHaptics.selection()
+                    showInitializationCode = true
                 }
             }
 

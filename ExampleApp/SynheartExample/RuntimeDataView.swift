@@ -77,6 +77,7 @@ private struct CloudIngestionCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showTechnicalDetails = false
     @State private var copiedDiagnostics = false
+    @State private var showCloudCode = false
 
     private var stage: AppModel.CloudIngestionStage { model.cloudIngestionStage }
 
@@ -94,6 +95,12 @@ private struct CloudIngestionCard: View {
                     Text(stage.guidance)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                CodeSnippetButton(accessibilityLabel: "View cloud upload code") {
+                    ExampleHaptics.selection()
+                    showCloudCode = true
                 }
             }
 
@@ -160,7 +167,7 @@ private struct CloudIngestionCard: View {
                     Task { await model.advanceCloudIngestionTest() }
                 } label: {
                     HStack {
-                        if model.isBusy { ProgressView() }
+                        if model.isBusy || model.isSavingConsent { ProgressView() }
                         Text(actionTitle)
                         Spacer()
                         Image(systemName: "arrow.right.circle.fill")
@@ -168,7 +175,7 @@ private struct CloudIngestionCard: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.isBusy)
+                .disabled(model.isBusy || model.isSavingConsent)
             }
 
             if let failure = model.cloudFailure {
@@ -234,6 +241,16 @@ private struct CloudIngestionCard: View {
         .animation(reduceMotion ? nil : ExampleMotion.gentle, value: stage)
         .onChange(of: stage) { newStage in
             if newStage == .verified { ExampleHaptics.success() }
+        }
+        .sheet(isPresented: $showCloudCode) {
+            SwiftCodeSheet(
+                snippet: ExampleCodeSnippets.cloudUpload(
+                    stage: model.cloudIngestionStage,
+                    queueLength: model.uploadStatus.queueLength
+                )
+            )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 

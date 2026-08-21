@@ -11,6 +11,7 @@ struct DiagnosticsView: View {
     @State private var showRequiredSymbols = false
     @State private var showOptionalSymbols = false
     @State private var copiedDiagnostics = false
+    @State private var showDiagnosticsCode = false
 
     private var runtimeIsHealthy: Bool {
         model.symbolDiagnostics.isCompatible
@@ -139,6 +140,16 @@ struct DiagnosticsView: View {
             .onChange(of: runtimeIsHealthy) { healthy in
                 if healthy { ExampleHaptics.success() }
             }
+            .sheet(isPresented: $showDiagnosticsCode) {
+                SwiftCodeSheet(
+                    snippet: ExampleCodeSnippets.diagnostics(
+                        isCompatible: model.symbolDiagnostics.isCompatible,
+                        runtimeVersion: Synheart.runtimeVersion
+                    )
+                )
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -159,6 +170,12 @@ struct DiagnosticsView: View {
                     : "Expand the compatibility details to see what is missing.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            CodeSnippetButton(accessibilityLabel: "View runtime diagnostics code") {
+                ExampleHaptics.selection()
+                showDiagnosticsCode = true
             }
         }
         .padding(.vertical, 6)

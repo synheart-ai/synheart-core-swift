@@ -4,6 +4,8 @@ import SynheartCore
 struct ConsentSessionView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showSessionCode = false
+    @State private var showPermissionCode = false
 
     var body: some View {
         NavigationStack {
@@ -12,7 +14,7 @@ struct ConsentSessionView: View {
                     sessionGuide
                 }
 
-                Section("Data permissions") {
+                Section {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Choose what this test session may collect and upload.")
                             .font(.caption)
@@ -48,17 +50,54 @@ struct ConsentSessionView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                } header: {
+                    HStack {
+                        Text("Data permissions")
+                        Spacer()
+                        if model.isSavingConsent {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityLabel("Saving data permissions")
+                        }
+                        CodeSnippetButton(accessibilityLabel: "View current data permission code") {
+                            ExampleHaptics.selection()
+                            showPermissionCode = true
+                        }
+                    }
                 }
 
                 if model.isRunning || hasCollectionActivity {
                     Section("Live collection") {
-                        metricRow("Behavior events", model.behaviorEventCount)
-                        metricRow("Motion samples", model.motionSampleCount)
-                        metricRow("HSI deliveries", model.typedStateCount)
-                        metricRow("HSI with data", model.dataBearingStateCount)
+                        metricRow(
+                            "Behavior events",
+                            model.behaviorEventCount,
+                            accessibilityIdentifier: "session.metric.behavior"
+                        )
+                        metricRow(
+                            "Motion samples",
+                            model.motionSampleCount,
+                            accessibilityIdentifier: "session.metric.motion"
+                        )
+                        metricRow(
+                            "HSI deliveries",
+                            model.typedStateCount,
+                            accessibilityIdentifier: "session.metric.hsiDeliveries"
+                        )
+                        metricRow(
+                            "HSI with data",
+                            model.dataBearingStateCount,
+                            accessibilityIdentifier: "session.metric.hsiWithData"
+                        )
+
+                        LabeledContent("HSI progress") {
+                            Text(hsiProgressLabel)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(model.dataBearingStateCount > 0 ? .green : .secondary)
+                                .multilineTextAlignment(.trailing)
+                        }
 
                         Text(model.isRunning
-                            ? "Keep interacting with the app for about 60 seconds, then stop the session to finalize its artifacts."
+                            ? hsiCollectionGuidance
                             : "These counts are from the most recent session in this app process.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -114,6 +153,23 @@ struct ConsentSessionView: View {
             .onChange(of: model.isRunning) { _ in
                 ExampleHaptics.success()
             }
+            .sheet(isPresented: $showSessionCode) {
+                SwiftCodeSheet(
+                    snippet: ExampleCodeSnippets.session(
+                        effectiveConsent: model.effectiveConsent,
+                        isRunning: model.isRunning
+                    )
+                )
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showPermissionCode) {
+                SwiftCodeSheet(
+                    snippet: ExampleCodeSnippets.permissions(model.requestedConsent)
+                )
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
             .safeAreaInset(edge: .bottom) {
                 bottomAction
                     .padding(.horizontal)
@@ -140,6 +196,12 @@ struct ConsentSessionView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                CodeSnippetButton(accessibilityLabel: "View session lifecycle code") {
+                    ExampleHaptics.selection()
+                    showSessionCode = true
+                }
             }
 
             VStack(spacing: 10) {
@@ -150,8 +212,8 @@ struct ConsentSessionView: View {
                 )
                 guideStatusRow(
                     "Collection permission",
-                    detail: model.hasCollectionConsent ? "Allowed" : "Needed",
-                    complete: model.hasCollectionConsent
+                    detail: model.hasBehaviorConsent ? "Behavior allowed" : "Behavior needed",
+                    complete: model.hasBehaviorConsent
                 )
                 if model.isCloudConfigured {
                     guideStatusRow(
@@ -169,7 +231,7 @@ struct ConsentSessionView: View {
                 )
             }
 
-            if model.isInitialized && !model.hasCollectionConsent {
+            if model.isInitialized && !model.hasBehaviorConsent {
                 Button {
                     ExampleHaptics.selection()
                     Task { await model.setConsent(.behavior, enabled: true) }
@@ -183,7 +245,7 @@ struct ConsentSessionView: View {
         }
         .padding(.vertical, 6)
         .animation(reduceMotion ? nil : ExampleMotion.gentle, value: model.isRunning)
-        .animation(reduceMotion ? nil : ExampleMotion.gentle, value: model.hasCollectionConsent)
+        .animation(reduceMotion ? nil : ExampleMotion.gentle, value: model.hasBehaviorConsent)
     }
 
     @ViewBuilder
@@ -202,7 +264,7 @@ struct ConsentSessionView: View {
             .buttonStyle(.borderedProminent)
             .tint(.red)
             .accessibilityIdentifier("session.stop")
-        } else if model.isInitialized && !model.hasCollectionConsent {
+        } else if model.isInitialized && !model.hasBehaviorConsent {
             Button {
                 ExampleHaptics.selection()
                 Task { await model.setConsent(.behavior, enabled: true) }
@@ -223,7 +285,7 @@ struct ConsentSessionView: View {
             }
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("session.start")
-            .disabled(!model.canStartSession)
+            .disabled(!model.canStartSession || !model.hasBehaviorConsent)
         }
     }
 
@@ -238,7 +300,8 @@ struct ConsentSessionView: View {
         if !model.isInitialized { return "Complete Setup first" }
         if model.isStoppingSession { return "Finalizing session" }
         if model.isRunning { return "Session is running" }
-        if !model.hasCollectionConsent { return "Choose test data" }
+        if model.isSavingConsent { return "Saving permissions" }
+        if !model.hasBehaviorConsent { return "Enable behavior data" }
         return "Ready to start"
     }
 
@@ -250,9 +313,12 @@ struct ConsentSessionView: View {
             return "The runtime is closing the catalog entry and finalizing artifacts."
         }
         if model.isRunning {
-            return "Interact with the app for about 60 seconds while collection counters increase."
+            return hsiCollectionGuidance
         }
-        if !model.hasCollectionConsent {
+        if model.isSavingConsent {
+            return "Your latest choices are visible immediately and are being saved in order."
+        }
+        if !model.hasBehaviorConsent {
             return "Behavior is the easiest source for testing without a wearable."
         }
         return "Your permissions are ready. Start a session and interact with the app."
@@ -261,12 +327,12 @@ struct ConsentSessionView: View {
     private var guideIcon: String {
         if model.isStoppingSession { return "hourglass.circle.fill" }
         if model.isRunning { return "waveform.path.ecg" }
-        if model.canStartSession { return "checkmark.circle.fill" }
+        if model.canStartSession && model.hasBehaviorConsent { return "checkmark.circle.fill" }
         return "arrow.triangle.2.circlepath.circle.fill"
     }
 
     private var guideColor: Color {
-        if model.isRunning || model.canStartSession { return .green }
+        if model.isRunning || (model.canStartSession && model.hasBehaviorConsent) { return .green }
         return .blue
     }
 
@@ -299,11 +365,34 @@ struct ConsentSessionView: View {
         .foregroundStyle(allowed ? .green : .secondary)
     }
 
-    private func metricRow(_ title: String, _ value: Int) -> some View {
+    private var hsiProgressLabel: String {
+        if model.dataBearingStateCount > 0 { return "Data received" }
+        if model.typedStateCount > 0 { return "Next window pending" }
+        return "First window pending"
+    }
+
+    private var hsiCollectionGuidance: String {
+        if model.dataBearingStateCount > 0 {
+            return "A data-bearing HSI is ready. Stop the session when you are finished testing."
+        }
+        if model.typedStateCount > 0 {
+            return "The first window had no axis data. Keep tapping and scrolling for about another 60 seconds."
+        }
+        return "Keep tapping and scrolling. The first HSI arrives around 60 seconds; behavior-derived axes normally require the following window."
+    }
+
+    private func metricRow(
+        _ title: String,
+        _ value: Int,
+        accessibilityIdentifier: String
+    ) -> some View {
         LabeledContent(title) {
-            AnimatedMetricText(value: value)
+            // Keep a stable Text identity: replacement transitions can be
+            // cached by Form rows and leave a stale visible counter.
+            Text("\(value)")
                 .font(.body.monospacedDigit())
                 .foregroundStyle(value > 0 ? .green : .secondary)
+                .accessibilityIdentifier(accessibilityIdentifier)
         }
     }
 
