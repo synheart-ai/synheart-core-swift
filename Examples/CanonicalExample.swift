@@ -11,6 +11,9 @@
 // 7. Error handling
 // 8. Clean shutdown
 //
+// Advanced runtime-backed APIs are listed in CAPABILITIES.md. Check runtime
+// symbol diagnostics before exposing an optional capability in your app.
+//
 // For a minimal example, see SimpleExample.swift.
 
 import Foundation
