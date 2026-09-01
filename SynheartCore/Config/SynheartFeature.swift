@@ -19,6 +19,9 @@ public enum SynheartFeature: String, CaseIterable, Sendable {
     /// Cloud upload connector
     case cloud
 
+    /// Cross-device baseline and artifact synchronization.
+    case synsync
+
     /// Syni hooks integration
     case syni
 
@@ -28,7 +31,7 @@ public enum SynheartFeature: String, CaseIterable, Sendable {
         case .wear:         return "biosignals"
         case .behavior:     return "behavior"
         case .phoneContext:  return "phoneContext"
-        case .cloud:        return "cloudUpload"
+        case .cloud, .synsync: return "cloudUpload"
         case .syni:         return "syni"
         }
     }

@@ -96,11 +96,16 @@ public final class CoreRuntimeBridge {
 
     private let handle: OpaquePointer
 
+    /// Internal access for additive ABI capability extensions. The opaque
+    /// handle never leaves the SDK module.
+    var runtimeHandle: OpaquePointer { handle }
+
     /// Retained box holding the HSI callback closure. `Unmanaged.passRetained`
     /// adds +1 to the closure's refcount so the runtime's C user_data pointer
     /// stays valid; we must `release()` it when the callback is replaced,
     /// cleared, or when this bridge deinits.
     private var hsiCallbackBox: Unmanaged<AnyObject>?
+    private var streamCallbackBox: Unmanaged<AnyObject>?
 
     // MARK: - C function type aliases
 
@@ -213,9 +218,13 @@ public final class CoreRuntimeBridge {
         return UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
     }()
 
-    private static func sym<T>(_ name: String) -> T? {
+    static func lookupSymbol<T>(_ name: String, as type: T.Type = T.self) -> T? {
         guard let lib = lib, let p = dlsym(lib, name) else { return nil }
         return unsafeBitCast(p, to: T.self)
+    }
+
+    private static func sym<T>(_ name: String) -> T? {
+        lookupSymbol(name, as: T.self)
     }
 
     private static func hasSymbol(_ name: String) -> Bool {
@@ -376,6 +385,8 @@ public final class CoreRuntimeBridge {
     deinit {
         Self._clearHsiCb?(handle)
         hsiCallbackBox?.release()
+        Self._setStreamCb?(handle, Self.streamNoopCallback, nil)
+        streamCallbackBox?.release()
         Self._free?(handle)
     }
 
@@ -383,7 +394,7 @@ public final class CoreRuntimeBridge {
 
     /// Convert a C string pointer to a Swift String, freeing the C string afterward.
     /// Returns nil if the pointer is null.
-    private func consumeCString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
+    func consumeCString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
         return Self.consumeCString(ptr)
     }
 
@@ -966,6 +977,48 @@ public final class CoreRuntimeBridge {
         Self._clearHsiCb?(handle)
         hsiCallbackBox?.release()
         hsiCallbackBox = nil
+    }
+
+    // MARK: - Vendor Stream Callback
+
+    private typealias SetStreamCallbackFn = @convention(c) (
+        OpaquePointer?,
+        @convention(c) (UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void,
+        UnsafeMutableRawPointer?
+    ) -> Void
+
+    private static let _setStreamCb: SetStreamCallbackFn? = sym("synheart_core_set_stream_callback")
+    private static let streamNoopCallback: @convention(c) (
+        UnsafePointer<CChar>?, UnsafeMutableRawPointer?
+    ) -> Void = { jsonPointer, _ in
+        guard let jsonPointer else { return }
+        _freeString?(UnsafeMutablePointer(mutating: jsonPointer))
+    }
+
+    /// Registers a callback for raw vendor-stream event JSON.
+    public func setStreamCallback(_ callback: @escaping (String) -> Void) {
+        guard let setCallback = Self._setStreamCb else { return }
+        let previousBox = streamCallbackBox
+        let box = Unmanaged.passRetained(callback as AnyObject)
+        let cCallback: @convention(c) (
+            UnsafePointer<CChar>?, UnsafeMutableRawPointer?
+        ) -> Void = { jsonPointer, userData in
+            guard let jsonPointer else { return }
+            defer { CoreRuntimeBridge._freeString?(UnsafeMutablePointer(mutating: jsonPointer)) }
+            guard let userData else { return }
+            let closure = Unmanaged<AnyObject>.fromOpaque(userData).takeUnretainedValue() as! (String) -> Void
+            closure(String(cString: jsonPointer))
+        }
+        setCallback(handle, cCallback, box.toOpaque())
+        streamCallbackBox = box
+        previousBox?.release()
+    }
+
+    /// Replaces the stream callback with a safe no-op before releasing it.
+    public func clearStreamCallback() {
+        Self._setStreamCb?(handle, Self.streamNoopCallback, nil)
+        streamCallbackBox?.release()
+        streamCallbackBox = nil
     }
 
     // MARK: - Cloud Consent (token binding)

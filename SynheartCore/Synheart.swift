@@ -57,9 +57,16 @@ enum RuntimeVersionResolver {
 public class Synheart {
     public static let shared = Synheart()
 
-    private var coreRuntime: SynheartCoreShim?
+    /// Version of the public Swift SDK surface.
+    public static let sdkVersion = SynheartCoreVersion.current
+
+    /// Latest typed baseline envelope per supported baseline kind.
+    public static let baselineSnapshots = BaselineSnapshots()
+
+    var coreRuntime: SynheartCoreShim?
     private let moduleManager = ModuleManager()
     private let initializationGate = InitializationGate()
+    private let deviceRegistrationGate = DeviceRegistrationGate()
 
     private var capabilityModule: CapabilityModule?
     private var consentModule: ConsentModule?
@@ -78,6 +85,7 @@ public class Synheart {
     private var lastUploadAt: Date?
     private var lastUploadAttemptAt: Date?
     private var lastUploadFailure: NativeOperationFailure?
+    var syniServiceClient: SyniServiceClient?
     private var _lastSessionStopReport: RuntimeSessionStopReport?
     private var _lastSessionStopPhase = "idle"
 
@@ -90,6 +98,8 @@ public class Synheart {
 
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
     private let typedHsiSubject = CurrentValueSubject<HSIState?, Never>(nil)
+    private let vendorStreamSubject = PassthroughSubject<[String: Any], Never>()
+    private let dataDeletionSubject = PassthroughSubject<DataDeletionEvent, Never>()
     private let hsiDeliveryDeduplicator = HSIDeliveryDeduplicator()
     private var cancellables = Set<AnyCancellable>()
 
@@ -128,6 +138,16 @@ public class Synheart {
     private func parseDict(_ json: String) -> [String: Any]? {
         guard let data = json.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    func installVendorStreamCallback(appId: String, userId: String) {
+        coreRuntime?.bridge?.setStreamCallback { [weak self] raw in
+            guard let self, let event = self.parseDict(raw) else { return }
+            self.vendorStreamSubject.send(event)
+            if let deletion = DataDeletionEvent(envelope: event, appId: appId, userId: userId) {
+                self.dataDeletionSubject.send(deletion)
+            }
+        }
     }
 
     // MARK: - Public State
@@ -192,6 +212,33 @@ public class Synheart {
     public static var onPhoneMotionSample: AnyPublisher<MotionData, Never> {
         shared.phoneModule?.motionSamples
             ?? Empty<MotionData, Never>().eraseToAnyPublisher()
+    }
+
+    /// Consent-filtered raw wearable samples accepted by the wear module.
+    /// A delivery is not necessarily data-bearing; inspect its optional fields.
+    public static var onWearSample: AnyPublisher<WearSample, Never> {
+        shared.wearModule?.rawSamplePublisher
+            ?? Empty<WearSample, Never>().eraseToAnyPublisher()
+    }
+
+    /// Whether each collection module is actively running.
+    public static var isWearCollecting: Bool { shared.wearModule?.isEnabled == true }
+    public static var isPhoneCollecting: Bool { shared.phoneModule?.isEnabled == true }
+    public static var isBehaviorCollecting: Bool { shared.behaviorModule?.isEnabled == true }
+
+    /// Whether the linked runtime exposes its lab protocol engine.
+    public static var isLabAvailable: Bool {
+        shared.coreRuntime?.bridge?.isLabAvailable() == true
+    }
+
+    /// Raw events received from the configured vendor stream.
+    public static var onVendorStreamEvent: AnyPublisher<[String: Any], Never> {
+        shared.vendorStreamSubject.eraseToAnyPublisher()
+    }
+
+    /// Typed GDPR deletion lifecycle events received from the vendor stream.
+    public static var onDataDeletionUpdate: AnyPublisher<DataDeletionEvent, Never> {
+        shared.dataDeletionSubject.eraseToAnyPublisher()
     }
 
     /// Get the current HSI state as a typed object.
@@ -682,6 +729,23 @@ public class Synheart {
     }
 
     private func _registerDevice(force: Bool) async -> DeviceRegistrationResult {
+        await deviceRegistrationGate.run { [weak self] in
+            guard let self else {
+                return DeviceRegistrationResult(
+                    success: false,
+                    status: DeviceAuthStatus(status: "unavailable"),
+                    failure: NativeOperationFailure(
+                        code: "SDK_DEALLOCATED",
+                        reason: .unknown,
+                        message: "The SDK instance was released during device registration"
+                    )
+                )
+            }
+            return await self._performDeviceRegistration(force: force)
+        }
+    }
+
+    private func _performDeviceRegistration(force: Bool) async -> DeviceRegistrationResult {
         guard _synheartConfig?.deviceAuthConfig != nil,
               let bridge = coreRuntime?.bridge else {
             let failure = NativeOperationFailure(
@@ -1823,7 +1887,7 @@ public class Synheart {
             } else if !isOperational && phoneModule?.status == .running {
                 Task { do { try await phoneModule?.stop() } catch { SynheartLogger.log("[Synheart] Failed to stop phone module: \(error)") } }
             }
-        case .cloud, .syni:
+        case .cloud, .synsync, .syni:
             break
         }
     }
@@ -1846,7 +1910,7 @@ public class Synheart {
         }
     }
 
-    private func _isCapabilityAllowed(_ feature: SynheartFeature) -> Bool {
+    func _isCapabilityAllowed(_ feature: SynheartFeature) -> Bool {
         guard _synheartConfig?.deviceRole.supportedFeatures.contains(feature) == true else {
             return false
         }
@@ -1856,6 +1920,7 @@ public class Synheart {
         case .behavior:     return cap.capability(.behavior) != .none
         case .phoneContext: return cap.capability(.phone) != .none
         case .cloud:        return cap.capability(.cloud) != .none
+        case .synsync:      return cap.capability(.cloud) != .none
         case .syni:         return true
         }
     }
@@ -1866,6 +1931,7 @@ public class Synheart {
         case .behavior: return "behavior"
         case .phoneContext: return "phone"
         case .cloud: return "cloud"
+        case .synsync: return "synsync"
         case .syni: return "syni"
         }
     }
