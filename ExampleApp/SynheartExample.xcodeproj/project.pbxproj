@@ -17,6 +17,7 @@
 		A00000000000000000000007 /* RuntimeDataView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000007 /* RuntimeDataView.swift */; };
 		A00000000000000000000008 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000008 /* DiagnosticsView.swift */; };
 		A00000000000000000000009 /* UIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000009 /* UIComponents.swift */; };
+		A0000000000000000000000B /* ParityLab.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000C /* ParityLab.swift */; };
 		A0000000000000000000000A /* SynheartCore in Frameworks */ = {isa = PBXBuildFile; productRef = L00000000000000000000001 /* SynheartCore */; };
 		A10000000000000000000001 /* SessionStopUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* SessionStopUITests.swift */; };
 /* End PBXBuildFile section */
@@ -44,6 +45,7 @@
 		B00000000000000000000009 /* UIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIComponents.swift; sourceTree = "<group>"; };
 		B0000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B0000000000000000000000B /* SynheartExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynheartExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0000000000000000000000C /* ParityLab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParityLab.swift; sourceTree = "<group>"; };
 		B10000000000000000000001 /* SessionStopUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStopUITests.swift; sourceTree = "<group>"; };
 		B10000000000000000000002 /* SynheartExampleUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SynheartExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000000000000000000001 /* Synheart.Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Synheart.Debug.xcconfig; sourceTree = "<group>"; };
@@ -115,6 +117,7 @@
 				B00000000000000000000007 /* RuntimeDataView.swift */,
 				B00000000000000000000008 /* DiagnosticsView.swift */,
 				B00000000000000000000009 /* UIComponents.swift */,
+				B0000000000000000000000C /* ParityLab.swift */,
 				B0000000000000000000000A /* Info.plist */,
 			);
 			path = SynheartExample;
@@ -302,6 +305,7 @@
 				A00000000000000000000007 /* RuntimeDataView.swift in Sources */,
 				A00000000000000000000008 /* DiagnosticsView.swift in Sources */,
 				A00000000000000000000009 /* UIComponents.swift in Sources */,
+				A0000000000000000000000B /* ParityLab.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

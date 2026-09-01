@@ -77,4 +77,24 @@ final class ConfigValidationTests: XCTestCase {
             }
         }
     }
+
+    func testDeviceAuthRequiresExplicitOrigin() {
+        let config = SynheartConfig(
+            appId: "com.test.app",
+            subjectId: "usr_123",
+            deviceAuthConfig: DeviceAuthConfig(authBaseUrl: "  ")
+        )
+
+        XCTAssertThrowsError(try config.validate()) { error in
+            guard case SynheartCoreError.notConfigured(let message) = error else {
+                return XCTFail("Expected notConfigured error, got \(error)")
+            }
+            XCTAssertTrue(message?.contains("authBaseUrl") == true)
+        }
+    }
+
+    func testSDKVersionMatchesPlannedRelease() {
+        XCTAssertEqual(Synheart.sdkVersion, "0.2.0")
+        XCTAssertEqual(Synheart.sdkVersion, SynheartCoreVersion.current)
+    }
 }

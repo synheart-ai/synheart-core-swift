@@ -8,6 +8,7 @@ struct SetupView: View {
     let continueToSession: () -> Void
 
     @State private var showTechnicalDetails = false
+    @State private var showIdentity = false
     @State private var showInitializationCode = false
     @State private var showTestingCode = false
     @State private var isContinuing = false
@@ -70,6 +71,34 @@ struct SetupView: View {
                             showTestingCode = true
                         }
                     }
+                }
+
+                Section {
+                    ReliableDisclosureGroup("Developer identity", isExpanded: $showIdentity) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            TextField("App ID", text: $model.appId)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            TextField("Subject ID", text: $model.subjectId)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+
+                            Button("Save identity") {
+                                ExampleHaptics.selection()
+                                model.persistIdentity()
+                            }
+                            .buttonStyle(.borderless)
+
+                            Text("Saved locally and locked while the SDK is initialized.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.top, 8)
+                        .disabled(model.isInitialized)
+                    }
+                } footer: {
+                    Text("Advanced setup")
+                        .foregroundStyle(.tertiary)
                 }
             }
             .navigationTitle("Synheart Core")

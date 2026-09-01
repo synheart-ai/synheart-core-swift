@@ -323,6 +323,48 @@ public struct SleepScoreResult: Sendable {
         let obj = try JSONSerialization.jsonObject(with: data, options: [])
         return fromJson(obj as? [String: Any] ?? [:])
     }
+
+    public func toJson() -> [String: Any] {
+        var value: [String: Any] = [
+            "confidence": confidence,
+            "path": path.rawValue,
+            "mode": mode.rawValue,
+            "components": [
+                "duration": components.duration.map { $0 as Any } ?? NSNull(),
+                "quality": components.quality.map { $0 as Any } ?? NSNull(),
+                "continuity": components.continuity.map { $0 as Any } ?? NSNull(),
+                "consistency": components.consistency.map { $0 as Any } ?? NSNull(),
+                "personalization": components.personalization.map { $0 as Any } ?? NSNull(),
+                "vendor_score": components.vendorScore.map { $0 as Any } ?? NSNull(),
+                "proxy_hr": components.proxyHr.map { $0 as Any } ?? NSNull(),
+            ],
+            "adjustments": [
+                "debt_penalty": adjustments.debtPenalty,
+                "hr_adjustment": adjustments.hrAdjustment,
+            ],
+            "effective_weights": [
+                "duration": effectiveWeights.duration,
+                "quality": effectiveWeights.quality,
+                "continuity": effectiveWeights.continuity,
+                "consistency": effectiveWeights.consistency,
+                "personalization": effectiveWeights.personalization,
+            ],
+            "reason": reason.map { $0.rawValue as Any } ?? NSNull(),
+            "prior_night_count": priorNightCount,
+            "pipeline_version": pipelineVersion,
+            "model_id": modelId,
+            "constants_hash": constantsHash,
+        ]
+        value["score"] = score.map { $0 as Any } ?? NSNull()
+        value["score_normalized"] = scoreNormalized.map { $0 as Any } ?? NSNull()
+        return value
+    }
+
+    public func toJsonString() -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: toJson()),
+              let value = String(data: data, encoding: .utf8) else { return "{}" }
+        return value
+    }
 }
 
 /// Wearable reference view over the Longitudinal SRM engine output.

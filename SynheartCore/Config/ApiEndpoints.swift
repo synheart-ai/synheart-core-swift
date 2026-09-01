@@ -1,28 +1,31 @@
 import Foundation
 
-/// Central registry of all Synheart API endpoints.
+/// Central registry of Synheart service paths.
 ///
-/// Service paths are within each service (after gateway routing).
-/// Base URLs resolve to: gateway (api.synheart.ai/{service}) or direct ({service}-dev.synheart.io)
+/// Origins are deliberately empty by default. Applications that use cloud
+/// services must provide their deployment origin through configuration. When
+/// no origin is supplied, the SDK omits it from the native configuration and
+/// lets the linked runtime apply its own policy.
 public enum ApiEndpoints {
     // MARK: - Base URLs (defaults)
-    public static let defaultCloudBaseUrl = "https://api.synheart.ai"
-    public static let defaultAuthBaseUrl = "https://api.synheart.ai"
+    public static let defaultCloudBaseUrl = ""
+    public static let defaultAuthBaseUrl = ""
 
     // MARK: - Cloud / HSI Ingest
     public static let ingestPath = "/v1/hsi/ingest"
 
     // MARK: - Lab Ingest (lab/raw data)
-    public static let defaultLabIngestBaseUrl = "https://api.synheart.ai"
+    public static let defaultLabIngestBaseUrl = ""
     public static let labSessionIngestPath = "/v1/lab/session/ingest"
     public static let labMetadataIngestPath = "/v1/lab/metadata/ingest"
 
     // MARK: - Consent Service
-    public static let defaultConsentBaseUrl = "https://api.synheart.ai"
+    public static let defaultConsentBaseUrl = ""
 
     public static func consentProfilesPath(appId: String) -> String {
         "/v1/apps/\(appId)/consent-profiles"
     }
     public static let consentTokenPath = "/v1/sdk/consent-token"
     public static let consentRevokePath = "/v1/sdk/consent-revoke"
+    public static let studyConsentPath = "/v1/sdk/study-consent"
 }

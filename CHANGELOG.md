@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - Unreleased
 
 ### Added
+- Full sync-space lifecycle and typed readiness checks, including create,
+  pairing, join, recovery, device management, leave, deletion, and local clear.
+- Typed baseline envelopes and snapshot hydration for reference, HSI-axis,
+  session-SRM, and longitudinal-wear baselines.
+- Runtime-backed sleep, recovery, and readiness scoring, score attachment, and
+  longitudinal snapshot import/export.
+- Typed customer-data deletion request/status/list APIs plus research status and
+  explicit study-consent recording.
+- RR batch, vendor HRV/vitals/event ingestion, HSI history, cloud-history,
+  personalization, workout, vendor-stream, and buffered-logging APIs.
+- Optional typed Syni cloud service and `SynheartInstance` for advanced
+  independent native handles with unique data-directory enforcement.
+- Public SDK version metadata and additive runtime-symbol diagnostics for the
+  expanded capability surface.
 - **Cloud consent token binding** — `Synheart.ensureCloudConsentReady()`,
   `Synheart.subjectId`, and `consentTokenSubjectStale()`. Mints/refreshes a
   consent token scoped to the current subject (configure-cloud on init,
@@ -25,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behavior/motion publishers, and upload/device-auth diagnostic results.
 
 ### Changed
+- Platform and authentication origins are now explicit configuration. Empty
+  origins are omitted from native configuration instead of silently selecting a
+  production endpoint.
+- Concurrent device-registration requests are coalesced into one native call.
 - Account deletion (`requestAccountDeletion` / `cancelAccountDeletion`) now goes
   through the native runtime's device-signed request instead of an in-process
   bearer token. Request signing is backed by `synheart-auth-swift`.
@@ -226,4 +244,3 @@ a Swift surface.
 [0.2.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.1.0
 [0.0.5]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.0.5
-[0.0.4]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.0.4

@@ -16,7 +16,7 @@ final class RuntimeConfigBuilderTests: XCTestCase {
         XCTAssertEqual(map["client_id"] as? String, "subject-local")
         XCTAssertEqual(map["org_id"] as? String, "")
         XCTAssertEqual(map["data_dir"] as? String, "/tmp/synheart-local")
-        XCTAssertEqual(map["api_base_url"] as? String, ApiEndpoints.defaultAuthBaseUrl)
+        XCTAssertNil(map["api_base_url"])
 
         let ingest = try XCTUnwrap(map["ingest"] as? [String: Bool])
         XCTAssertEqual(ingest, ["enabled": false, "hsi": false, "lab": false])
@@ -28,7 +28,7 @@ final class RuntimeConfigBuilderTests: XCTestCase {
         XCTAssertEqual(deviceAuth["allow_unattested_dev_registration"] as? Bool, false)
 
         let sync = try XCTUnwrap(map["sync"] as? [String: Any])
-        XCTAssertEqual(sync["base_url"] as? String, ApiEndpoints.defaultAuthBaseUrl)
+        XCTAssertNil(sync["base_url"])
     }
 
     func testCloudAndDeviceAuthAreEnabledOnlyWhenConfigured() throws {

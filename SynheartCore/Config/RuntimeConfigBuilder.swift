@@ -26,12 +26,16 @@ enum RuntimeConfigBuilder {
             storage["retention_days"] = retentionDays
         }
 
+        var sync: [String: Any] = ["enabled": config.sync.enabled]
+        if !endpoints.syncBaseURL.isEmpty {
+            sync["base_url"] = endpoints.syncBaseURL
+        }
+
         var result: [String: Any] = [
             "app_id": config.appId,
             "org_id": orgId,
             "subject_id": config.subjectId,
             "client_id": config.subjectId,
-            "api_base_url": endpoints.platformBaseURL,
             "mode": config.mode.rawValue,
             "device_id": config.deviceId,
             "app_version": config.appVersion,
@@ -48,14 +52,15 @@ enum RuntimeConfigBuilder {
                 "package_name": deviceAuth?.packageName ?? "",
                 "allow_unattested_dev_registration": allowUnattestedDevRegistration,
             ],
-            "sync": [
-                "enabled": config.sync.enabled,
-                "base_url": endpoints.syncBaseURL,
-            ],
+            "sync": sync,
             "privacy": [
                 "allow_research": config.privacy.allowResearch,
             ],
         ]
+
+        if let platformBaseURL = endpoints.platformBaseURL {
+            result["api_base_url"] = platformBaseURL
+        }
 
         if let dataDir {
             result["data_dir"] = dataDir

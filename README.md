@@ -341,6 +341,11 @@ For the modular architecture, features are collected in time windows:
 
 ## API Reference
 
+The complete runtime-backed capability map—including sync spaces, typed
+baselines and scores, privacy operations, vendor inputs, HSI history,
+personalization, Syni, and independent instances—is documented in
+[`CAPABILITIES.md`](CAPABILITIES.md).
+
 ### Synheart (Main Entry Point)
 
 | Method | Description |

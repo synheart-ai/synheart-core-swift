@@ -1,7 +1,7 @@
 import Foundation
 
 struct ServiceEndpoints: Equatable {
-    let platformBaseURL: String
+    let platformBaseURL: String?
     let authBaseURL: String
     let consentBaseURL: String
     let syncBaseURL: String
@@ -13,17 +13,13 @@ enum ServiceEndpointResolver {
     static func resolve(_ config: SynheartConfig) -> ServiceEndpoints {
         let cloud = normalized(config.cloudConfig?.baseUrl)
         let configuredSync = normalized(config.sync.baseUrl)
-        let syncIsDefault = configuredSync == nil
-            || configuredSync == normalized(ApiEndpoints.defaultAuthBaseUrl)
-
-        let platform = (!syncIsDefault ? configuredSync : cloud)
-            ?? normalized(ApiEndpoints.defaultCloudBaseUrl)!
+        let platform = configuredSync ?? cloud
 
         return ServiceEndpoints(
             platformBaseURL: platform,
-            authBaseURL: normalized(config.deviceAuthConfig?.authBaseUrl) ?? platform,
-            consentBaseURL: normalized(config.consentConfig?.consentServiceUrl) ?? platform,
-            syncBaseURL: platform
+            authBaseURL: normalized(config.deviceAuthConfig?.authBaseUrl) ?? platform ?? "",
+            consentBaseURL: normalized(config.consentConfig?.consentServiceUrl) ?? platform ?? "",
+            syncBaseURL: configuredSync ?? platform ?? ""
         )
     }
 

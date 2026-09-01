@@ -166,6 +166,13 @@ public struct SynheartConfig {
                 )
             }
         }
+        if let deviceAuthConfig {
+            guard !deviceAuthConfig.authBaseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw SynheartCoreError.notConfigured(
+                    "deviceAuthConfig.authBaseUrl must name the device-auth service origin"
+                )
+            }
+        }
     }
 }
 
@@ -181,7 +188,7 @@ public struct SynheartConfig {
 /// )
 /// ```
 public struct CloudConfig {
-    /// Base URL for Synheart Platform (default: production)
+    /// Platform origin. Empty means the linked runtime applies its own policy.
     public let baseUrl: String
 
     /// Auth provider for request signing. The runtime signs every ingest

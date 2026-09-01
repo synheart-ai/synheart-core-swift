@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import SynheartCore
 
@@ -6,6 +7,9 @@ struct ConsentSessionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSessionCode = false
     @State private var showPermissionCode = false
+    @State private var showOptionalPermissions = false
+    @State private var showEffectivePermissions = false
+    @State private var showSignalSources = false
 
     var body: some View {
         NavigationStack {
@@ -20,7 +24,7 @@ struct ConsentSessionView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
-                        ForEach(AppModel.ConsentKind.allCases) { kind in
+                        ForEach(AppModel.ConsentKind.collection) { kind in
                             Toggle(
                                 kind.title,
                                 isOn: Binding(
@@ -36,19 +40,49 @@ struct ConsentSessionView: View {
 
                         Divider()
 
-                        Text("Effective permissions")
-                            .font(.caption.bold())
-                        ForEach(AppModel.ConsentKind.allCases) { kind in
-                            permissionRow(
-                                kind.title,
-                                allowed: model.effectiveConsentValue(for: kind)
-                            )
-                            .padding(.vertical, 4)
+                        ReliableDisclosureGroup(
+                            "Sharing & optional permissions",
+                            isExpanded: $showOptionalPermissions
+                        ) {
+                            VStack(spacing: 8) {
+                                ForEach(AppModel.ConsentKind.optionalSharing) { kind in
+                                    Toggle(
+                                        kind.title,
+                                        isOn: Binding(
+                                            get: { model.requestedConsentValue(for: kind) },
+                                            set: { enabled in
+                                                Task { await model.setConsent(kind, enabled: enabled) }
+                                            }
+                                        )
+                                    )
+                                    .disabled(!model.isInitialized || model.isBusy)
+                                }
+                            }
+                            .padding(.top, 8)
                         }
 
-                        Text("The runtime may enforce stricter permissions than the saved choices based on app policy and verified device identity.")
+                        ReliableDisclosureGroup(
+                            "Effective permissions",
+                            isExpanded: $showEffectivePermissions
+                        ) {
+                            VStack(spacing: 8) {
+                                ForEach(AppModel.ConsentKind.allCases) { kind in
+                                    permissionRow(
+                                        kind.title,
+                                        allowed: model.effectiveConsentValue(for: kind)
+                                    )
+                                }
+                                Divider()
+                                detailRow("Profile", model.requestedConsent.profileId, monospaced: true)
+                                detailRow("Tier", String(describing: model.requestedConsent.consentTier))
+                                detailRow("Version", model.effectiveConsent?.version ?? "Unavailable")
+                            }
+                            .padding(.top, 8)
+                        }
+
+                        Text("Optional sharing and runtime-enforced details stay tucked away until needed.")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tertiary)
                     }
                 } header: {
                     HStack {
@@ -147,6 +181,48 @@ struct ConsentSessionView: View {
                             }
                         }
                     }
+                }
+
+                Section {
+                    ReliableDisclosureGroup("Signal sources", isExpanded: $showSignalSources) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            sourceRow(
+                                "Wear",
+                                detail: "Heart rate and RR → runtime",
+                                active: Synheart.isWearCollecting
+                            )
+                            sourceRow(
+                                "Behavior",
+                                detail: "Interaction → digital modality",
+                                active: Synheart.isBehaviorCollecting
+                            )
+                            sourceRow(
+                                "Phone",
+                                detail: "Motion and device context",
+                                active: Synheart.isPhoneCollecting
+                            )
+
+                            Divider()
+                            detailRow("Wear samples", "\(model.wearSampleCount)")
+                            detailRow("Carrying signal", "\(model.wearDataSampleCount)")
+                            if let sample = model.lastWearSample {
+                                detailRow("Latest HR", sample.hr.map { String(format: "%.1f bpm", $0) } ?? "No value")
+                                detailRow("Latest RMSSD", sample.hrvRmssd.map { String(format: "%.1f ms", $0) } ?? "No value")
+                                detailRow("RR intervals", "\(sample.rrIntervals?.count ?? 0)")
+                            }
+                            if !model.behaviorBreakdownDescription.isEmpty {
+                                detailRow("Behavior mix", model.behaviorBreakdownDescription)
+                            }
+
+                            Text(signalGuidance)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.top, 8)
+                    }
+                } footer: {
+                    Text("Integration detail")
+                        .foregroundStyle(.tertiary)
                 }
             }
             .navigationTitle("Session")
@@ -363,6 +439,38 @@ struct ConsentSessionView: View {
         }
         .font(.caption)
         .foregroundStyle(allowed ? .green : .secondary)
+    }
+
+    private func sourceRow(
+        _ title: String,
+        detail: String,
+        active: Bool
+    ) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(active ? Color.green : Color.secondary.opacity(0.35))
+                .frame(width: 7, height: 7)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Text(active ? "Active" : "Idle")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(active ? .green : .secondary)
+        }
+    }
+
+    private var signalGuidance: String {
+        if model.wearDataSampleCount > 0 {
+            return "A real physiological field has reached the Swift wear pipeline."
+        }
+        if model.wearSampleCount > 0 {
+            return "The wear source is emitting, but its samples do not yet contain physiological values."
+        }
+        return "No wearable sample has arrived. The SDK does not manufacture physiological evidence."
     }
 
     private var hsiProgressLabel: String {

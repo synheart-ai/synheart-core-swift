@@ -33,7 +33,7 @@ enum SessionStartPolicy {
         case .wear: return consent.biosignals
         case .behavior: return consent.behavior
         case .phoneContext: return consent.phoneContext
-        case .cloud, .syni: return false
+        case .cloud, .synsync, .syni: return false
         }
     }
 
@@ -45,7 +45,7 @@ enum SessionStartPolicy {
         case .wear: return consent.allows(.biosignals)
         case .behavior: return consent.allows(.behavior)
         case .phoneContext: return consent.allows(.phoneContext)
-        case .cloud, .syni: return false
+        case .cloud, .synsync, .syni: return false
         }
     }
 }
