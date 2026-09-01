@@ -10,6 +10,7 @@ struct DiagnosticsView: View {
     @State private var showDependencies = false
     @State private var showRequiredSymbols = false
     @State private var showOptionalSymbols = false
+    @State private var showRuntimeCounters = false
     @State private var copiedDiagnostics = false
     @State private var showDiagnosticsCode = false
 
@@ -119,6 +120,21 @@ struct DiagnosticsView: View {
                             isExpanded: $showOptionalSymbols
                         )
                     }
+                }
+
+                Section {
+                    ReliableDisclosureGroup("Runtime counters", isExpanded: $showRuntimeCounters) {
+                        VStack(spacing: 10) {
+                            detailRow("SDK version", Synheart.sdkVersion)
+                            detailRow("HSI frames", "\(model.rawFrameCount)")
+                            detailRow("Stored sessions", "\(model.sessions.count)")
+                            detailRow("Lab ABI", Synheart.isLabAvailable ? "Available" : "Unavailable")
+                        }
+                        .padding(.top, 8)
+                    }
+                } footer: {
+                    Text("Additional integration detail")
+                        .foregroundStyle(.tertiary)
                 }
 
                 Section {

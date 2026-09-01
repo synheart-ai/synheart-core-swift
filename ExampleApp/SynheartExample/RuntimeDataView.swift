@@ -1,10 +1,15 @@
 import SwiftUI
 import UIKit
+import SynheartCore
 
 struct RuntimeDataView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showStorageDetails = false
     @State private var showSessionCatalog = false
+    @State private var showAdvanced = false
+    @State private var showParityLab = false
+    @State private var showMaintenance = false
+    @State private var showWipeConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -65,9 +70,95 @@ struct RuntimeDataView: View {
                         .padding(.top, 10)
                     }
                 }
+
+                Section {
+                    ReliableDisclosureGroup("Advanced SDK surfaces", isExpanded: $showAdvanced) {
+                        VStack(spacing: 10) {
+                            advancedRow(
+                                "Sync spaces",
+                                available: model.isInitialized && Synheart.syncReadinessSnapshot != nil
+                            )
+                            advancedRow(
+                                "Typed baselines",
+                                available: model.isInitialized,
+                                detail: "\(Synheart.baselineSnapshots.all.count) cached"
+                            )
+                            advancedRow(
+                                "HSI history",
+                                available: model.isInitialized,
+                                detail: "\(Synheart.hsiHistoryCount) windows"
+                            )
+                            advancedRow(
+                                "Syni service",
+                                available: model.isInitialized && Synheart.syniService != nil
+                            )
+                            advancedRow("Privacy & deletion", available: model.isInitialized)
+                            advancedRow("Personalization", available: model.isInitialized)
+
+                            Text("These APIs are intentionally summarized here. Destructive and credentialed flows belong in dedicated integration tests.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.top, 8)
+                    }
+                } footer: {
+                    Text("Optional capabilities")
+                        .foregroundStyle(.tertiary)
+                }
+
+                Section {
+                    ReliableDisclosureGroup("Parity Lab", isExpanded: $showParityLab) {
+                        ParityLabView()
+                    }
+                } footer: {
+                    Text("Internal validation")
+                        .foregroundStyle(.tertiary)
+                }
+
+                Section {
+                    ReliableDisclosureGroup("Maintenance", isExpanded: $showMaintenance) {
+                        Button(role: .destructive) {
+                            showWipeConfirmation = true
+                        } label: {
+                            Label("Wipe local data", systemImage: "trash")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .disabled(!model.isInitialized || model.isBusy)
+
+                        Text("Deletes local sessions, consent records, and learned baselines for this subject.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
             .navigationTitle("Runtime Data")
             .onAppear { model.refreshRuntimeData() }
+            .alert("Wipe local data?", isPresented: $showWipeConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Wipe", role: .destructive) {
+                    Task { await model.wipeLocalData() }
+                }
+            } message: {
+                Text("This cannot be undone. Baselines will restart from cold.")
+            }
+        }
+    }
+
+    private func advancedRow(
+        _ title: String,
+        available: Bool,
+        detail: String? = nil
+    ) -> some View {
+        HStack(spacing: 9) {
+            Circle()
+                .fill(available ? Color.green.opacity(0.8) : Color.secondary.opacity(0.3))
+                .frame(width: 6, height: 6)
+            Text(title)
+            Spacer()
+            Text(detail ?? (available ? "Available" : "Unavailable"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

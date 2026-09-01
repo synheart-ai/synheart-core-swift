@@ -98,6 +98,21 @@ final class RuntimeSymbolDiagnosticsTests: XCTestCase {
         XCTAssertTrue(symbols.isDisjoint(with: RuntimeSymbolManifest.required))
     }
 
+    func testParityCapabilitiesRemainAdditiveForOlderRuntimeCompatibility() {
+        let additive: Set<String> = [
+            "synheart_core_sync_create_space",
+            "synheart_core_baseline_hydrate_local",
+            "synheart_core_request_data_deletion",
+            "synheart_core_hsi_history_list",
+            "synheart_core_personalization_context_json",
+            "synheart_core_syni_chat",
+            "synheart_core_stream_start",
+        ]
+
+        XCTAssertTrue(additive.isSubset(of: RuntimeSymbolManifest.optional))
+        XCTAssertTrue(additive.isDisjoint(with: RuntimeSymbolManifest.required))
+    }
+
     func testConsentAuthoritySymbolsAreRequired() {
         let consentAuthority: Set<String> = [
             "synheart_core_current_consent",

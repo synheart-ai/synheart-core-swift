@@ -5,7 +5,7 @@ import SynheartCore
 @MainActor
 final class AppModel: ObservableObject {
     enum ConsentKind: String, CaseIterable, Identifiable {
-        case biosignals, behavior, phoneContext, cloudUpload, syni
+        case biosignals, behavior, phoneContext, cloudUpload, syni, vendorSync, research
 
         var id: String { rawValue }
         var title: String {
@@ -15,8 +15,13 @@ final class AppModel: ObservableObject {
             case .phoneContext: return "Phone context"
             case .cloudUpload: return "Cloud upload"
             case .syni: return "Syni personalization"
+            case .vendorSync: return "Vendor sync"
+            case .research: return "Research"
             }
         }
+
+        static let collection: [ConsentKind] = [.biosignals, .behavior, .phoneContext]
+        static let optionalSharing: [ConsentKind] = [.cloudUpload, .syni, .vendorSync, .research]
     }
 
     enum CloudIngestionStage: Equatable {
@@ -118,7 +123,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var typedStateCount = 0
     @Published private(set) var dataBearingStateCount = 0
     @Published private(set) var behaviorEventCount = 0
+    @Published private(set) var behaviorEventBreakdown: [String: Int] = [:]
     @Published private(set) var motionSampleCount = 0
+    @Published private(set) var wearSampleCount = 0
+    @Published private(set) var wearDataSampleCount = 0
+    @Published private(set) var lastWearSample: WearSample?
     @Published private(set) var storageUsage: StorageUsage?
     @Published private(set) var sessions: [SessionRecord] = []
     @Published private(set) var uploadStatus = UploadQueueStatus(state: .localOnly, queueLength: 0)
@@ -145,11 +154,16 @@ final class AppModel: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
-        let storedSubject = defaults.string(forKey: "example.subjectId")
-            ?? "example_\(UUID().uuidString.lowercased())"
+        let parityProbe = CommandLine.arguments.contains("--run-parity-probe")
+        let storedSubject = parityProbe
+            ? "parity_\(UUID().uuidString.lowercased())"
+            : defaults.string(forKey: "example.subjectId")
+                ?? "example_\(UUID().uuidString.lowercased())"
         let storedDevice = defaults.string(forKey: "example.deviceId")
             ?? UUID().uuidString.lowercased()
-        defaults.set(storedSubject, forKey: "example.subjectId")
+        if !parityProbe {
+            defaults.set(storedSubject, forKey: "example.subjectId")
+        }
         defaults.set(storedDevice, forKey: "example.deviceId")
 
         appId = ExampleEnvironment.current.appId
@@ -264,10 +278,33 @@ final class AppModel: ObservableObject {
         return names.isEmpty ? "None" : names.joined(separator: ", ")
     }
 
+    var behaviorBreakdownDescription: String {
+        behaviorEventBreakdown
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key) \($0.value)" }
+            .joined(separator: " · ")
+    }
+
+    func persistIdentity() {
+        let trimmedAppId = appId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSubjectId = subjectId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAppId.isEmpty, !trimmedSubjectId.isEmpty else {
+            report(ExampleError.operation("App ID and subject ID are required"), operation: "Save identity")
+            return
+        }
+        appId = trimmedAppId
+        subjectId = trimmedSubjectId
+        defaults.set(appId, forKey: "example.appId")
+        defaults.set(subjectId, forKey: "example.subjectId")
+        reportSuccess("Developer identity saved")
+    }
+
     func initializeSDK() async {
         await perform("Initialize SDK") {
             self.defaults.set(self.appId, forKey: "example.appId")
-            self.defaults.set(self.subjectId, forKey: "example.subjectId")
+            if !CommandLine.arguments.contains("--run-parity-probe") {
+                self.defaults.set(self.subjectId, forKey: "example.subjectId")
+            }
 
             let config = SynheartConfig(
                 appId: self.appId.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -279,7 +316,7 @@ final class AppModel: ObservableObject {
                 deviceId: self.deviceId,
                 storage: StorageConfig(enabled: true, retentionDays: 30),
                 sync: SyncConfig(
-                    enabled: false,
+                    enabled: self.isCloudConfigured,
                     baseUrl: self.environment.cloudBaseUrl ?? ApiEndpoints.defaultCloudBaseUrl
                 ),
                 cloudConfig: self.makeCloudConfig(),
@@ -444,6 +481,10 @@ final class AppModel: ObservableObject {
             )
         case .syni:
             return form.copyWith(syni: enabled)
+        case .vendorSync:
+            return form.copyWith(allowVendorSync: enabled)
+        case .research:
+            return form.copyWith(allowResearch: enabled)
         }
     }
 
@@ -501,7 +542,11 @@ final class AppModel: ObservableObject {
             self.typedStateCount = 0
             self.dataBearingStateCount = 0
             self.behaviorEventCount = 0
+            self.behaviorEventBreakdown = [:]
             self.motionSampleCount = 0
+            self.wearSampleCount = 0
+            self.wearDataSampleCount = 0
+            self.lastWearSample = nil
 
             if self.effectiveConsent?.biosignals == true { Synheart.activate(.wear) }
             if self.effectiveConsent?.behavior == true { Synheart.activate(.behavior) }
@@ -691,6 +736,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func wipeLocalData() async {
+        await perform("Wipe local data") {
+            try await Synheart.wipeLocalData()
+            self.latestState = nil
+            self.rawHSI = ""
+            self.rawFrameCount = 0
+            self.typedStateCount = 0
+            self.dataBearingStateCount = 0
+            self.behaviorEventCount = 0
+            self.behaviorEventBreakdown = [:]
+            self.motionSampleCount = 0
+            self.wearSampleCount = 0
+            self.wearDataSampleCount = 0
+            self.lastWearSample = nil
+            self.refreshRuntimeData()
+            self.reportSuccess("Local runtime data and baselines were wiped")
+        }
+    }
+
     func disposeSDK() async {
         await perform("Dispose SDK") {
             try await Synheart.dispose()
@@ -714,7 +778,11 @@ final class AppModel: ObservableObject {
             self.typedStateCount = 0
             self.dataBearingStateCount = 0
             self.behaviorEventCount = 0
+            self.behaviorEventBreakdown = [:]
             self.motionSampleCount = 0
+            self.wearSampleCount = 0
+            self.wearDataSampleCount = 0
+            self.lastWearSample = nil
             self.cloudTestBaselineUploadAt = nil
             self.cloudTestHasFinalizedSession = false
             self.reportSuccess("SDK disposed. Secure device identity was preserved.")
@@ -723,6 +791,13 @@ final class AppModel: ObservableObject {
 
     func clearError() { lastError = nil }
     func clearSuccess() { lastSuccess = nil }
+
+    func reportInitializationRequired() {
+        report(
+            ExampleError.operation("Initialize the SDK from Setup first"),
+            operation: "Open example section"
+        )
+    }
 
     func diagnosticsText() -> String {
         let required = symbolDiagnostics.missingRequiredSymbols.joined(separator: ", ")
@@ -770,6 +845,8 @@ final class AppModel: ObservableObject {
         case .phoneContext: return requestedConsent.phoneContext
         case .cloudUpload: return requestedConsent.allowCloud
         case .syni: return requestedConsent.syni
+        case .vendorSync: return requestedConsent.allowVendorSync
+        case .research: return requestedConsent.allowResearch
         }
     }
 
@@ -781,6 +858,8 @@ final class AppModel: ObservableObject {
         case .phoneContext: return effectiveConsent.phoneContext
         case .cloudUpload: return effectiveConsent.cloudUpload
         case .syni: return effectiveConsent.syni
+        case .vendorSync: return effectiveConsent.vendorSync
+        case .research: return effectiveConsent.research
         }
     }
 
@@ -839,7 +918,24 @@ final class AppModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
                 self?.behaviorEventCount += 1
-                self?.appendEvent("Behavior: \(String(describing: event.type))")
+                let type = String(describing: event.type)
+                self?.behaviorEventBreakdown[type, default: 0] += 1
+                self?.appendEvent("Behavior: \(type)")
+            }
+            .store(in: &subscriptions)
+
+        Synheart.onWearSample
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] sample in
+                guard let self else { return }
+                self.wearSampleCount += 1
+                self.lastWearSample = sample
+                if sample.hr != nil
+                    || sample.hrvRmssd != nil
+                    || sample.respRate != nil
+                    || !(sample.rrIntervals?.isEmpty ?? true) {
+                    self.wearDataSampleCount += 1
+                }
             }
             .store(in: &subscriptions)
 

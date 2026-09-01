@@ -4,9 +4,20 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedTab: AppTab = .setup
+    @StateObject private var parityRunner = ParityTestRunner()
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: Binding(
+            get: { selectedTab },
+            set: { requestedTab in
+                if requestedTab == .setup || model.isInitialized {
+                    selectedTab = requestedTab
+                } else {
+                    selectedTab = .setup
+                    model.reportInitializationRequired()
+                }
+            }
+        )) {
             SetupView {
                 selectedTab = .session
             }
@@ -22,6 +33,7 @@ struct ContentView: View {
                 .tag(AppTab.hsi)
 
             RuntimeDataView()
+                .environmentObject(parityRunner)
                 .tabItem { Label("Data", systemImage: "externaldrive") }
                 .tag(AppTab.data)
 
@@ -57,6 +69,9 @@ struct ContentView: View {
         }
         .task {
             await model.runAutomatedSessionStopProbeIfRequested()
+            if CommandLine.arguments.contains("--run-parity-probe") {
+                await parityRunner.run(model: model)
+            }
         }
     }
 }
