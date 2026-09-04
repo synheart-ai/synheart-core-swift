@@ -10,6 +10,13 @@ before enabling a capability that may not exist in an older bundled runtime.
 - Platform and authentication origins must be configured explicitly; the SDK
   does not silently select a production server.
 - Concurrent device-registration calls are coalesced into one native request.
+- Core v0.24 identity repair uses `reattestDeviceAuth()` without rotating the
+  installed key or device id. `logoutDeviceAuth()` removes native identity and
+  sync membership; await `logout()` before clearing host account credentials.
+- `ensureDeviceAuthRegisteredOrThrow()` preserves typed registration failures.
+  `NativeOperationFailure.isAccountMismatch` identifies account-switch recovery.
+- Sync and identity work is serialized per native handle and retains its owner
+  until completion, including during disposal.
 - Runtime diagnostics separate the required ABI from optional capabilities so
   an older runtime can still initialize while newer features remain unavailable.
 

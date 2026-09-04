@@ -5,17 +5,17 @@ public extension Synheart {
 
     static func syncCreateSpace(deviceName: String? = nil) async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.syncCreateSpace(deviceName: deviceName ?? "") }
+        return await bridge.performAsync { bridge in bridge.syncCreateSpace(deviceName: deviceName ?? "") }
     }
 
     static func syncGeneratePairing() async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.syncGeneratePairing() }
+        return await bridge.performAsync { bridge in bridge.syncGeneratePairing() }
     }
 
     static func syncJoinSpace(pairingToken: String, deviceName: String? = nil) async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run {
+        return await bridge.performAsync { bridge in
             bridge.syncJoinSpace(pairingToken: pairingToken, deviceName: deviceName ?? "")
         }
     }
@@ -66,53 +66,53 @@ public extension Synheart {
 
     static func syncRecoverSpace(recoveryKey: String, spaceId: String) async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run {
+        return await bridge.performAsync { bridge in
             bridge.syncRecoverSpace(recoveryKey: recoveryKey, spaceId: spaceId)
         }
     }
 
     static func syncLeaveSpace() async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.syncLeaveSpace() }
+        return await bridge.performAsync { bridge in bridge.syncLeaveSpace() }
     }
 
     static func syncListDevices() async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.syncListDevices() }
+        return await bridge.performAsync { bridge in bridge.syncListDevices() }
     }
 
     static func syncRevokeDevice(deviceId: String) async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.syncRevokeDevice(deviceId: deviceId) }
+        return await bridge.performAsync { bridge in bridge.syncRevokeDevice(deviceId: deviceId) }
     }
 
     static func syncDeleteSpace() async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.syncDeleteSpace() }
+        return await bridge.performAsync { bridge in bridge.syncDeleteSpace() }
     }
 
     static func syncClearLocalSpace() async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.syncClearLocalSpace() }
+        return await bridge.performAsync { bridge in bridge.syncClearLocalSpace() }
     }
 
     // MARK: - Baseline transport and scores
 
     static func baselineHydrateLocal() async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        let response = await RuntimeWorkExecutor.run { bridge.baselineHydrateLocal() }
+        let response = await bridge.performAsync { bridge in bridge.baselineHydrateLocal() }
         if let response { _ = baselineSnapshots.hydrate(from: response) }
         return response
     }
 
     static func baselineExportOffline(passphrase: String) async -> Data? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.baselineExportOffline(passphrase: passphrase) }
+        return await bridge.performAsync { bridge in bridge.baselineExportOffline(passphrase: passphrase) }
     }
 
     static func baselineImportOffline(passphrase: String, blob: Data) async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.baselineImportOffline(passphrase: passphrase, blob: blob) }
+        return await bridge.performAsync { bridge in bridge.baselineImportOffline(passphrase: passphrase, blob: blob) }
     }
 
     static func computeSleepScore(_ input: SleepScoreInput) -> SleepScoreResult? {
@@ -195,7 +195,7 @@ public extension Synheart {
 
     static func researchStudyStatus() async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        return await RuntimeWorkExecutor.run { bridge.researchStudyStatus() }
+        return await bridge.performAsync { bridge in bridge.researchStudyStatus() }
     }
 
     static func recordStudyConsent(_ payload: [String: Any]) async throws -> [String: Any]? {
@@ -205,7 +205,7 @@ public extension Synheart {
         guard let bridge = shared.coreRuntime?.bridge else { throw SynheartError.notInitialized }
         let data = try JSONSerialization.data(withJSONObject: payload)
         let json = String(decoding: data, as: UTF8.self)
-        return await RuntimeWorkExecutor.run { bridge.recordStudyConsent(payloadJson: json) }
+        return await bridge.performAsync { bridge in bridge.recordStudyConsent(payloadJson: json) }
     }
 
     // MARK: - Runtime inputs, vendor data, and HSI history
@@ -278,7 +278,7 @@ public extension Synheart {
         guard let bridge = shared.coreRuntime?.bridge else { return [] }
         let fromMs = Int64(from.timeIntervalSince1970 * 1_000)
         let toMs = Int64(to.timeIntervalSince1970 * 1_000)
-        return await RuntimeWorkExecutor.run { bridge.fetchCloudHsi(fromMs: fromMs, toMs: toMs) }
+        return await bridge.performAsync { bridge in bridge.fetchCloudHsi(fromMs: fromMs, toMs: toMs) }
     }
 
     static var hsiHistoryCount: Int64 { shared.coreRuntime?.bridge?.hsiHistoryCount() ?? 0 }

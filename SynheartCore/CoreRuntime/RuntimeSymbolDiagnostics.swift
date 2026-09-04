@@ -138,6 +138,8 @@ enum RuntimeSymbolManifest {
         "synheart_core_resilience_compute_v1",
         "synheart_core_sdk_device_auth_status",
         "synheart_core_sdk_register_device",
+        "synheart_core_sdk_reattest_device",
+        "synheart_core_sdk_logout",
         "synheart_core_sdk_set_crypto_callbacks",
         "synheart_core_set_ambient_capture",
         "synheart_core_set_storage_callbacks",

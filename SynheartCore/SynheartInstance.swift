@@ -13,7 +13,6 @@ public final class SynheartInstance {
 
     private let stateLock = NSLock()
     private var shim: SynheartCoreShim?
-    private var directoryRegistration: String?
 
     public init(config: SynheartConfig, dataDirectory: URL) throws {
         try config.validate()
@@ -34,11 +33,13 @@ public final class SynheartInstance {
             if let bridge = runtime.bridge {
                 _ = bridge.setStorageCallbacks()
                 if config.deviceAuthConfig != nil { _ = bridge.setSdkCryptoCallbacks() }
+                bridge.onNativeHandleReleased = {
+                    _ = Self.registryLock.synchronized { Self.activeDirectories.remove(key) }
+                }
             }
             self.config = config
             self.dataDirectory = directory
             self.shim = runtime
-            self.directoryRegistration = key
         } catch {
             _ = Self.registryLock.synchronized { Self.activeDirectories.remove(key) }
             throw error
@@ -58,7 +59,7 @@ public final class SynheartInstance {
     @discardableResult
     public func registerDevice(clientId: String) async -> [String: Any]? {
         guard let bridge = withBridge({ $0 }) else { return nil }
-        return await RuntimeWorkExecutor.run {
+        return await bridge.performAsync { bridge in
             guard let raw = bridge.registerDevice(clientId: clientId) else { return nil }
             return Self.decodeMap(raw)
         }
@@ -66,6 +67,32 @@ public final class SynheartInstance {
 
     public func deviceAuthStatus() -> [String: Any]? {
         withBridge { bridge in bridge.deviceAuthStatus().flatMap(Self.decodeMap) } ?? nil
+    }
+
+    /// Refresh attestation without rotating this instance's installed identity.
+    public func reattestDevice() async throws -> [String: Any] {
+        guard let bridge = withBridge({ $0 }) else { throw SynheartError.notInitialized }
+        guard bridge.isDeviceReattestAvailable else {
+            throw NativeOperationFailure(code: "DEVICE_REATTEST_UNSUPPORTED", reason: .unsupported,
+                                         message: "Device re-attestation requires Core v0.24")
+        }
+        let result: Result<[String: Any], Error> = await bridge.performAsync { bridge in
+            Result { try DeviceIdentityResponse.decode(bridge.reattestDevice(), operation: "Re-attestation") }
+        }
+        return try result.get()
+    }
+
+    /// Clear this instance's installed device identity and sync membership.
+    public func logoutDevice() async throws -> [String: Any] {
+        guard let bridge = withBridge({ $0 }) else { throw SynheartError.notInitialized }
+        guard bridge.isDeviceLogoutAvailable else {
+            throw NativeOperationFailure(code: "DEVICE_LOGOUT_UNSUPPORTED", reason: .unsupported,
+                                         message: "Device logout requires Core v0.24")
+        }
+        let result: Result<[String: Any], Error> = await bridge.performAsync { bridge in
+            Result { try DeviceIdentityResponse.decode(bridge.logoutDevice(), operation: "Device logout") }
+        }
+        return try result.get()
     }
 
     @discardableResult
@@ -167,14 +194,7 @@ public final class SynheartInstance {
 
     /// Idempotently frees this instance's native handle.
     public func dispose() {
-        let registration = stateLock.synchronized { () -> String? in
-            shim = nil
-            defer { directoryRegistration = nil }
-            return directoryRegistration
-        }
-        if let registration {
-            _ = Self.registryLock.synchronized { Self.activeDirectories.remove(registration) }
-        }
+        stateLock.synchronized { shim = nil }
     }
 
     private func withShim<T>(_ body: (SynheartCoreShim) -> T) -> T? {

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - Unreleased
 
 ### Added
+- Core v0.24 device identity APIs: `reattestDeviceAuth()` preserves installed
+  identity during repair; `logoutDeviceAuth()` clears identity and sync membership.
+  Independent instances expose `reattestDevice()` and `logoutDevice()`.
+- `ensureDeviceAuthRegisteredOrThrow()` preserves typed native failures,
+  including `DEVICE_ACCOUNT_MISMATCH`. Restored canonical subjects are compared
+  before reusing registration.
 - Full sync-space lifecycle and typed readiness checks, including create,
   pairing, join, recovery, device management, leave, deletion, and local clear.
 - Typed baseline envelopes and snapshot hydration for reference, HSI-axis,
@@ -39,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behavior/motion publishers, and upload/device-auth diagnostic results.
 
 ### Changed
+- `reregisterDeviceAuth()` is deprecated and delegates to identity-preserving
+  re-attestation, never first-time registration. Repair requires Core v0.24.
+- `logout()` awaits native identity logout before local data and consent cleanup.
+  Hosts must await logout before removing their own account credentials. Older
+  runtimes retain local cleanup without claiming native identity removal.
+- Blocking sync and identity operations share a serial queue per native handle.
+  Pending work retains the handle and isolated data-directory reservation through
+  disposal; independent runtimes no longer block each other's queued operations.
 - Platform and authentication origins are now explicit configuration. Empty
   origins are omitted from native configuration instead of silently selecting a
   production endpoint.

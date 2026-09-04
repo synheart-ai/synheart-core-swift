@@ -91,6 +91,15 @@ public struct RuntimeSessionStopReport: Codable, Equatable, Sendable {
 /// Complex types are exchanged as JSON strings; all returned C strings
 /// must be freed with `synheart_core_free_string`.
 public final class CoreRuntimeBridge {
+    private let operationQueue = RuntimeOperationQueue()
+    // Installed by isolated hosts before publishing the bridge. Released only
+    // after pending closures have released their ownership of the native handle.
+    var onNativeHandleReleased: (() -> Void)?
+
+    /// Serializes blocking identity and sync work, retaining this native handle.
+    func performAsync<T>(_ operation: @escaping (CoreRuntimeBridge) -> T) async -> T {
+        await operationQueue.run { operation(self) }
+    }
 
     // MARK: - Opaque handle
 
@@ -388,6 +397,7 @@ public final class CoreRuntimeBridge {
         Self._setStreamCb?(handle, Self.streamNoopCallback, nil)
         streamCallbackBox?.release()
         Self._free?(handle)
+        onNativeHandleReleased?()
     }
 
     // MARK: - String Helpers
@@ -1111,6 +1121,21 @@ public final class CoreRuntimeBridge {
     private static let _setStorageCb:   SetStorageCallbacksFn? = sym("synheart_core_set_storage_callbacks")
     private static let _registerDevice: RegisterDeviceFn?      = sym("synheart_core_sdk_register_device")
     private static let _deviceAuthStat: DeviceAuthStatusFn?    = sym("synheart_core_sdk_device_auth_status")
+    private static let _reattestDevice: DeviceAuthStatusFn? = sym("synheart_core_sdk_reattest_device")
+    private static let _logoutDevice: DeviceAuthStatusFn? = sym("synheart_core_sdk_logout")
+
+    public var isDeviceReattestAvailable: Bool { Self._reattestDevice != nil }
+    public var isDeviceLogoutAvailable: Bool { Self._logoutDevice != nil }
+
+    public func reattestDevice() -> String? {
+        guard let fn = Self._reattestDevice else { return nil }
+        return consumeCString(fn(handle))
+    }
+
+    public func logoutDevice() -> String? {
+        guard let fn = Self._logoutDevice else { return nil }
+        return consumeCString(fn(handle))
+    }
 
     /// Hand the runtime the Secure Enclave-backed crypto callbacks. Returns the
     /// runtime status (0 ok), or -2 if the symbol is absent in this build.
