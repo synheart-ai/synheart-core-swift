@@ -622,8 +622,8 @@ final class AppModel: ObservableObject {
     private func registerDevice(force: Bool) async {
         await perform(force ? "Re-attest device" : "Register device") {
             let result = force
-                ? await Synheart.reregisterDeviceAuth()
-                : await Synheart.ensureDeviceAuthRegistered()
+                ? try await Synheart.reattestDeviceAuth()
+                : try await Synheart.ensureDeviceAuthRegisteredOrThrow()
             self.lastRegistrationFailure = result.failure
             self.refreshRuntimeData()
             if let failure = result.failure {

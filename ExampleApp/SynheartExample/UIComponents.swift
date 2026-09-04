@@ -443,7 +443,7 @@ enum ExampleCodeSnippets {
 
         if deviceAuthConfigured {
             lines.append("// Force a fresh device registration and attestation.")
-            lines.append("let registration = await Synheart.reregisterDeviceAuth()")
+            lines.append("let registration = try await Synheart.reattestDeviceAuth()")
             lines.append("if let failure = registration.failure {")
             lines.append("    print(failure.message)")
             lines.append("}")

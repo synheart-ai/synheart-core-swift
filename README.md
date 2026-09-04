@@ -280,6 +280,30 @@ if let state = Synheart.currentHSIState {
 ```
 
 
+### Device identity lifecycle
+
+With `DeviceAuthConfig` configured, register once and use re-attestation for
+repair. Core v0.24 re-attestation preserves the installed device identity, key,
+and sync membership. It does not repeat first-time registration.
+
+```swift
+let registration = try await Synheart.ensureDeviceAuthRegisteredOrThrow()
+let repaired = try await Synheart.reattestDeviceAuth()
+
+// Run before clearing your app's account credentials.
+try await Synheart.logout()
+```
+
+Handle `NativeOperationFailure` to distinguish account mismatch
+(`isAccountMismatch`), policy refusal, and retryable errors. Do not automatically
+erase an identity or retry registration when an account mismatch is reported.
+
+`reregisterDeviceAuth()` is a deprecated compatibility alias for re-attestation.
+On older runtimes, repair reports unsupported rather than rotating identity.
+`logout()` retains local cleanup on older runtimes; native identity removal and
+sync-membership cleanup require Core v0.24. Independent instances expose
+`reattestDevice()` and `logoutDevice()` with typed failures.
+
 ## Error Handling
 
 The SDK uses Swift's native error handling with typed errors:

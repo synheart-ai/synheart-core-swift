@@ -452,7 +452,8 @@ public class Synheart {
         if shared.isRunning {
             try await shared._stopSession()
         }
-        let wiped = await RuntimeWorkExecutor.run { cr.wipeLocalData() }
+        guard let bridge = cr.bridge else { throw SynheartError.notInitialized }
+        let wiped = await bridge.performAsync { _ in cr.wipeLocalData() }
         guard wiped else {
             throw SynheartError.runtimeOperationFailed("Unable to wipe local data")
         }
@@ -508,6 +509,12 @@ public class Synheart {
     }
 
     private func _logout() async throws {
+        // Preserve account credentials until Core has left the sync space and
+        // removed the installed identity. A native failure must stop cleanup.
+        try await Self.logoutDeviceAuth()
+        try await Self.wipeLocalData()
+        Baselines.shared.reset()
+        Self.baselineSnapshots.reset()
         guard let consentModule, let coreRuntime, coreRuntime.isAvailable else {
             throw SynheartError.notInitialized
         }
@@ -546,7 +553,8 @@ public class Synheart {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
             throw SynheartError.notInitialized
         }
-        let status = await RuntimeWorkExecutor.run {
+        guard let bridge = cr.bridge else { throw SynheartError.notInitialized }
+        let status = await bridge.performAsync { _ in
             cr.setSyncEnabled(enabled)
             return cr.syncStatus()
         }
@@ -565,7 +573,8 @@ public class Synheart {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
             throw SynheartError.notInitialized
         }
-        let result = await RuntimeWorkExecutor.run { cr.syncNow() }
+        guard let bridge = cr.bridge else { throw SynheartError.notInitialized }
+        let result = await bridge.performAsync { _ in cr.syncNow() }
         guard let result else {
             throw SynheartError.runtimeOperationFailed("Native sync cycle failed")
         }
@@ -715,17 +724,72 @@ public class Synheart {
         await shared._ensureDeviceAuthRegistered()
     }
 
+    @discardableResult
+    public static func ensureDeviceAuthRegisteredOrThrow() async throws -> DeviceRegistrationResult {
+        let result = await ensureDeviceAuthRegistered()
+        if let failure = result.failure { throw failure }
+        guard result.success else {
+            throw NativeOperationFailure(code: "DEVICE_REGISTRATION_FAILED", reason: .unknown,
+                                         message: "Device registration did not complete")
+        }
+        return result
+    }
+
+    /// Core v0.24 repair preserves the device key, identity, and sync membership.
+    @discardableResult
+    public static func reattestDeviceAuth() async throws -> DeviceRegistrationResult {
+        guard let bridge = shared.coreRuntime?.bridge else { throw SynheartError.notInitialized }
+        guard bridge.isDeviceReattestAvailable else {
+            throw NativeOperationFailure(code: "DEVICE_REATTEST_UNSUPPORTED", reason: .unsupported,
+                                         message: "Device re-attestation requires Core v0.24")
+        }
+        let result: Result<DeviceRegistrationResult, Error> = await bridge.performAsync { bridge in
+            Result {
+                let map = try DeviceIdentityResponse.decode(bridge.reattestDevice(), operation: "Re-attestation")
+                let status = bridge.deviceAuthStatus().flatMap { shared.parseDict($0) }
+                    .map(DeviceAuthStatus.init(runtimeMap:)) ?? DeviceAuthStatus(runtimeMap: map)
+                guard status.isRegistered else {
+                    throw NativeOperationFailure(code: "DEVICE_REATTEST_FAILED", reason: .unknown,
+                                                 message: "Device is not registered after re-attestation")
+                }
+                return DeviceRegistrationResult(success: true, status: status)
+            }
+        }
+        let registration = try result.get()
+        shared.syncSubjectFromNative()
+        _ = await ensureCloudConsentReady()
+        return registration
+    }
+
+    /// Clear the installed native identity before the host clears its own login.
+    /// Older runtimes retain the legacy local cleanup performed by logout().
+    public static func logoutDeviceAuth() async throws {
+        guard let bridge = shared.coreRuntime?.bridge else { throw SynheartError.notInitialized }
+        if bridge.isDeviceLogoutAvailable {
+            let result: Result<Void, Error> = await bridge.performAsync { bridge in
+                Result { _ = try DeviceIdentityResponse.decode(bridge.logoutDevice(), operation: "Device logout") }
+            }
+            try result.get()
+        }
+        shared.currentTokenSubject = nil
+        shared.nativeSubjectIdOverride = nil
+    }
+
     private func _ensureDeviceAuthRegistered() async -> DeviceRegistrationResult {
         await _registerDevice(force: false)
     }
 
-    /// Force a fresh native registration even when a secure local device record
-    /// says this device is already registered. Use this only as a user-initiated
-    /// repair after the server has lost or revoked the corresponding record.
-    /// Local sessions, consent choices, baselines, and upload data are preserved.
+    /// Compatibility alias for identity-preserving repair. Never re-registers
+    /// or rotates an installed identity, including on older runtimes.
     @discardableResult
+    @available(*, deprecated, message: "Use reattestDeviceAuth(); registration is first-time setup only")
     public static func reregisterDeviceAuth() async -> DeviceRegistrationResult {
-        await shared._registerDevice(force: true)
+        do { return try await reattestDeviceAuth() }
+        catch {
+            let failure = (error as? NativeOperationFailure) ?? NativeOperationFailure(
+                code: "DEVICE_REATTEST_FAILED", reason: .unknown, message: error.localizedDescription)
+            return DeviceRegistrationResult(success: false, status: deviceAuthStatus ?? DeviceAuthStatus(status: "failed"), failure: failure)
+        }
     }
 
     private func _registerDevice(force: Bool) async -> DeviceRegistrationResult {
@@ -748,51 +812,42 @@ public class Synheart {
     private func _performDeviceRegistration(force: Bool) async -> DeviceRegistrationResult {
         guard _synheartConfig?.deviceAuthConfig != nil,
               let bridge = coreRuntime?.bridge else {
-            let failure = NativeOperationFailure(
-                code: "DEVICE_AUTH_NOT_CONFIGURED",
-                reason: .misconfigured,
-                message: "DeviceAuthConfig is required before registering a device"
-            )
-            return DeviceRegistrationResult(
-                success: false,
+            return DeviceRegistrationResult(success: false,
                 status: DeviceAuthStatus(status: "not_configured"),
-                failure: failure
-            )
+                failure: NativeOperationFailure(code: "DEVICE_AUTH_NOT_CONFIGURED",
+                    reason: .misconfigured, message: "DeviceAuthConfig is required"))
         }
-        if !force, let existing = Self.deviceAuthStatus, existing.isRegistered {
-            return DeviceRegistrationResult(success: true, status: existing)
+        let clientId = subjectId ?? ""
+        let result = await bridge.performAsync { bridge -> DeviceRegistrationResult in
+            do {
+                let existing = bridge.deviceAuthStatus().flatMap { self.parseDict($0) }
+                    .map(DeviceAuthStatus.init(runtimeMap:))
+                if !force, let existing, existing.isRegistered,
+                   existing.matchesSubject(bridge.runtimeSubjectId() ?? clientId) {
+                    return DeviceRegistrationResult(success: true, status: existing)
+                }
+                guard !clientId.isEmpty else { throw SynheartError.invalidArgument("Subject is empty") }
+                let map = try DeviceIdentityResponse.decode(
+                    bridge.registerDevice(clientId: clientId), operation: "Device registration")
+                let status = bridge.deviceAuthStatus().flatMap { self.parseDict($0) }
+                    .map(DeviceAuthStatus.init(runtimeMap:)) ?? DeviceAuthStatus(runtimeMap: map)
+                guard status.isRegistered else {
+                    throw NativeOperationFailure(code: "DEVICE_REGISTRATION_FAILED", reason: .unknown,
+                        message: "Device registration did not complete")
+                }
+                return DeviceRegistrationResult(success: true, status: status)
+            } catch {
+                let failure = (error as? NativeOperationFailure) ?? NativeOperationFailure(
+                    code: "DEVICE_REGISTRATION_FAILED", reason: .unknown, message: error.localizedDescription)
+                return DeviceRegistrationResult(success: false,
+                    status: DeviceAuthStatus(status: "failed"), failure: failure)
+            }
         }
-        guard let clientId = subjectId, !clientId.isEmpty,
-              let json = await RuntimeWorkExecutor.run({ bridge.registerDevice(clientId: clientId) }),
-              let map = parseDict(json) else {
-            let failure = NativeOperationFailure(
-                code: "DEVICE_REGISTRATION_NO_RESULT",
-                reason: .unknown,
-                message: "Native device registration returned no result"
-            )
-            return DeviceRegistrationResult(
-                success: false,
-                status: DeviceAuthStatus(status: "failed"),
-                failure: failure
-            )
-        }
-        if let failure = NativeOperationFailure.fromRuntimeMap(map, fallback: "Device registration failed") {
-            return DeviceRegistrationResult(
-                success: false,
-                status: DeviceAuthStatus(runtimeMap: map),
-                failure: failure
-            )
-        }
-        let status = Self.deviceAuthStatus
-            ?? DeviceAuthStatus(
-                status: "registered",
-                deviceId: map["device_id"] as? String,
-                attestation: map["attestation"] as? String ?? "unknown"
-            )
-        if status.isRegistered {
+        if result.success {
+            syncSubjectFromNative()
             _ = await _ensureCloudConsentReady()
         }
-        return DeviceRegistrationResult(success: status.isRegistered, status: status)
+        return result
     }
 
     // MARK: - Activation API
@@ -1950,6 +2005,9 @@ public class Synheart {
 
     private func _dispose() async throws {
         try await _stopSession()
+        if let bridge = coreRuntime?.bridge {
+            await bridge.performAsync { _ in () }
+        }
         await moduleManager.disposeAll()
 
         sessionModule?.dispose()

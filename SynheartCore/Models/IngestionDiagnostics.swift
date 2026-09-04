@@ -11,7 +11,9 @@ public enum NativeFailureReason: String, Sendable {
     case unknown
 }
 
-public struct NativeOperationFailure: Equatable, Sendable {
+public struct NativeOperationFailure: Error, LocalizedError, Equatable, Sendable {
+    public var errorDescription: String? { message }
+    public var isAccountMismatch: Bool { code == "DEVICE_ACCOUNT_MISMATCH" }
     /// Stable native error code, for example `DEVICE_REGISTRATION_REQUIRED`.
     public let code: String
     public let reason: NativeFailureReason
@@ -160,20 +162,29 @@ public struct DeviceAuthStatus: Equatable, Sendable {
     public let status: String
     public let deviceId: String?
     public let attestation: String
+    public let subjectId: String?
+
+    /// Old runtimes omit subject_id. Compare canonical ids, not raw client ids.
+    public func matchesSubject(_ expected: String) -> Bool {
+        guard let subjectId, !subjectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        return subjectId.trimmingCharacters(in: .whitespacesAndNewlines) == expected
+    }
 
     public var isRegistered: Bool { status.lowercased() == "registered" }
 
-    public init(status: String, deviceId: String? = nil, attestation: String = "unknown") {
+    public init(status: String, deviceId: String? = nil, attestation: String = "unknown", subjectId: String? = nil) {
         self.status = status
         self.deviceId = deviceId
         self.attestation = attestation
+        self.subjectId = subjectId
     }
 
     init(runtimeMap: [String: Any]) {
         self.init(
             status: runtimeMap["status"] as? String ?? "unknown",
             deviceId: runtimeMap["device_id"] as? String,
-            attestation: runtimeMap["attestation"] as? String ?? "unknown"
+            attestation: runtimeMap["attestation"] as? String ?? "unknown",
+            subjectId: runtimeMap["subject_id"] as? String
         )
     }
 }
