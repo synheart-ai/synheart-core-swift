@@ -303,6 +303,134 @@ public class Synheart {
         return shared.coreRuntime?.getAmbientCapture() ?? false
     }
 
+    // MARK: - Mobile host surface
+
+    /// Which mobile-host runtime symbols resolved. A `false` entry means the
+    /// matching call is a no-op on the linked runtime; check before relying on
+    /// it, and pick a fallback path (e.g. ``tick(nowMs:)`` when `tickAll` is absent).
+    public static var mobileHostAbiSupport: [String: Bool] {
+        shared.coreRuntime?.mobileHostAbiSupport ?? [:]
+    }
+
+    /// Push one typed behavior event. Returns the runtime status (`0` =
+    /// accepted), or `nil` when the runtime is unavailable, the symbol is
+    /// absent, or the event could not be encoded.
+    @discardableResult
+    public static func pushBehaviorEvent(_ event: BehaviorEventInput) -> Int32? {
+        guard let json = event.toJSONString() else { return nil }
+        return shared.coreRuntime?.pushBehaviorEventJson(json)
+    }
+
+    /// Push one context event. Returns the runtime status (`0` = accepted), or
+    /// `nil` when the runtime is unavailable, the symbol is absent, or the
+    /// event could not be encoded.
+    @discardableResult
+    public static func pushContextEvent(_ event: ContextEventInput) -> Int32? {
+        guard let json = event.toJSONString() else { return nil }
+        return shared.coreRuntime?.pushContextEventJson(json)
+    }
+
+    /// Push a context event already in its externally-tagged JSON object form.
+    /// Prefer ``pushContextEvent(_:)``; this exists for hosts that assemble the
+    /// payload elsewhere.
+    @discardableResult
+    public static func pushContextEventJson(_ event: [String: Any]) -> Int32? {
+        guard let json = JSONValue.encode(event) else { return nil }
+        return shared.coreRuntime?.pushContextEventJson(json)
+    }
+
+    /// Push a GPS-derived ground speed sample in metres per second.
+    public static func pushSpeed(tsMs: Int64, speedMps: Double) {
+        shared.coreRuntime?.pushSpeed(tsMs: tsMs, speedMps: speedMps)
+    }
+
+    /// Declare where the accelerometer physically sits.
+    ///
+    /// The kinematic heads withhold entirely under ``AccelPlacement/unknown``,
+    /// and only `pocket` and `waist` are inside the validated envelope.
+    /// Placement on a handheld is dynamic — re-declare it as it changes rather
+    /// than setting it once at startup.
+    public static func setAccelPlacement(_ placement: AccelPlacement) {
+        shared.coreRuntime?.setAccelPlacement(placement.code)
+    }
+
+    /// Push one sample from a wrist-worn accelerometer (a watch), in m/s²
+    /// including gravity, stamped with the sensor's own sample time.
+    public static func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
+        shared.coreRuntime?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z)
+    }
+
+    /// Declare the window containing `tsMs` to be a rest window. One-shot per
+    /// rest window; see `CoreRuntimeBridge.declareRestWindow(tsMs:)`.
+    public static func declareRestWindow(tsMs: Int64) {
+        shared.coreRuntime?.declareRestWindow(tsMs: tsMs)
+    }
+
+    /// Advance the engine clock and return the HSI document of a window that
+    /// closed, or `nil`. The document is also delivered through
+    /// ``onHSIUpdate``. Tick once a second for the whole session.
+    @discardableResult
+    public static func tick(nowMs: Int64) -> String? {
+        guard let json = shared.coreRuntime?.tick(nowMs: nowMs) else { return nil }
+        shared._deliverHsi(json: json)
+        return json
+    }
+
+    /// Drain every completed window, oldest first. Each document is also
+    /// delivered through ``onHSIUpdate``. Returns `nil` when the runtime is
+    /// unavailable or predates `synheart_core_tick_all` — fall back to
+    /// ``tick(nowMs:)`` rather than assuming there were no windows.
+    @discardableResult
+    public static func tickAll(nowMs: Int64) -> [String]? {
+        guard let array = shared.coreRuntime?.tickAll(nowMs: nowMs) else { return nil }
+        return shared._deliverHsiArray(array)
+    }
+
+    /// Emit every window still held for the lateness budget. Call on
+    /// backgrounding and at session end. Same delivery and return shape as
+    /// ``tickAll(nowMs:)``.
+    @discardableResult
+    public static func flushPending(nowMs: Int64) -> [String]? {
+        guard let array = shared.coreRuntime?.flushPending(nowMs: nowMs) else { return nil }
+        return shared._deliverHsiArray(array)
+    }
+
+    /// Advance the daily accumulator to `dayIndex` (days since epoch in the
+    /// host's local zone). Call ``attachStrainScoreJson()`` first if you want
+    /// the day's Strain score — rolling clears its inputs.
+    @discardableResult
+    public static func rollDay(_ dayIndex: Int32) -> Int32? {
+        shared.coreRuntime?.rollDay(dayIndex)
+    }
+
+    /// Export the per-head session state for restore on the next launch.
+    public static func exportSessionState() -> String? {
+        shared.coreRuntime?.exportSessionState()
+    }
+
+    /// Restore a previously exported session state. Must run before the first
+    /// tick of the session.
+    @discardableResult
+    public static func loadSessionState(_ json: String) -> Int32? {
+        shared.coreRuntime?.loadSessionState(json)
+    }
+
+    /// Opaque comparability key for cached scores; compare, never parse.
+    public static var configId: String? {
+        shared.coreRuntime?.configId()
+    }
+
+    /// The most recent human-state vector as JSON, or `nil` before the first
+    /// window has closed.
+    public static func lastHsv() -> String? {
+        shared.coreRuntime?.lastHsv()
+    }
+
+    /// The day's Strain score as JSON. Call before ``rollDay(_:)``.
+    public static func attachStrainScoreJson() -> String? {
+        shared.coreRuntime?.attachStrainScoreJson()
+    }
+
     // MARK: - Local Query API
 
     /// List stored sessions with optional filters.
@@ -1108,14 +1236,42 @@ public class Synheart {
 
     private func _installHSICallback(on bridge: CoreRuntimeBridge) {
         bridge.setHsiCallback { [weak self] json in
-            guard let self = self else { return }
-            guard let consent = self._effectiveConsent(),
-                  consent.biosignals || consent.behavior || consent.phoneContext else { return }
-            guard self.hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
-            let typed = HSIState.fromJson(json, subjectId: self.subjectId ?? "")
-            self.typedHsiSubject.send(typed)
-            self.hsiSubject.send(json)
+            self?._deliverHsi(json: json)
         }
+    }
+
+    /// Single delivery path for HSI documents, whether they arrive through the
+    /// native callback or are drained explicitly by `tick` / `tickAll` /
+    /// `flushPending`. Consent-gated and de-duplicated by `meta.ids.hsi_id`, so
+    /// a window that reaches us on both paths is published once.
+    private func _deliverHsi(json: String) {
+        guard let consent = _effectiveConsent(),
+              consent.biosignals || consent.behavior || consent.phoneContext else { return }
+        guard hsiDeliveryDeduplicator.shouldDeliver(json: json) else { return }
+        let typed = HSIState.fromJson(json, subjectId: subjectId ?? "")
+        typedHsiSubject.send(typed)
+        hsiSubject.send(json)
+    }
+
+    /// Split a `tick_all` / `flush_pending` JSON array into one document per
+    /// window, deliver each, and return them. A malformed array is returned
+    /// as a single element rather than dropped.
+    private func _deliverHsiArray(_ arrayJson: String) -> [String] {
+        guard let data = arrayJson.data(using: .utf8),
+              let decoded = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
+            if arrayJson.isEmpty { return [] }
+            _deliverHsi(json: arrayJson)
+            return [arrayJson]
+        }
+        var out: [String] = []
+        for element in decoded {
+            guard JSONSerialization.isValidJSONObject(element),
+                  let d = try? JSONSerialization.data(withJSONObject: element),
+                  let s = String(data: d, encoding: .utf8) else { continue }
+            _deliverHsi(json: s)
+            out.append(s)
+        }
+        return out
     }
 
     /// Clears every partially-created component so a failed initialization can
