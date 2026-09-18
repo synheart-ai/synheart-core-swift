@@ -402,6 +402,41 @@ personalization, Syni, and independent instances—is documented in
 | `isInitialized` | `Bool` | Whether SDK is initialized |
 | `isRunning` | `Bool` | Whether a session is active |
 
+### Mobile-host runtime surface
+
+The runtime does not advance its clock when samples are pushed. A host that
+wants windows to close on time ticks it, once a second, for the whole session,
+and drains any windows still held for the lateness budget when it backgrounds:
+
+```swift
+// Once a second while a session is running. Each closed window is also
+// delivered through `Synheart.onHSIUpdate`.
+Synheart.tickAll(nowMs: Int64(Date().timeIntervalSince1970 * 1000))
+
+// On backgrounding / session end.
+Synheart.flushPending(nowMs: nowMs)
+```
+
+Typed events replace the payload-less `pushBehavior(ts, code, value)`:
+
+```swift
+Synheart.pushBehaviorEvent(.appForeground(nowMs, app: "com.example.reader"))
+Synheart.pushBehaviorEvent(.scroll(nowMs, velocity: 1.8, direction: .down))
+Synheart.pushContextEvent(.keyboard(nowMs, .typingTap))
+Synheart.setAccelPlacement(.pocket)          // re-declare as it changes
+Synheart.declareRestWindow(tsMs: nowMs)      // once per rest window
+```
+
+Every one of these symbols is optional in the runtime. Check
+`Synheart.mobileHostAbiSupport` before relying on a call; an absent symbol
+makes the call a no-op (or `nil`) rather than an error.
+
+Engine configuration that changes output is opt-in on `SynheartConfig`:
+`windowMs`, `extraHeads` (kinematic heads, which also need a body-worn
+`AccelPlacement`), `emitDiagnostics` (per-head evidence terms in
+`meta.synheart.diagnostics`; validation builds only), `researchBaseline`
+(single-visit baseline profile) and `hostDeclarations`.
+
 ## Project Structure
 
 ```
