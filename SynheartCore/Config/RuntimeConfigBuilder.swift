@@ -65,6 +65,24 @@ enum RuntimeConfigBuilder {
         if let dataDir {
             result["data_dir"] = dataDir
         }
+        if let windowMs = config.windowMs, windowMs > 0 {
+            result["window_ms"] = windowMs
+        }
+        if !config.extraHeads.isEmpty {
+            result["extra_heads"] = config.extraHeads.map { $0.rawValue }
+        }
+        // Both default to the runtime's own default (false), so the key is
+        // emitted only when the host asked for it. Sending `false` explicitly
+        // would be harmless but makes a config diff read as if the host made a
+        // choice it did not make.
+        if config.emitDiagnostics { result["emit_diagnostics"] = true }
+        if config.researchBaseline { result["research_baseline"] = true }
+        // Host declarations are spread, not nested: the runtime reads
+        // `sensing` / `device_class` / `mask_profile` / `cfi_structural_components`
+        // as top-level keys, and an absent key means *undeclared*.
+        for (key, value) in config.hostDeclarations.toJSON() {
+            result[key] = value
+        }
         return result
     }
 }
