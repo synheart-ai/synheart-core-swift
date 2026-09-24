@@ -398,6 +398,8 @@ personalization, Syni, and independent instances—is documented in
 | `onStateUpdate` | `AnyPublisher<HSIState, Never>` | Typed HSI state updates |
 | `currentState` | `String?` | Latest HSI JSON frame |
 | `currentHSIState` | `HSIState?` | Latest typed HSI state |
+| `isHsiDeliveryBuffered` | `Bool` | HSI is polled from the runtime's ring (runtime ≥ 0.31.1) instead of pushed through a callback |
+| `droppedHsiFrames` | `UInt64` | Frames the ring evicted since buffered delivery started |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |
 | `isInitialized` | `Bool` | Whether SDK is initialized |
 | `isRunning` | `Bool` | Whether a session is active |

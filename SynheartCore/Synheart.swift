@@ -371,7 +371,9 @@ public class Synheart {
     /// ``onHSIUpdate``. Tick once a second for the whole session.
     @discardableResult
     public static func tick(nowMs: Int64) -> String? {
-        guard let json = shared.coreRuntime?.tick(nowMs: nowMs) else { return nil }
+        let json = shared.coreRuntime?.tick(nowMs: nowMs)
+        shared.coreRuntime?.bridge?.drainHsi() // see ``tickAll(nowMs:)``
+        guard let json else { return nil }
         shared._deliverHsi(json: json)
         return json
     }
@@ -382,7 +384,12 @@ public class Synheart {
     /// ``tick(nowMs:)`` rather than assuming there were no windows.
     @discardableResult
     public static func tickAll(nowMs: Int64) -> [String]? {
-        guard let array = shared.coreRuntime?.tickAll(nowMs: nowMs) else { return nil }
+        let array = shared.coreRuntime?.tickAll(nowMs: nowMs)
+        // In buffered mode the runtime queued these same windows for the drain
+        // pump; take them now so they reach the publishers in this call rather
+        // than up to a drain interval later (deduplicated by `hsi_id` either way).
+        shared.coreRuntime?.bridge?.drainHsi()
+        guard let array else { return nil }
         return shared._deliverHsiArray(array)
     }
 
@@ -391,7 +398,9 @@ public class Synheart {
     /// ``tickAll(nowMs:)``.
     @discardableResult
     public static func flushPending(nowMs: Int64) -> [String]? {
-        guard let array = shared.coreRuntime?.flushPending(nowMs: nowMs) else { return nil }
+        let array = shared.coreRuntime?.flushPending(nowMs: nowMs)
+        shared.coreRuntime?.bridge?.drainHsi() // see ``tickAll(nowMs:)``
+        guard let array else { return nil }
         return shared._deliverHsiArray(array)
     }
 
@@ -1238,6 +1247,13 @@ public class Synheart {
         bridge.setHsiCallback { [weak self] json in
             self?._deliverHsi(json: json)
         }
+        SynheartLogger.log(
+            bridge.isHsiBuffered
+                ? "[Synheart] HSI delivery: buffered (ring \(CoreRuntimeBridge.hsiBufferCapacity), "
+                    + "drain \(CoreRuntimeBridge.hsiDrainIntervalMs) ms)"
+                : "[Synheart] HSI delivery: push callback — runtime predates 0.31.1 buffered "
+                    + "delivery; the callback-lifetime exposure remains until the linked runtime is updated."
+        )
     }
 
     /// Single delivery path for HSI documents, whether they arrive through the
@@ -2025,6 +2041,23 @@ public class Synheart {
             buildInfo: runtimeBuildInfo,
             diagnostics: shared.coreRuntime?.diagnostics()
         )
+    }
+
+    /// True when HSI frames are delivered by polling the runtime's ring buffer
+    /// (runtime ≥ 0.31.1) rather than through a native callback. In buffered
+    /// mode no function pointer crosses the FFI boundary, so no callback can
+    /// dangle; see `CoreRuntimeBridge.setHsiCallback`. Tune the ring and
+    /// cadence through `CoreRuntimeBridge.hsiBufferCapacity` /
+    /// `CoreRuntimeBridge.hsiDrainIntervalMs` before ``initialize``.
+    public static var isHsiDeliveryBuffered: Bool {
+        shared.coreRuntime?.bridge?.isHsiBuffered ?? false
+    }
+
+    /// Frames evicted from the HSI ring since buffered delivery was
+    /// initialised. `0` unless the host stopped draining for longer than the
+    /// ring holds; log it beside your frame count for field visibility.
+    public static var droppedHsiFrames: UInt64 {
+        shared.coreRuntime?.bridge?.droppedHsiFrames() ?? 0
     }
 
     /// Exact native runtime build provenance when supported by the linked ABI.
