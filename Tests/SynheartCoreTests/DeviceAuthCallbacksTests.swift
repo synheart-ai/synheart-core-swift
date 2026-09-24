@@ -49,3 +49,34 @@ final class DeviceAuthCallbacksTests: XCTestCase {
         XCTAssertEqual(exists, 0)
     }
 }
+
+/// The absent / unavailable split behind `secure_load`, exercised without a
+/// Keychain: the C callback can only return a pointer or NULL, so the SDK
+/// must decide *before* that boundary which statuses are worth retrying.
+final class DeviceAuthSecureLoadClassificationTests: XCTestCase {
+
+    func testLockedAndNotReadyStatusesAreTransient() {
+        XCTAssertTrue(DeviceAuthCallbacks.keychainStatusIsTransient(errSecInteractionNotAllowed))
+        XCTAssertTrue(DeviceAuthCallbacks.keychainStatusIsTransient(errSecNotAvailable))
+        XCTAssertTrue(DeviceAuthCallbacks.keychainStatusIsTransient(errSecIO))
+    }
+
+    func testPermanentStatusesAreNotRetried() {
+        XCTAssertFalse(DeviceAuthCallbacks.keychainStatusIsTransient(errSecParam))
+        XCTAssertFalse(DeviceAuthCallbacks.keychainStatusIsTransient(errSecMissingEntitlement))
+        XCTAssertFalse(DeviceAuthCallbacks.keychainStatusIsTransient(errSecDecode))
+        XCTAssertFalse(DeviceAuthCallbacks.keychainStatusIsTransient(errSecItemNotFound))
+    }
+
+    func testMissingItemIsReportedAsAbsentNotUnavailable() throws {
+        let outcome = DeviceAuthCallbacks.keychainLoadOnce(
+            service: "synheart.test.deviceauth.absent",
+            account: "never-stored-\(UUID().uuidString)"
+        )
+        // A host without Keychain entitlements answers with an error status;
+        // only a reachable Keychain can prove the absent branch.
+        try XCTSkipIf({ if case .unavailable = outcome { return true }; return false }(),
+                      "Keychain unavailable in this test host (entitlements)")
+        XCTAssertEqual(outcome, .absent)
+    }
+}
