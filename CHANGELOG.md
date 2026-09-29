@@ -5,6 +5,53 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — per-instance HSI delivery
+- **`SynheartInstance` can now receive every HSI window it completes.**
+  `setHsiListener`, `clearHsiListener`, `drainHsi` and `isHsiBuffered` are the
+  per-instance equivalent of `Synheart.onHSIUpdate`, which reaches the
+  personal runtime only. A host reading a second instance's output had
+  `tick()`'s return value alone — but `startSession` also starts the runtime's
+  own 1 s background tick loop on the same pipeline, and a window that loop
+  closes first never comes back from `tick()`. Buffered delivery on runtime
+  ≥ 0.31.1, push callback on older runtimes. No new native calls.
+
+### Added — host notification support
+- **`Synheart.onRuntimeBehaviorEvent`.** Every behavior event in the rich form
+  the personal runtime receives it, so a host feeding a second
+  `SynheartInstance`, which has no collectors, can forward what it needs with
+  `pushBehaviorEvent`. A facade-level publisher: one subscription outlives
+  the behavior module being rebuilt.
+- **`HostDeclarations.notificationsObservable`** sends
+  `notifications_observable` (runtime ≥ 0.32.0). Absent, the runtime resolves
+  it from the platform; a host without a running notification producer should
+  declare `false`. Older runtimes ignore it.
+
+### Added — worn accelerometer streams
+- **`pushWornAccel`** on `Synheart` and `SynheartInstance` binds
+  `synheart_core_push_worn_accel`: a body-worn stream tagged with its
+  `AccelPlacement` per sample. `pushWristAccel` is now also available on
+  `SynheartInstance`. Samples are in g with gravity included. Both degrade to
+  no-ops on a runtime without the symbol; `mobileHostAbiSupport` reports them.
+
+### Changed — behavior module feeds the rich and context channels
+- **The behavior module now tries `push_behavior_event` first** and falls back
+  to the legacy int-coded `push_behavior` only on a runtime without the
+  symbol, so scroll and swipe payloads reach the engine instead of a single
+  flattened double. Taps, scrolls and swipes are also forwarded on the
+  **context channel** (`push_context_event`), the only source of
+  `context.deviation.*` and so of the friction index; keystrokes are not — they
+  must enter from the host's text layer via `ContextEventInput.textChange`.
+
+### Fixed — notification follow-ups counted as arrivals
+- **A notification's later outcome no longer reaches the runtime as a new
+  arrival.** The host reports a notification on arrival and again when it is
+  opened; the engine counts every notification event as an arrival, so an
+  opened notification counted twice, inflating the notification rate,
+  Interruption Pressure and the lab `notification_count`. Follow-ups are no
+  longer pushed to the runtime; `onBehaviorEvent` still carries them.
+
 ## [0.3.0] - 2026-09-24
 
 ### Added — runtime version gate

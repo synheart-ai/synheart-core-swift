@@ -130,6 +130,16 @@ public final class SynheartInstance {
         withShim { $0.pushAccel(tsMs: timestampMs, x: x, y: y, z: z) }
     }
 
+    /// One wrist-worn accelerometer sample in g. See `Synheart.pushWristAccel`.
+    public func pushWristAccel(timestampMs: Int64, x: Double, y: Double, z: Double) {
+        withShim { $0.pushWristAccel(tsMs: timestampMs, x: x, y: y, z: z) }
+    }
+
+    /// One body-worn accelerometer sample in g with its placement. See `Synheart.pushWornAccel`.
+    public func pushWornAccel(timestampMs: Int64, x: Double, y: Double, z: Double, placement: AccelPlacement) {
+        withShim { $0.pushWornAccel(tsMs: timestampMs, x: x, y: y, z: z, placementCode: placement.code) }
+    }
+
     public func pushBehavior(timestampMs: Int64, eventType: Int32, value: Double) {
         withShim { $0.pushBehavior(tsMs: timestampMs, eventType: eventType, value: value) }
     }
@@ -207,9 +217,54 @@ public final class SynheartInstance {
         return withShim { $0.pushContextEventJson(json) } ?? nil
     }
 
+    /// Advance the pipeline clock and return the HSI window that closed, if any.
+    ///
+    /// The return value is NOT every window this instance completes: once
+    /// `startSession` runs, the runtime's own background tick loop closes
+    /// windows on the same pipeline, and a window it closes first never comes
+    /// back from here. Use ``setHsiListener(_:)`` to receive all of them.
     public func tick(at date: Date = Date()) -> String? {
         withBridge { $0.tick(timestampMs: Int64(date.timeIntervalSince1970 * 1_000)) } ?? nil
     }
+
+    // MARK: - HSI delivery (per-instance)
+    //
+    // The per-instance equivalent of the static `Synheart.onHSIUpdate`, which
+    // reaches the PERSONAL runtime only. Without it a host reading this
+    // instance's output had `tick`'s return value alone, and lost every window
+    // the runtime's background loop closed first — those windows were still
+    // emitted (and uploaded), just unreachable from the host.
+
+    /// Receive every HSI window this instance completes, as raw JSON — whether
+    /// the host's ``tick(at:)`` or the runtime's background tick loop closed it.
+    ///
+    /// Buffered (pull-based) delivery on a runtime ≥ 0.31.1, so no function
+    /// pointer crosses the FFI boundary; frames arrive on the next
+    /// ``drainHsi()`` or on the bridge's periodic drain. Falls back to a push
+    /// callback on an older runtime. A window that also came back from
+    /// ``tick(at:)`` is delivered here too, so a host using both deduplicates
+    /// (by `meta.ids.hsi_id` or window end). Replaces any listener already set.
+    /// No-op when disposed. The listener fires on a background thread.
+    public func setHsiListener(_ onHsi: @escaping (String) -> Void) {
+        withBridge { $0.setHsiCallback(onHsi) }
+    }
+
+    /// Stop HSI delivery. In buffered mode, frames still pending are delivered
+    /// once more before the listener is dropped. Idempotent; ``dispose()`` also
+    /// clears it.
+    public func clearHsiListener() {
+        withBridge { $0.clearHsiCallback() }
+    }
+
+    /// Deliver pending buffered frames to the listener now, oldest first,
+    /// instead of waiting for the periodic drain. Cheap when nothing is
+    /// pending; no-op without a listener or outside buffered mode.
+    public func drainHsi() {
+        withBridge { $0.drainHsi() }
+    }
+
+    /// Whether HSI reaches the listener by polling rather than by callback.
+    public var isHsiBuffered: Bool { withBridge { $0.isHsiBuffered } ?? false }
 
     public func syncNow() async -> SyncResult? {
         guard let runtime = withShim({ $0 }) else { return nil }

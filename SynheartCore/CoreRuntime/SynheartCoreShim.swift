@@ -134,6 +134,9 @@ public final class SynheartCoreShim {
     public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
         bridge?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z)
     }
+    public func pushWornAccel(tsMs: Int64, x: Double, y: Double, z: Double, placementCode: Int32) {
+        bridge?.pushWornAccel(tsMs: tsMs, x: x, y: y, z: z, placementCode: placementCode)
+    }
     public func declareRestWindow(tsMs: Int64) { bridge?.declareRestWindow(tsMs: tsMs) }
     public func rollDay(_ dayIndex: Int32) -> Int32? { bridge?.rollDay(dayIndex) }
     public func exportSessionState() -> String? { bridge?.exportSessionState() }

@@ -595,6 +595,7 @@ public final class CoreRuntimeBridge {
     private typealias ReadStringFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias LoadStringFn        = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
     private typealias PushWristAccelFn    = @convention(c) (OpaquePointer?, Int64, Double, Double, Double) -> Void
+    private typealias PushWornAccelFn     = @convention(c) (OpaquePointer?, Int64, Double, Double, Double, Int32) -> Void
 
     private static let _tick:              TickFn?              = sym("synheart_core_tick")
     private static let _tickAll:           TickFn?              = sym("synheart_core_tick_all")
@@ -605,6 +606,7 @@ public final class CoreRuntimeBridge {
     private static let _setAccelPlacement: SetAccelPlacementFn? = sym("synheart_core_set_accel_placement")
     private static let _declareRestWindow: DeclareRestWindowFn? = sym("synheart_core_declare_rest_window")
     private static let _pushWristAccel:    PushWristAccelFn?    = sym("synheart_core_push_wrist_accel")
+    private static let _pushWornAccel:     PushWornAccelFn?     = sym("synheart_core_push_worn_accel")
     private static let _rollDay:           RollDayFn?           = sym("synheart_core_roll_day")
     private static let _exportSessionState: ReadStringFn?       = sym("synheart_core_export_session_state")
     private static let _loadSessionState:  LoadStringFn?        = sym("synheart_core_load_session_state")
@@ -625,6 +627,7 @@ public final class CoreRuntimeBridge {
             "setAccelPlacement": Self._setAccelPlacement != nil,
             "declareRestWindow": Self._declareRestWindow != nil,
             "pushWristAccel": Self._pushWristAccel != nil,
+            "pushWornAccel": Self._pushWornAccel != nil,
             "rollDay": Self._rollDay != nil,
             "exportSessionState": Self._exportSessionState != nil,
             "loadSessionState": Self._loadSessionState != nil,
@@ -698,10 +701,18 @@ public final class CoreRuntimeBridge {
         Self._setAccelPlacement?(handle, placementCode)
     }
 
-    /// Push one sample from a wrist-worn accelerometer, in m/s² including
+    /// Push one sample from a wrist-worn accelerometer, in g including
     /// gravity. The runtime keeps wrist motion separate from device motion.
     public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
         Self._pushWristAccel?(handle, tsMs, x, y, z)
+    }
+
+    /// Push one sample from a body-worn accelerometer, in g, tagged with the
+    /// placement it was worn at so the engine can pick the kinematic model for
+    /// that mount. Unlike `setAccelPlacement`, which declares where the
+    /// *device* sits, the placement here travels with every sample.
+    public func pushWornAccel(tsMs: Int64, x: Double, y: Double, z: Double, placementCode: Int32) {
+        Self._pushWornAccel?(handle, tsMs, x, y, z, placementCode)
     }
 
     /// Declare that the window containing `tsMs` is a rest window.

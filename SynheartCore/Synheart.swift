@@ -99,6 +99,7 @@ public class Synheart {
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
     private let typedHsiSubject = CurrentValueSubject<HSIState?, Never>(nil)
     private let vendorStreamSubject = PassthroughSubject<[String: Any], Never>()
+    private let runtimeBehaviorEventSubject = PassthroughSubject<BehaviorEventInput, Never>()
     private let dataDeletionSubject = PassthroughSubject<DataDeletionEvent, Never>()
     private let hsiDeliveryDeduplicator = HSIDeliveryDeduplicator()
     private var cancellables = Set<AnyCancellable>()
@@ -206,6 +207,20 @@ public class Synheart {
     public static var onBehaviorEvent: AnyPublisher<BehaviorEvent, Never> {
         shared.behaviorModule?.capturedEvents
             ?? Empty<BehaviorEvent, Never>().eraseToAnyPublisher()
+    }
+
+    /// Every behavior event in the rich form the personal runtime receives it —
+    /// notification action, scroll and swipe payload — as it is pushed.
+    ///
+    /// For a host that feeds a second runtime (``SynheartInstance``), which has
+    /// no collectors of its own: forward the events it needs with
+    /// `SynheartInstance.pushBehaviorEvent`. Unlike ``onBehaviorEvent`` this is
+    /// a facade-level publisher: it exists before `initialize` and survives the
+    /// behavior module being rebuilt, so one subscription lasts the process.
+    /// Events arrive only while behavior collection runs and its consent is
+    /// granted.
+    public static var onRuntimeBehaviorEvent: AnyPublisher<BehaviorEventInput, Never> {
+        shared.runtimeBehaviorEventSubject.eraseToAnyPublisher()
     }
 
     /// Real, consent-filtered phone motion samples forwarded to the native runtime.
@@ -354,10 +369,17 @@ public class Synheart {
         shared.coreRuntime?.setAccelPlacement(placement.code)
     }
 
-    /// Push one sample from a wrist-worn accelerometer (a watch), in m/s²
-    /// including gravity, stamped with the sensor's own sample time.
+    /// Push one sample from a wrist-worn accelerometer (a watch), in g
+    /// including gravity, stamped with the sensor's own sample time. Kept
+    /// apart from the device's motion; a no-op on a runtime without the symbol.
     public static func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
         shared.coreRuntime?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z)
+    }
+
+    /// Push one sample from a body-worn accelerometer, in g, with the
+    /// placement it was worn at. A no-op on a runtime without the symbol.
+    public static func pushWornAccel(tsMs: Int64, x: Double, y: Double, z: Double, placement: AccelPlacement) {
+        shared.coreRuntime?.pushWornAccel(tsMs: tsMs, x: x, y: y, z: z, placementCode: placement.code)
     }
 
     /// Declare the window containing `tsMs` to be a rest window. One-shot per
@@ -1151,6 +1173,11 @@ public class Synheart {
             runtimeSink: coreRuntime,
             sessionIdProvider: { [weak self] in self?._currentSessionHandle?.sessionId }
         )
+        // Republish every rich event the personal runtime receives, so a host
+        // feeding a second instance (which has no collectors) can forward them.
+        behaviorModule?.onRuntimeBehaviorEvent = { [weak self] event in
+            self?.runtimeBehaviorEventSubject.send(event)
+        }
 
         try moduleManager.registerModule(wearModule!, dependsOn: ["capabilities", "consent"])
         try moduleManager.registerModule(phoneModule!, dependsOn: ["capabilities", "consent"])

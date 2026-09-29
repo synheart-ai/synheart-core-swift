@@ -117,17 +117,26 @@ public struct HostDeclarations: Equatable, Sendable {
     public var maskProfile: HostDeclaration<MaskProfile>?
     /// Number of structural CFI components the host can supply.
     public var cfiStructuralComponents: Int?
+    /// Whether a notification producer actually runs on this host, so that a
+    /// window with no notifications is evidence of low demand rather than no
+    /// evidence (runtime ≥ 0.32.0). `nil` sends nothing, and the runtime then
+    /// resolves it from `platform`. A host whose listener is not running (not
+    /// granted, not implemented) should declare `false`, or every quiet window
+    /// reads as low demand. Older runtimes ignore the key.
+    public var notificationsObservable: Bool?
 
     public init(
         sensing: HostDeclaration<SensingProfile>? = nil,
         deviceClass: HostDeclaration<DeviceClass>? = nil,
         maskProfile: HostDeclaration<MaskProfile>? = nil,
-        cfiStructuralComponents: Int? = nil
+        cfiStructuralComponents: Int? = nil,
+        notificationsObservable: Bool? = nil
     ) {
         self.sensing = sensing
         self.deviceClass = deviceClass
         self.maskProfile = maskProfile
         self.cfiStructuralComponents = cfiStructuralComponents
+        self.notificationsObservable = notificationsObservable
     }
 
     /// Every declaration left to the runtime's auto-detection, with the
@@ -140,7 +149,8 @@ public struct HostDeclarations: Equatable, Sendable {
     )
 
     public var isEmpty: Bool {
-        sensing == nil && deviceClass == nil && maskProfile == nil && cfiStructuralComponents == nil
+        sensing == nil && deviceClass == nil && maskProfile == nil
+            && cfiStructuralComponents == nil && notificationsObservable == nil
     }
 
     /// Top-level runtime config keys. Spread these into the config object.
@@ -165,6 +175,7 @@ public struct HostDeclarations: Equatable, Sendable {
             }
         }
         if let n = cfiStructuralComponents { out["cfi_structural_components"] = n }
+        if let v = notificationsObservable { out["notifications_observable"] = v }
         return out
     }
 }

@@ -133,6 +133,17 @@ final class MobileHostSurfaceTests: XCTestCase {
         Synheart.setAccelPlacement(.pocket)
         Synheart.pushSpeed(tsMs: 1, speedMps: 1.2)
         Synheart.declareRestWindow(tsMs: 1)
-        Synheart.pushWristAccel(tsMs: 1, x: 0, y: 0, z: 9.81)
+        Synheart.pushWristAccel(tsMs: 1, x: 0, y: 0, z: 1.0)
+        Synheart.pushWornAccel(tsMs: 1, x: 0, y: 0, z: 1.0, placement: .wrist)
+    }
+
+    func testNotificationsObservableIsEmittedOnlyWhenDeclared() {
+        XCTAssertNil(HostDeclarations().toJSON()["notifications_observable"])
+        XCTAssertTrue(HostDeclarations().isEmpty)
+        let off = HostDeclarations(notificationsObservable: false)
+        XCTAssertEqual(off.toJSON()["notifications_observable"] as? Bool, false)
+        XCTAssertFalse(off.isEmpty)
+        let map = RuntimeConfigBuilder.build(SynheartConfig(appId: "a", subjectId: "s", hostDeclarations: off))
+        XCTAssertEqual(map["notifications_observable"] as? Bool, false)
     }
 }

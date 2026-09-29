@@ -18,6 +18,15 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
     private var cleanupTimer: AnyCancellable?
     private let capturedEventSubject = PassthroughSubject<BehaviorEvent, Never>()
 
+    /// Observer for every rich event handed to the runtime, called just before
+    /// the push. Lets the facade republish them for a host that feeds a second
+    /// runtime; see `Synheart.onRuntimeBehaviorEvent`.
+    var onRuntimeBehaviorEvent: ((BehaviorEventInput) -> Void)?
+
+    /// Context-channel bookkeeping, readable for diagnostics.
+    private(set) var contextEventsAccepted = 0
+    private(set) var contextEventsRejected = 0
+
     /// Consent-filtered interaction events that were accepted for native ingest.
     public var capturedEvents: AnyPublisher<BehaviorEvent, Never> {
         capturedEventSubject.eraseToAnyPublisher()
@@ -120,12 +129,43 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
     private func accept(_ event: BehaviorEvent) {
         guard consent.current().behavior else { return }
         aggregator.addEvent(event)
-        guard let mapped = BehaviorRuntimeMapping.map(event) else { return }
-        runtimeSink?.pushBehavior(
-            tsMs: Int64(event.timestamp.timeIntervalSince1970 * 1_000),
-            eventType: mapped.0.rawValue,
-            value: mapped.1
-        )
+
+        // Two paths, and the rich one is tried first: it carries the payload
+        // the event has, where the legacy int-coded call flattens everything to
+        // one double. The legacy path is the fallback for a runtime that
+        // predates `synheart_core_push_behavior_event`; the two are mutually
+        // exclusive per event, or every interaction would count twice.
+        //
+        // Arrivals only: a notification's later outcome would reach the engine
+        // as a second arrival. It is still published to the host below.
+        let followUp = BehaviorRuntimeMapping.isNotificationFollowUp(event)
+        let rich = followUp ? nil : BehaviorRuntimeMapping.translateBehaviorEvent(event)
+        if let rich { onRuntimeBehaviorEvent?(rich) }
+        var richStatus: Int32?
+        if let rich, let json = rich.toJSONString() {
+            richStatus = runtimeSink?.pushBehaviorEventJson(json)
+        }
+        if richStatus == nil, !followUp, let mapped = BehaviorRuntimeMapping.map(event) {
+            runtimeSink?.pushBehavior(
+                tsMs: Int64(event.timestamp.timeIntervalSince1970 * 1_000),
+                eventType: mapped.0.rawValue,
+                value: mapped.1
+            )
+        }
+
+        // The context channel, in addition to whichever behaviour path ran
+        // above. Independent buffer, independent consumer: it feeds the
+        // person-relative context window, the only source of
+        // `context.deviation.*` and so of the friction index. Unwired, pause,
+        // error and scroll deviation are structurally zero on every window.
+        if let ctx = BehaviorRuntimeMapping.translateContextEvent(event), let json = ctx.toJSONString() {
+            switch runtimeSink?.pushContextEventJson(json) {
+            case .some(0): contextEventsAccepted += 1
+            case .some: contextEventsRejected += 1
+            case .none: break
+            }
+        }
+
         capturedEventSubject.send(event)
     }
 }
