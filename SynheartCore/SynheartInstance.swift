@@ -130,6 +130,16 @@ public final class SynheartInstance {
         withShim { $0.pushAccel(tsMs: timestampMs, x: x, y: y, z: z) }
     }
 
+    /// One wrist-worn accelerometer sample in g. See `Synheart.pushWristAccel`.
+    public func pushWristAccel(timestampMs: Int64, x: Double, y: Double, z: Double) {
+        withShim { $0.pushWristAccel(tsMs: timestampMs, x: x, y: y, z: z) }
+    }
+
+    /// One body-worn accelerometer sample in g with its placement. See `Synheart.pushWornAccel`.
+    public func pushWornAccel(timestampMs: Int64, x: Double, y: Double, z: Double, placement: AccelPlacement) {
+        withShim { $0.pushWornAccel(tsMs: timestampMs, x: x, y: y, z: z, placementCode: placement.code) }
+    }
+
     public func pushBehavior(timestampMs: Int64, eventType: Int32, value: Double) {
         withShim { $0.pushBehavior(tsMs: timestampMs, eventType: eventType, value: value) }
     }
@@ -138,9 +148,123 @@ public final class SynheartInstance {
         withShim { $0.ingestBatch(batchJson: json, nowMs: timestampMs) } ?? nil
     }
 
+    // MARK: - Mobile host surface (per-instance)
+
+    /// Whether the linked runtime takes rich behavior events on this instance.
+    /// Same probe as `Synheart.mobileHostAbiSupport["pushBehaviorEvent"]` for
+    /// the personal runtime. Both instances link one native library, but a
+    /// host feeding two handles should ask the handle it is about to feed.
+    public var supportsRichBehaviorEvents: Bool {
+        withShim { $0.mobileHostAbiSupport["pushBehaviorEvent"] == true } ?? false
+    }
+
+    /// Push one typed behavior event into this instance — most importantly a
+    /// windowed typing summary, which the legacy int-coded path cannot express.
+    /// Returns the runtime status (`0` = accepted), or `nil` when this instance
+    /// is disposed, the symbol is absent, or the event could not be encoded.
+    /// Do not also push the raw keystrokes behind a typing summary: the engine
+    /// counts both and every rate feature roughly doubles.
+    @discardableResult
+    public func pushBehaviorEvent(_ event: BehaviorEventInput) -> Int32? {
+        guard let json = event.toJSONString() else { return nil }
+        return withShim { $0.pushBehaviorEventJson(json) } ?? nil
+    }
+
+    // Context fan-in (app identity + keystroke context during a lab window).
+    //
+    // The static `Synheart.pushContextEvent` and app-foreground events reach
+    // the PERSONAL runtime only. A host running a second, research instance
+    // had no way to give it an app identity or context evidence, so every
+    // research window resolved to the `Unknown` app category (an all-zero
+    // interpretation-mask row) and carried `context_label: UK` with no
+    // evidence behind it. These are the per-instance equivalents.
+
+    /// Declare which application is in the foreground for THIS instance.
+    ///
+    /// Send at session start, on every foreground change, and on a slow
+    /// heartbeat — repeats are steady-state observations, not switches.
+    /// `app` is the bundle identifier. Returns the runtime status (`0` =
+    /// accepted), or `nil` when this instance is disposed or the runtime lacks
+    /// `push_behavior_event`.
+    @discardableResult
+    public func pushAppForeground(
+        _ app: String,
+        tsMs: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
+    ) -> Int32? {
+        pushBehaviorEvent(.appForeground(tsMs, app: app))
+    }
+
+    /// Push one privacy-preserving context event into this instance — the only
+    /// source of `context.deviation.*`, and therefore of CFI. Mirrors the
+    /// static `Synheart.pushContextEvent`; keyboard events must come from the
+    /// text layer via `ContextEventInput.textChange`, sent for both directions.
+    ///
+    /// Returns `0` on acceptance, `nil` when this instance is disposed or the
+    /// symbol is absent, and a non-zero status most often when the runtime was
+    /// built without the `app-context` feature.
+    @discardableResult
+    public func pushContextEvent(_ event: ContextEventInput) -> Int32? {
+        guard let json = event.toJSONString() else { return nil }
+        return withShim { $0.pushContextEventJson(json) } ?? nil
+    }
+
+    /// Raw-payload escape hatch for ``pushContextEvent(_:)``; prefer the typed
+    /// call — a payload that does not parse buffers nothing, and the failure is
+    /// indistinguishable from a runtime built without the context feature.
+    @discardableResult
+    public func pushContextEventJson(_ event: [String: Any]) -> Int32? {
+        guard let json = JSONValue.encode(event) else { return nil }
+        return withShim { $0.pushContextEventJson(json) } ?? nil
+    }
+
+    /// Advance the pipeline clock and return the HSI window that closed, if any.
+    ///
+    /// The return value is NOT every window this instance completes: once
+    /// `startSession` runs, the runtime's own background tick loop closes
+    /// windows on the same pipeline, and a window it closes first never comes
+    /// back from here. Use ``setHsiListener(_:)`` to receive all of them.
     public func tick(at date: Date = Date()) -> String? {
         withBridge { $0.tick(timestampMs: Int64(date.timeIntervalSince1970 * 1_000)) } ?? nil
     }
+
+    // MARK: - HSI delivery (per-instance)
+    //
+    // The per-instance equivalent of the static `Synheart.onHSIUpdate`, which
+    // reaches the PERSONAL runtime only. Without it a host reading this
+    // instance's output had `tick`'s return value alone, and lost every window
+    // the runtime's background loop closed first — those windows were still
+    // emitted (and uploaded), just unreachable from the host.
+
+    /// Receive every HSI window this instance completes, as raw JSON — whether
+    /// the host's ``tick(at:)`` or the runtime's background tick loop closed it.
+    ///
+    /// Buffered (pull-based) delivery on a runtime ≥ 0.31.1, so no function
+    /// pointer crosses the FFI boundary; frames arrive on the next
+    /// ``drainHsi()`` or on the bridge's periodic drain. Falls back to a push
+    /// callback on an older runtime. A window that also came back from
+    /// ``tick(at:)`` is delivered here too, so a host using both deduplicates
+    /// (by `meta.ids.hsi_id` or window end). Replaces any listener already set.
+    /// No-op when disposed. The listener fires on a background thread.
+    public func setHsiListener(_ onHsi: @escaping (String) -> Void) {
+        withBridge { $0.setHsiCallback(onHsi) }
+    }
+
+    /// Stop HSI delivery. In buffered mode, frames still pending are delivered
+    /// once more before the listener is dropped. Idempotent; ``dispose()`` also
+    /// clears it.
+    public func clearHsiListener() {
+        withBridge { $0.clearHsiCallback() }
+    }
+
+    /// Deliver pending buffered frames to the listener now, oldest first,
+    /// instead of waiting for the periodic drain. Cheap when nothing is
+    /// pending; no-op without a listener or outside buffered mode.
+    public func drainHsi() {
+        withBridge { $0.drainHsi() }
+    }
+
+    /// Whether HSI reaches the listener by polling rather than by callback.
+    public var isHsiBuffered: Bool { withBridge { $0.isHsiBuffered } ?? false }
 
     public func syncNow() async -> SyncResult? {
         guard let runtime = withShim({ $0 }) else { return nil }

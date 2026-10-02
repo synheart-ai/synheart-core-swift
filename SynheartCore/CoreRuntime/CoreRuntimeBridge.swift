@@ -116,6 +116,42 @@ public final class CoreRuntimeBridge {
     private var hsiCallbackBox: Unmanaged<AnyObject>?
     private var streamCallbackBox: Unmanaged<AnyObject>?
 
+    /// True while HSI reaches Swift through the runtime's ring buffer
+    /// (`synheart_core_init_hsi_buffered` + `synheart_core_drain_hsi`, runtime
+    /// ≥ 0.31.1) instead of a C callback.
+    ///
+    /// Same class of problem the buffered logging path removed: a push
+    /// callback is a function pointer plus a retained `user_data` box whose
+    /// lifetime the runtime's tokio workers know nothing about. Releasing the
+    /// box at the wrong moment, or having the Swift side torn down while the
+    /// native runtime, its workers and the HSI listener survive in the
+    /// process, means the next completed window is dispatched through a
+    /// dangling pointer and the process aborts on a `tokio-rt-worker` thread.
+    /// In buffered mode no function pointer ever crosses the boundary: the
+    /// runtime buffers, this side polls, and the sink runs on a queue the SDK
+    /// owns and cancels.
+    private var hsiBufferedMode = false
+    private var hsiDrainTimer: DispatchSourceTimer?
+    private var hsiSink: ((String) -> Void)?
+    private var lastReportedDroppedHsi: UInt64 = 0
+    /// Serialises the drain so frames reach the sink oldest-first even when
+    /// the pump and a host tick overlap.
+    private let hsiDrainLock = NSLock()
+    private static let hsiDrainQueue = DispatchQueue(label: "ai.synheart.core.hsi-drain", qos: .utility)
+
+    /// Ring capacity handed to `init_hsi_buffered`. Frames arrive at ~1 Hz
+    /// during an active session and the **oldest** is evicted when the ring
+    /// is full, so size it for the worst gap between drains the host expects,
+    /// not for typical operation. 64 covers a minute with nobody polling.
+    /// Read when ``setHsiCallback(preferBuffered:_:)`` switches to buffered mode.
+    public static var hsiBufferCapacity: Int32 = 64
+
+    /// Drain cadence in buffered mode, in milliseconds. Frames are ~1 Hz, so
+    /// polling faster buys nothing; slower adds that much latency to
+    /// `onStateUpdate`. A host that ticks the engine itself gets its frames in
+    /// the same call regardless — see ``drainHsi()``.
+    public static var hsiDrainIntervalMs: Int = 1_000
+
     // MARK: - C function type aliases
 
     // Lifecycle
@@ -392,9 +428,15 @@ public final class CoreRuntimeBridge {
     }
 
     deinit {
+        hsiDrainTimer?.cancel()
+        hsiDrainTimer = nil
         Self._clearHsiCb?(handle)
         hsiCallbackBox?.release()
-        Self._setStreamCb?(handle, Self.streamNoopCallback, nil)
+        if let clear = Self._clearStreamCb {
+            clear(handle)
+        } else {
+            Self._setStreamCb?(handle, Self.streamNoopCallback, nil)
+        }
         streamCallbackBox?.release()
         Self._free?(handle)
         onNativeHandleReleased?()
@@ -553,6 +595,7 @@ public final class CoreRuntimeBridge {
     private typealias ReadStringFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias LoadStringFn        = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
     private typealias PushWristAccelFn    = @convention(c) (OpaquePointer?, Int64, Double, Double, Double) -> Void
+    private typealias PushWornAccelFn     = @convention(c) (OpaquePointer?, Int64, Double, Double, Double, Int32) -> Void
 
     private static let _tick:              TickFn?              = sym("synheart_core_tick")
     private static let _tickAll:           TickFn?              = sym("synheart_core_tick_all")
@@ -563,6 +606,7 @@ public final class CoreRuntimeBridge {
     private static let _setAccelPlacement: SetAccelPlacementFn? = sym("synheart_core_set_accel_placement")
     private static let _declareRestWindow: DeclareRestWindowFn? = sym("synheart_core_declare_rest_window")
     private static let _pushWristAccel:    PushWristAccelFn?    = sym("synheart_core_push_wrist_accel")
+    private static let _pushWornAccel:     PushWornAccelFn?     = sym("synheart_core_push_worn_accel")
     private static let _rollDay:           RollDayFn?           = sym("synheart_core_roll_day")
     private static let _exportSessionState: ReadStringFn?       = sym("synheart_core_export_session_state")
     private static let _loadSessionState:  LoadStringFn?        = sym("synheart_core_load_session_state")
@@ -583,6 +627,7 @@ public final class CoreRuntimeBridge {
             "setAccelPlacement": Self._setAccelPlacement != nil,
             "declareRestWindow": Self._declareRestWindow != nil,
             "pushWristAccel": Self._pushWristAccel != nil,
+            "pushWornAccel": Self._pushWornAccel != nil,
             "rollDay": Self._rollDay != nil,
             "exportSessionState": Self._exportSessionState != nil,
             "loadSessionState": Self._loadSessionState != nil,
@@ -656,10 +701,18 @@ public final class CoreRuntimeBridge {
         Self._setAccelPlacement?(handle, placementCode)
     }
 
-    /// Push one sample from a wrist-worn accelerometer, in m/s² including
+    /// Push one sample from a wrist-worn accelerometer, in g including
     /// gravity. The runtime keeps wrist motion separate from device motion.
     public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
         Self._pushWristAccel?(handle, tsMs, x, y, z)
+    }
+
+    /// Push one sample from a body-worn accelerometer, in g, tagged with the
+    /// placement it was worn at so the engine can pick the kinematic model for
+    /// that mount. Unlike `setAccelPlacement`, which declares where the
+    /// *device* sits, the placement here travels with every sample.
+    public func pushWornAccel(tsMs: Int64, x: Double, y: Double, z: Double, placementCode: Int32) {
+        Self._pushWornAccel?(handle, tsMs, x, y, z, placementCode)
     }
 
     /// Declare that the window containing `tsMs` is a rest window.
@@ -1129,15 +1182,51 @@ public final class CoreRuntimeBridge {
         UnsafeMutableRawPointer?
     ) -> Void
     private typealias ClearHsiCallbackFn = @convention(c) (OpaquePointer?) -> Void
+    // Buffered (pull-based) HSI delivery — runtime ≥ 0.31.1. Optional: a
+    // runtime that predates them keeps the push-callback path.
+    //
+    //   init_hsi_buffered(handle, capacity: c_int) -> c_int   0 ok, 1 null handle
+    //   drain_hsi(handle) -> *mut c_char                      JSON array, oldest
+    //                                                         first; NULL when
+    //                                                         nothing pending
+    //   dropped_hsi_frames(handle) -> u64                     monotonic; reset by
+    //                                                         init_hsi_buffered
+    private typealias InitHsiBufferedFn  = @convention(c) (OpaquePointer?, Int32) -> Int32
+    private typealias DrainHsiFn         = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias DroppedHsiFramesFn = @convention(c) (OpaquePointer?) -> UInt64
 
     private static let _setHsiCb: SetHsiCallbackFn? = sym("synheart_core_set_hsi_callback")
     private static let _clearHsiCb: ClearHsiCallbackFn? = sym("synheart_core_clear_hsi_callback")
+    private static let _initHsiBuffered: InitHsiBufferedFn? = sym("synheart_core_init_hsi_buffered")
+    private static let _drainHsi: DrainHsiFn? = sym("synheart_core_drain_hsi")
+    private static let _droppedHsiFrames: DroppedHsiFramesFn? = sym("synheart_core_dropped_hsi_frames")
 
-    /// Register a callback for real-time HSI state updates.
+    /// Whether the linked runtime exports the buffered HSI delivery symbols.
+    public var supportsBufferedHsi: Bool {
+        Self._initHsiBuffered != nil && Self._drainHsi != nil
+    }
+
+    /// Whether HSI is currently delivered by polling rather than by callback.
+    public var isHsiBuffered: Bool { hsiDrainLock.synchronized { hsiBufferedMode } }
+
+    /// Register a sink for real-time HSI state updates.
     ///
-    /// The callback fires on a background thread. Dispatch to main thread
-    /// if updating UI.
-    public func setHsiCallback(_ callback: @escaping (String) -> Void) {
+    /// Only one delivery path can be active. Call ``clearHsiCallback()`` to
+    /// unregister. The sink fires on a background thread either way — the
+    /// SDK's drain queue in buffered mode, a native tokio worker in push mode.
+    /// Dispatch to the main thread if updating UI.
+    ///
+    /// Prefers **buffered (pull-based) delivery** when the runtime supports it
+    /// (≥ 0.31.1): `init_hsi_buffered` retires any native callback, waits for
+    /// an in-flight dispatch, and from then on the runtime queues frames in a
+    /// ring this bridge drains every ``hsiDrainIntervalMs``. Falls back to the
+    /// legacy push callback on an older runtime — same behaviour as before,
+    /// including its callback-lifetime exposure, until the linked runtime is
+    /// updated.
+    public func setHsiCallback(preferBuffered: Bool = true, _ callback: @escaping (String) -> Void) {
+        clearHsiCallback()
+        if preferBuffered && initHsiBuffered(callback) { return }
+
         let previousBox = hsiCallbackBox
         let box = Unmanaged.passRetained(callback as AnyObject)
         let ud = box.toOpaque()
@@ -1160,11 +1249,91 @@ public final class CoreRuntimeBridge {
         previousBox?.release()
     }
 
-    /// Unregister the HSI callback.
+    /// Unregister HSI delivery.
+    ///
+    /// Buffered mode: one final drain so a window completed since the last
+    /// poll is not lost, then the pump stops — no callback was ever
+    /// registered. Push mode: tells the runtime to stop dispatching and
+    /// releases the callback box.
     public func clearHsiCallback() {
+        let wasBuffered: Bool = hsiDrainLock.synchronized { hsiBufferedMode }
+        if wasBuffered {
+            drainHsi()
+            hsiDrainLock.synchronized {
+                hsiDrainTimer?.cancel()
+                hsiDrainTimer = nil
+                hsiBufferedMode = false
+                hsiSink = nil
+            }
+        }
         Self._clearHsiCb?(handle)
         hsiCallbackBox?.release()
         hsiCallbackBox = nil
+    }
+
+    /// Switch the runtime to buffered delivery and start the drain pump.
+    /// Returns false — with nothing changed — when the runtime lacks the
+    /// symbols or refuses, so the caller can fall back to the push path.
+    private func initHsiBuffered(_ callback: @escaping (String) -> Void) -> Bool {
+        guard let initFn = Self._initHsiBuffered, Self._drainHsi != nil else { return false }
+        guard initFn(handle, Self.hsiBufferCapacity) == 0 else { return false }
+        let interval = max(Self.hsiDrainIntervalMs, 50)
+        let timer = DispatchSource.makeTimerSource(queue: Self.hsiDrainQueue)
+        timer.schedule(deadline: .now() + .milliseconds(interval), repeating: .milliseconds(interval), leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in self?.drainHsi() }
+        hsiDrainLock.synchronized {
+            hsiDrainTimer?.cancel()
+            hsiDrainTimer = timer
+            hsiBufferedMode = true
+            hsiSink = callback
+            lastReportedDroppedHsi = 0 // the runtime resets its counter on init
+        }
+        timer.resume()
+        return true
+    }
+
+    /// Deliver every frame pending in the runtime's ring to the registered
+    /// sink, oldest first. No-op outside buffered mode.
+    ///
+    /// Safe — and cheap — to call from the host's own tick loop as well as
+    /// from the periodic pump: an empty ring returns NULL (never an empty
+    /// array) and costs one FFI call. Frames a host already received as a
+    /// `tick` / `tick_all` return value are deduplicated downstream by `hsi_id`.
+    public func drainHsi() {
+        hsiDrainLock.lock()
+        defer { hsiDrainLock.unlock() }
+        guard hsiBufferedMode, let sink = hsiSink, let drain = Self._drainHsi else { return }
+        guard let blob = consumeCString(drain(handle)), !blob.isEmpty else { return } // nothing pending
+        guard let data = blob.data(using: .utf8),
+              let frames = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return }
+        for frame in frames {
+            // The delivery path is string-based end to end (the deduper reads
+            // `meta.ids.hsi_id` off the raw text and `HSIState` keeps the raw
+            // JSON), so hand each element on as its own JSON document.
+            guard JSONSerialization.isValidJSONObject(frame),
+                  let d = try? JSONSerialization.data(withJSONObject: frame),
+                  let s = String(data: d, encoding: .utf8) else { continue }
+            sink(s)
+        }
+        reportDroppedHsiIfChanged()
+    }
+
+    /// Frames the runtime evicted from the ring (or lost to channel lag) since
+    /// buffered mode was last initialised. Always `0` while something drains
+    /// at least every ``hsiBufferCapacity`` frames; anything else is a gap in
+    /// the host's drain loop, not back-pressure to tune.
+    public func droppedHsiFrames() -> UInt64 {
+        Self._droppedHsiFrames?(handle) ?? 0
+    }
+
+    private func reportDroppedHsiIfChanged() {
+        let dropped = droppedHsiFrames()
+        guard dropped != lastReportedDroppedHsi else { return }
+        lastReportedDroppedHsi = dropped
+        SynheartLogger.log(
+            "[Synheart] HSI ring has dropped \(dropped) frame(s) in total — nothing "
+            + "drained for longer than hsiBufferCapacity (\(Self.hsiBufferCapacity)) frames."
+        )
     }
 
     // MARK: - Vendor Stream Callback
@@ -1175,7 +1344,14 @@ public final class CoreRuntimeBridge {
         UnsafeMutableRawPointer?
     ) -> Void
 
+    private typealias ClearStreamCallbackFn = @convention(c) (OpaquePointer?) -> Void
+
     private static let _setStreamCb: SetStreamCallbackFn? = sym("synheart_core_set_stream_callback")
+    /// Runtime ≥ 0.31.1. Returns only once the stream callback can no longer
+    /// be invoked, so its box may be released immediately afterwards. Absent
+    /// on older runtimes, where the registration is replaced with a no-op
+    /// before the box is released.
+    private static let _clearStreamCb: ClearStreamCallbackFn? = sym("synheart_core_clear_stream_callback")
     private static let streamNoopCallback: @convention(c) (
         UnsafePointer<CChar>?, UnsafeMutableRawPointer?
     ) -> Void = { jsonPointer, _ in
@@ -1202,9 +1378,21 @@ public final class CoreRuntimeBridge {
         previousBox?.release()
     }
 
-    /// Replaces the stream callback with a safe no-op before releasing it.
+    /// Unregister the stream callback.
+    ///
+    /// On a runtime ≥ 0.31.1 `synheart_core_clear_stream_callback` returns
+    /// only once the callback can no longer be invoked, so the box is
+    /// released on the spot. Older runtimes have no clear entrypoint, so the
+    /// registration is replaced with a safe no-op first. Never call this from
+    /// inside the stream callback itself: the runtime waits for the in-flight
+    /// dispatch and deadlocks. The stream callback is still a pushed function
+    /// pointer — 0.31.1 adds clear-only, no buffered mode.
     public func clearStreamCallback() {
-        Self._setStreamCb?(handle, Self.streamNoopCallback, nil)
+        if let clear = Self._clearStreamCb {
+            clear(handle)
+        } else {
+            Self._setStreamCb?(handle, Self.streamNoopCallback, nil)
+        }
         streamCallbackBox?.release()
         streamCallbackBox = nil
     }
@@ -1364,5 +1552,15 @@ public final class CoreRuntimeBridge {
     public func rebindSubjectId(_ subjectId: String, invalidateToken: Bool = true) -> Int32 {
         guard let fn = Self._rebindSubject else { return -1 }
         return subjectId.withCString { fn(handle, $0, invalidateToken ? 1 : 0) }
+    }
+}
+
+private extension NSLock {
+    /// `NSLock.withLock` needs watchOS 9 / tvOS 16; this package still
+    /// declares watchOS 8 and tvOS 15.
+    func synchronized<T>(_ body: () throws -> T) rethrows -> T {
+        lock()
+        defer { unlock() }
+        return try body()
     }
 }

@@ -1,6 +1,6 @@
 # Synheart Core SDK — Swift
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-FA7343.svg)](https://swift.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -158,7 +158,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.2.0")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.3.0")
 ]
 ```
 
@@ -398,6 +398,9 @@ personalization, Syni, and independent instances—is documented in
 | `onStateUpdate` | `AnyPublisher<HSIState, Never>` | Typed HSI state updates |
 | `currentState` | `String?` | Latest HSI JSON frame |
 | `currentHSIState` | `HSIState?` | Latest typed HSI state |
+| `isHsiDeliveryBuffered` | `Bool` | HSI is polled from the runtime's ring (runtime ≥ 0.31.1) instead of pushed through a callback |
+| `runtimeCompatibility` | `RuntimeCompatResult?` | Version gate result: the linked runtime against `RuntimeCompat.writtenAgainst` (0.31.1) and `minimum` (0.20.0); `initialize` throws `runtimeVersionTooOld` below the minimum |
+| `droppedHsiFrames` | `UInt64` | Frames the ring evicted since buffered delivery started |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |
 | `isInitialized` | `Bool` | Whether SDK is initialized |
 | `isRunning` | `Bool` | Whether a session is active |

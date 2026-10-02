@@ -99,6 +99,7 @@ public class Synheart {
     private let hsiSubject = CurrentValueSubject<String?, Never>(nil)
     private let typedHsiSubject = CurrentValueSubject<HSIState?, Never>(nil)
     private let vendorStreamSubject = PassthroughSubject<[String: Any], Never>()
+    private let runtimeBehaviorEventSubject = PassthroughSubject<BehaviorEventInput, Never>()
     private let dataDeletionSubject = PassthroughSubject<DataDeletionEvent, Never>()
     private let hsiDeliveryDeduplicator = HSIDeliveryDeduplicator()
     private var cancellables = Set<AnyCancellable>()
@@ -206,6 +207,20 @@ public class Synheart {
     public static var onBehaviorEvent: AnyPublisher<BehaviorEvent, Never> {
         shared.behaviorModule?.capturedEvents
             ?? Empty<BehaviorEvent, Never>().eraseToAnyPublisher()
+    }
+
+    /// Every behavior event in the rich form the personal runtime receives it —
+    /// notification action, scroll and swipe payload — as it is pushed.
+    ///
+    /// For a host that feeds a second runtime (``SynheartInstance``), which has
+    /// no collectors of its own: forward the events it needs with
+    /// `SynheartInstance.pushBehaviorEvent`. Unlike ``onBehaviorEvent`` this is
+    /// a facade-level publisher: it exists before `initialize` and survives the
+    /// behavior module being rebuilt, so one subscription lasts the process.
+    /// Events arrive only while behavior collection runs and its consent is
+    /// granted.
+    public static var onRuntimeBehaviorEvent: AnyPublisher<BehaviorEventInput, Never> {
+        shared.runtimeBehaviorEventSubject.eraseToAnyPublisher()
     }
 
     /// Real, consent-filtered phone motion samples forwarded to the native runtime.
@@ -354,10 +369,17 @@ public class Synheart {
         shared.coreRuntime?.setAccelPlacement(placement.code)
     }
 
-    /// Push one sample from a wrist-worn accelerometer (a watch), in m/s²
-    /// including gravity, stamped with the sensor's own sample time.
+    /// Push one sample from a wrist-worn accelerometer (a watch), in g
+    /// including gravity, stamped with the sensor's own sample time. Kept
+    /// apart from the device's motion; a no-op on a runtime without the symbol.
     public static func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
         shared.coreRuntime?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z)
+    }
+
+    /// Push one sample from a body-worn accelerometer, in g, with the
+    /// placement it was worn at. A no-op on a runtime without the symbol.
+    public static func pushWornAccel(tsMs: Int64, x: Double, y: Double, z: Double, placement: AccelPlacement) {
+        shared.coreRuntime?.pushWornAccel(tsMs: tsMs, x: x, y: y, z: z, placementCode: placement.code)
     }
 
     /// Declare the window containing `tsMs` to be a rest window. One-shot per
@@ -371,7 +393,9 @@ public class Synheart {
     /// ``onHSIUpdate``. Tick once a second for the whole session.
     @discardableResult
     public static func tick(nowMs: Int64) -> String? {
-        guard let json = shared.coreRuntime?.tick(nowMs: nowMs) else { return nil }
+        let json = shared.coreRuntime?.tick(nowMs: nowMs)
+        shared.coreRuntime?.bridge?.drainHsi() // see ``tickAll(nowMs:)``
+        guard let json else { return nil }
         shared._deliverHsi(json: json)
         return json
     }
@@ -382,7 +406,12 @@ public class Synheart {
     /// ``tick(nowMs:)`` rather than assuming there were no windows.
     @discardableResult
     public static func tickAll(nowMs: Int64) -> [String]? {
-        guard let array = shared.coreRuntime?.tickAll(nowMs: nowMs) else { return nil }
+        let array = shared.coreRuntime?.tickAll(nowMs: nowMs)
+        // In buffered mode the runtime queued these same windows for the drain
+        // pump; take them now so they reach the publishers in this call rather
+        // than up to a drain interval later (deduplicated by `hsi_id` either way).
+        shared.coreRuntime?.bridge?.drainHsi()
+        guard let array else { return nil }
         return shared._deliverHsiArray(array)
     }
 
@@ -391,7 +420,9 @@ public class Synheart {
     /// ``tickAll(nowMs:)``.
     @discardableResult
     public static func flushPending(nowMs: Int64) -> [String]? {
-        guard let array = shared.coreRuntime?.flushPending(nowMs: nowMs) else { return nil }
+        let array = shared.coreRuntime?.flushPending(nowMs: nowMs)
+        shared.coreRuntime?.bridge?.drainHsi() // see ``tickAll(nowMs:)``
+        guard let array else { return nil }
         return shared._deliverHsiArray(array)
     }
 
@@ -1142,6 +1173,11 @@ public class Synheart {
             runtimeSink: coreRuntime,
             sessionIdProvider: { [weak self] in self?._currentSessionHandle?.sessionId }
         )
+        // Republish every rich event the personal runtime receives, so a host
+        // feeding a second instance (which has no collectors) can forward them.
+        behaviorModule?.onRuntimeBehaviorEvent = { [weak self] event in
+            self?.runtimeBehaviorEventSubject.send(event)
+        }
 
         try moduleManager.registerModule(wearModule!, dependsOn: ["capabilities", "consent"])
         try moduleManager.registerModule(phoneModule!, dependsOn: ["capabilities", "consent"])
@@ -1193,6 +1229,19 @@ public class Synheart {
         if let cr = coreRuntime, let bridge = cr.bridge {
             SynheartLogger.log("[Synheart] Core runtime bridge loaded")
 
+            // Version gate. The C ABI is additive, so an old linked library
+            // resolves fine and diverges silently; this is where it becomes
+            // visible.
+            let compat = RuntimeCompat.check(buildInfo: bridge.buildInfo().flatMap(parseDict))
+            runtimeCompatibility = compat
+            SynheartLogger.log(compat.message)
+            if !compat.isAcceptable {
+                throw SynheartError.runtimeVersionTooOld(
+                    version: compat.version ?? "unknown",
+                    minimum: RuntimeCompat.minimum
+                )
+            }
+
             // Capture the canonical subject the runtime resolved (a device-auth
             // derive may have changed it) so SDK subject checks match native.
             syncSubjectFromNative()
@@ -1238,6 +1287,13 @@ public class Synheart {
         bridge.setHsiCallback { [weak self] json in
             self?._deliverHsi(json: json)
         }
+        SynheartLogger.log(
+            bridge.isHsiBuffered
+                ? "[Synheart] HSI delivery: buffered (ring \(CoreRuntimeBridge.hsiBufferCapacity), "
+                    + "drain \(CoreRuntimeBridge.hsiDrainIntervalMs) ms)"
+                : "[Synheart] HSI delivery: push callback — runtime predates 0.31.1 buffered "
+                    + "delivery; the callback-lifetime exposure remains until the linked runtime is updated."
+        )
     }
 
     /// Single delivery path for HSI documents, whether they arrive through the
@@ -2016,6 +2072,14 @@ public class Synheart {
         shared.coreRuntime?.bridge?.loadSrmSnapshot(json: json) ?? false
     }
 
+    /// Result of the runtime version gate run at initialisation: the linked
+    /// runtime's version against ``RuntimeCompat/writtenAgainst`` /
+    /// ``RuntimeCompat/minimum``. `nil` before initialisation. Below the
+    /// minimum ``initialize`` throws ``SynheartError/runtimeVersionTooOld``;
+    /// between minimum and written-against it logs a warning once.
+    public static var runtimeCompatibility: RuntimeCompatResult? { shared.runtimeCompatibility }
+    private var runtimeCompatibility: RuntimeCompatResult?
+
     /// Get the native core runtime version, or `nil` if unavailable.
     ///
     /// Build metadata is authoritative. Diagnostics is retained as a fallback
@@ -2025,6 +2089,23 @@ public class Synheart {
             buildInfo: runtimeBuildInfo,
             diagnostics: shared.coreRuntime?.diagnostics()
         )
+    }
+
+    /// True when HSI frames are delivered by polling the runtime's ring buffer
+    /// (runtime ≥ 0.31.1) rather than through a native callback. In buffered
+    /// mode no function pointer crosses the FFI boundary, so no callback can
+    /// dangle; see `CoreRuntimeBridge.setHsiCallback`. Tune the ring and
+    /// cadence through `CoreRuntimeBridge.hsiBufferCapacity` /
+    /// `CoreRuntimeBridge.hsiDrainIntervalMs` before ``initialize``.
+    public static var isHsiDeliveryBuffered: Bool {
+        shared.coreRuntime?.bridge?.isHsiBuffered ?? false
+    }
+
+    /// Frames evicted from the HSI ring since buffered delivery was
+    /// initialised. `0` unless the host stopped draining for longer than the
+    /// ring holds; log it beside your frame count for field visibility.
+    public static var droppedHsiFrames: UInt64 {
+        shared.coreRuntime?.bridge?.droppedHsiFrames() ?? 0
     }
 
     /// Exact native runtime build provenance when supported by the linked ABI.
@@ -2209,6 +2290,8 @@ public enum SynheartError: Error {
     case notInitialized
     case alreadyConfigured
     case runtimeIncompatible(missingSymbols: [String])
+    /// The linked runtime reports a version below `RuntimeCompat.minimum`.
+    case runtimeVersionTooOld(version: String, minimum: String)
     case runtimeCreationFailed(message: String?)
     case runtimeDependencyMissing(dependencies: [String])
     case invalidArgument(String)
@@ -2227,6 +2310,8 @@ extension SynheartError: LocalizedError {
             return "Synheart is already configured"
         case let .runtimeIncompatible(missingSymbols):
             return "Native runtime is missing required symbols: \(missingSymbols.joined(separator: ", "))"
+        case let .runtimeVersionTooOld(version, minimum):
+            return "Native runtime \(version) is below the minimum \(minimum) these bindings support. Update the linked runtime with `synheart install runtime`."
         case let .runtimeCreationFailed(message):
             return message.map { "Native runtime initialization failed: \($0)" }
                 ?? "Native runtime initialization failed"

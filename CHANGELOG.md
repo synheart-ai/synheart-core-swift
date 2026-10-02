@@ -7,7 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [0.3.0] - 2026-10-02
+
+### Added — per-instance HSI delivery
+- **`SynheartInstance` can now receive every HSI window it completes.**
+  `setHsiListener`, `clearHsiListener`, `drainHsi` and `isHsiBuffered` are the
+  per-instance equivalent of `Synheart.onHSIUpdate`, which reaches the
+  personal runtime only. A host reading a second instance's output had
+  `tick()`'s return value alone — but `startSession` also starts the runtime's
+  own 1 s background tick loop on the same pipeline, and a window that loop
+  closes first never comes back from `tick()`. Buffered delivery on runtime
+  ≥ 0.31.1, push callback on older runtimes. No new native calls.
+
+### Added — host notification support
+- **`Synheart.onRuntimeBehaviorEvent`.** Every behavior event in the rich form
+  the personal runtime receives it, so a host feeding a second
+  `SynheartInstance`, which has no collectors, can forward what it needs with
+  `pushBehaviorEvent`. A facade-level publisher: one subscription outlives
+  the behavior module being rebuilt.
+- **`HostDeclarations.notificationsObservable`** sends
+  `notifications_observable` (runtime ≥ 0.32.0). Absent, the runtime resolves
+  it from the platform; a host without a running notification producer should
+  declare `false`. Older runtimes ignore it.
+
+### Added — worn accelerometer streams
+- **`pushWornAccel`** on `Synheart` and `SynheartInstance` binds
+  `synheart_core_push_worn_accel`: a body-worn stream tagged with its
+  `AccelPlacement` per sample. `pushWristAccel` is now also available on
+  `SynheartInstance`. Samples are in g with gravity included. Both degrade to
+  no-ops on a runtime without the symbol; `mobileHostAbiSupport` reports them.
+
+### Changed — behavior module feeds the rich and context channels
+- **The behavior module now tries `push_behavior_event` first** and falls back
+  to the legacy int-coded `push_behavior` only on a runtime without the
+  symbol, so scroll and swipe payloads reach the engine instead of a single
+  flattened double. Taps, scrolls and swipes are also forwarded on the
+  **context channel** (`push_context_event`), the only source of
+  `context.deviation.*` and so of the friction index; keystrokes are not — they
+  must enter from the host's text layer via `ContextEventInput.textChange`.
+
+### Fixed — notification follow-ups counted as arrivals
+- **A notification's later outcome no longer reaches the runtime as a new
+  arrival.** The host reports a notification on arrival and again when it is
+  opened; the engine counts every notification event as an arrival, so an
+  opened notification counted twice, inflating the notification rate,
+  Interruption Pressure and the lab `notification_count`. Follow-ups are no
+  longer pushed to the runtime; `onBehaviorEvent` still carries them.
+
+### Added — runtime version gate
+
+- **The SDK now states which runtime its bindings assume and checks it at
+  init.** `RuntimeCompat.writtenAgainst` (`0.31.1`) and `RuntimeCompat.minimum`
+  (`0.20.0`) are compared against `build_info.core_runtime` once the bridge is
+  created; the result is logged and exposed as `Synheart.runtimeCompatibility`.
+  Below the minimum, `initialize` throws `SynheartError.runtimeVersionTooOld`
+  naming the fix (`synheart install runtime`); between minimum and
+  written-against it warns once. Until now nothing in this package recorded
+  the runtime version the hand-written `dlsym` surface was written for, so
+  every behavioural change in the runtime's `SDK-CONTRACT-CHANGES.md` was
+  invisible to a consumer — the C ABI is additive, so an old linked library
+  resolves fine and diverges silently.
+
+### Added — research instance fan-in
+
+- **`SynheartInstance` can now be given rich behavior events, an app identity
+  and keystroke context.** `pushBehaviorEvent`, `pushAppForeground`,
+  `pushContextEvent`, `pushContextEventJson` and `supportsRichBehaviorEvents`
+  are the per-instance equivalents of the `Synheart.*` calls, which reach the
+  personal runtime only. A host running a second (research) instance had no
+  way to feed any of them, so every research window resolved to the `Unknown`
+  app category — an all-zero interpretation-mask row — and carried
+  `context_label: UK` with no evidence behind it, starving CFI / Cognitive
+  Load's digital term, Valence's friction index and the behaviour-only Stress
+  path on every research row. No new native calls: all route through the
+  existing bridge symbols.
+
+### Fixed — HSI callback lifetime (runtime ≥ 0.31.1)
+
+- **HSI delivery is now buffered (pull-based) when the runtime supports it.**
+  The push path hands the runtime a C function pointer plus a retained
+  `user_data` box whose lifetime its tokio workers know nothing about; if the
+  Swift side that owns the box is torn down while the native runtime, its
+  workers and the HSI listener survive in the process, the next completed
+  window is dispatched through a dangling pointer and the process aborts on a
+  `tokio-rt-worker` thread. On a runtime ≥ 0.31.1 the bridge now calls
+  `synheart_core_init_hsi_buffered` instead of registering a callback and
+  drains `synheart_core_drain_hsi` from a dispatch timer on an SDK-owned queue
+  every `CoreRuntimeBridge.hsiDrainIntervalMs` (1 s; ring
+  `CoreRuntimeBridge.hsiBufferCapacity`, default 64 — the oldest frame is
+  evicted when full). `Synheart.tick` / `tickAll` / `flushPending` drain in
+  the same call, so a host that ticks itself sees no added latency; delivery
+  stays deduplicated by `hsi_id`. Older runtimes fall back to the push
+  callback unchanged. `Synheart.isHsiDeliveryBuffered` and
+  `Synheart.droppedHsiFrames` expose the mode and the runtime's eviction
+  counter. Same pattern as the buffered logging path. The four symbols join
+  the optional set in `RuntimeSymbolManifest`.
+- **Stream callback teardown uses `synheart_core_clear_stream_callback`**
+  when exported (≥ 0.31.1) and releases the box immediately; older runtimes
+  keep the swap-in-a-no-op path. The stream callback itself is still a pushed
+  function pointer — 0.31.1 adds clear-only, no buffered mode.
+
+### Fixed — `secure_load` no longer reports a failed read as "no such key"
+
+- The Keychain-backed `load` callback returned NULL for every status other
+  than success — including `errSecInteractionNotAllowed` (device locked /
+  before first unlock) and `errSecNotAvailable`. The runtime reads NULL as
+  "absent", so one locked-Keychain launch minted a new storage master key
+  over the existing one and orphaned every sealed blob. Absence
+  (`errSecItemNotFound`) is now the only immediate NULL; transient statuses
+  are retried with a bounded ~1.5 s backoff; other failures are logged with
+  their `OSStatus`. A non-UTF-8 item is reported as unavailable, not absent.
+  The callback still has to return NULL when storage is genuinely unavailable
+  — the C signature has no error channel. On runtime ≥ 0.31.1 the
+  provisioning marker turns that into `ERR_SECURE_STORAGE_UNAVAILABLE`
+  (retryable) rather than a re-mint; older runtimes keep the re-mint exposure.
+
+### Added — mobile-host runtime surface
 - **Mobile-host runtime surface.** Optional bindings for
   `synheart_core_tick`, `tick_all`, `flush_pending`, `push_behavior_event`,
   `push_context_event`, `push_speed`, `set_accel_placement`,
@@ -275,6 +390,8 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.1.0
 [0.0.5]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.0.5
