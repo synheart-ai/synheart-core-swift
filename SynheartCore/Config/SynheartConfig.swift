@@ -77,6 +77,39 @@ public struct SynheartConfig {
     public let sync: SyncConfig
     public let privacy: PrivacyConfig
 
+    /// Engine window length in milliseconds. `nil` takes the runtime default.
+    public let windowMs: Int?
+
+    /// Opt-in kinematic heads. Empty by default; they also need a body-worn
+    /// ``AccelPlacement`` before they produce anything.
+    public let extraHeads: [ExtraHead]
+
+    /// Publish per-head evidence terms in `meta.synheart.diagnostics`.
+    ///
+    /// The block carries each head's component breakdown, the notes a head
+    /// wrote when it withheld, and the input signals to the digital axes.
+    /// Off by default and it should stay off for a product surface: the axes
+    /// are the contract and this is debug telemetry that roughly doubles the
+    /// size of every stored window. Turn it on for a validation build — it is
+    /// the difference between an export a reviewer can audit and a list of
+    /// scores they have to take on trust.
+    public let emitDiagnostics: Bool
+
+    /// Use the single-visit baseline profile (`d_min = 1`) without switching
+    /// the whole instance into ``SynheartMode/research``.
+    ///
+    /// `d_min` is the number of distinct calendar days a metric needs before
+    /// its personal baseline is promoted from Warming to Ready; the default of
+    /// 3 makes Ready unreachable in a supervised single-visit protocol. Data
+    /// matured under this flag is a within-session reference, not a personal
+    /// baseline, and analysis must report it as such. Off by default.
+    public let researchBaseline: Bool
+
+    /// Host declarations that change engine output — `sensing`,
+    /// `device_class`, `mask_profile`, `cfi_structural_components`. Defaults
+    /// to declaring nothing. See ``HostDeclarations``.
+    public let hostDeclarations: HostDeclarations
+
     public let cloudConfig: CloudConfig?
     public let labIngestConfig: LabIngestConfig?
     public let consentConfig: ConsentConfig?
@@ -120,7 +153,12 @@ public struct SynheartConfig {
         deviceAuthConfig: DeviceAuthConfig? = nil,
         capabilityToken: CapabilityToken? = nil,
         capabilitySecret: String? = nil,
-        allowUnsignedCapabilities: Bool = false
+        allowUnsignedCapabilities: Bool = false,
+        windowMs: Int? = nil,
+        extraHeads: [ExtraHead] = [],
+        emitDiagnostics: Bool = false,
+        researchBaseline: Bool = false,
+        hostDeclarations: HostDeclarations = HostDeclarations()
     ) {
         self.appId = appId
         self.subjectId = subjectId
@@ -143,6 +181,11 @@ public struct SynheartConfig {
         self.legacyCapabilityToken = capabilityToken
         self.legacyCapabilitySecret = capabilitySecret
         self.allowUnsignedCapabilities = allowUnsignedCapabilities
+        self.windowMs = windowMs
+        self.extraHeads = extraHeads
+        self.emitDiagnostics = emitDiagnostics
+        self.researchBaseline = researchBaseline
+        self.hostDeclarations = hostDeclarations
     }
 
     /// Validate config and throw on violations.
@@ -164,6 +207,16 @@ public struct SynheartConfig {
                 throw SynheartCoreError.notConfigured(
                     "storage.retentionDays must be between 0 and \(Int32.max)"
                 )
+            }
+        }
+        if let windowMs {
+            guard windowMs > 0 else {
+                throw SynheartCoreError.notConfigured("windowMs must be greater than 0")
+            }
+        }
+        if let n = hostDeclarations.cfiStructuralComponents {
+            guard n >= 0 else {
+                throw SynheartCoreError.notConfigured("cfiStructuralComponents must not be negative")
             }
         }
         if let deviceAuthConfig {

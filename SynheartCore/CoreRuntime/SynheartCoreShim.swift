@@ -121,6 +121,27 @@ public final class SynheartCoreShim {
         bridge?.pushSleepStages(json: json)
     }
 
+    // MARK: - Mobile host surface (pass-through)
+
+    public var mobileHostAbiSupport: [String: Bool] { bridge?.mobileHostAbiSupport ?? [:] }
+    public func tick(nowMs: Int64) -> String? { bridge?.tick(nowMs: nowMs) }
+    public func tickAll(nowMs: Int64) -> String? { bridge?.tickAll(nowMs: nowMs) }
+    public func flushPending(nowMs: Int64) -> String? { bridge?.flushPending(nowMs: nowMs) }
+    public func pushBehaviorEventJson(_ json: String) -> Int32? { bridge?.pushBehaviorEventJson(json) }
+    public func pushContextEventJson(_ json: String) -> Int32? { bridge?.pushContextEventJson(json) }
+    public func pushSpeed(tsMs: Int64, speedMps: Double) { bridge?.pushSpeed(tsMs: tsMs, speedMps: speedMps) }
+    public func setAccelPlacement(_ code: Int32) { bridge?.setAccelPlacement(code) }
+    public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
+        bridge?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z)
+    }
+    public func declareRestWindow(tsMs: Int64) { bridge?.declareRestWindow(tsMs: tsMs) }
+    public func rollDay(_ dayIndex: Int32) -> Int32? { bridge?.rollDay(dayIndex) }
+    public func exportSessionState() -> String? { bridge?.exportSessionState() }
+    public func loadSessionState(_ json: String) -> Int32? { bridge?.loadSessionState(json) }
+    public func configId() -> String? { bridge?.configId() }
+    public func lastHsv() -> String? { bridge?.lastHsv() }
+    public func attachStrainScoreJson() -> String? { bridge?.attachStrainScoreJson() }
+
     /// Batch-ingest events. Returns an `HSIState` if a window completed, or nil.
     public func ingestBatch(batchJson: String, nowMs: Int64) -> HSIState? {
         guard let json = bridge?.ingestBatch(batchJson: batchJson, nowMs: nowMs) else { return nil }

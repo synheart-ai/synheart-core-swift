@@ -537,6 +537,184 @@ public final class CoreRuntimeBridge {
         return consumeCString(ptr)
     }
 
+    // MARK: - Mobile host surface
+
+    // Every symbol below is optional. A call degrades to a no-op (or returns
+    // `nil`) when the linked runtime predates it, and `mobileHostAbiSupport`
+    // says which ones resolved, so a host can pick a fallback path instead of
+    // assuming the call did something.
+
+    private typealias TickFn              = @convention(c) (OpaquePointer?, Int64) -> UnsafeMutablePointer<CChar>?
+    private typealias PushJsonEventFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
+    private typealias PushSpeedFn         = @convention(c) (OpaquePointer?, Int64, Double) -> Void
+    private typealias SetAccelPlacementFn = @convention(c) (OpaquePointer?, Int32) -> Void
+    private typealias DeclareRestWindowFn = @convention(c) (OpaquePointer?, Int64) -> Void
+    private typealias RollDayFn           = @convention(c) (OpaquePointer?, Int32) -> Int32
+    private typealias ReadStringFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias LoadStringFn        = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
+    private typealias PushWristAccelFn    = @convention(c) (OpaquePointer?, Int64, Double, Double, Double) -> Void
+
+    private static let _tick:              TickFn?              = sym("synheart_core_tick")
+    private static let _tickAll:           TickFn?              = sym("synheart_core_tick_all")
+    private static let _flushPending:      TickFn?              = sym("synheart_core_flush_pending")
+    private static let _pushBehaviorEvent: PushJsonEventFn?     = sym("synheart_core_push_behavior_event")
+    private static let _pushContextEvent:  PushJsonEventFn?     = sym("synheart_core_push_context_event")
+    private static let _pushSpeed:         PushSpeedFn?         = sym("synheart_core_push_speed")
+    private static let _setAccelPlacement: SetAccelPlacementFn? = sym("synheart_core_set_accel_placement")
+    private static let _declareRestWindow: DeclareRestWindowFn? = sym("synheart_core_declare_rest_window")
+    private static let _pushWristAccel:    PushWristAccelFn?    = sym("synheart_core_push_wrist_accel")
+    private static let _rollDay:           RollDayFn?           = sym("synheart_core_roll_day")
+    private static let _exportSessionState: ReadStringFn?       = sym("synheart_core_export_session_state")
+    private static let _loadSessionState:  LoadStringFn?        = sym("synheart_core_load_session_state")
+    private static let _configId:          ReadStringFn?        = sym("synheart_core_config_id")
+    private static let _lastHsv:           ReadStringFn?        = sym("synheart_core_last_hsv")
+    private static let _attachStrainScore: ReadStringFn?        = sym("synheart_core_attach_strain_score_json")
+
+    /// Which mobile-host symbols the linked runtime exports. A `false` entry
+    /// means the matching method is a no-op on this runtime.
+    public var mobileHostAbiSupport: [String: Bool] {
+        [
+            "tick": Self._tick != nil,
+            "tickAll": Self._tickAll != nil,
+            "flushPending": Self._flushPending != nil,
+            "pushBehaviorEvent": Self._pushBehaviorEvent != nil,
+            "pushContextEvent": Self._pushContextEvent != nil,
+            "pushSpeed": Self._pushSpeed != nil,
+            "setAccelPlacement": Self._setAccelPlacement != nil,
+            "declareRestWindow": Self._declareRestWindow != nil,
+            "pushWristAccel": Self._pushWristAccel != nil,
+            "rollDay": Self._rollDay != nil,
+            "exportSessionState": Self._exportSessionState != nil,
+            "loadSessionState": Self._loadSessionState != nil,
+            "configId": Self._configId != nil,
+            "lastHsv": Self._lastHsv != nil,
+            "attachStrainScoreJson": Self._attachStrainScore != nil,
+        ]
+    }
+
+    /// Advance the engine clock to `nowMs` and return the HSI document of a
+    /// window that closed, or `nil` when none did (or the symbol is absent).
+    ///
+    /// Pushing samples does not advance the clock on its own: a host that
+    /// wants windows to close on time must tick, once a second, for the whole
+    /// session. `tick` polls a single window; after any gap prefer
+    /// ``tickAll(nowMs:)``.
+    public func tick(nowMs: Int64) -> String? {
+        let out = consumeCString(Self._tick?(handle, nowMs))
+        return (out?.isEmpty ?? true) ? nil : out
+    }
+
+    /// Drain every completed window as a JSON array, oldest first.
+    ///
+    /// `tick` polls one window, so a backgrounded stretch silently skips the
+    /// windows it spanned; this returns all of them. Returns `nil` when the
+    /// runtime predates `synheart_core_tick_all` — fall back to ``tick(nowMs:)``
+    /// in that case rather than assuming there were no windows.
+    public func tickAll(nowMs: Int64) -> String? {
+        consumeCString(Self._tickAll?(handle, nowMs))
+    }
+
+    /// Emit every window the engine is still holding for its lateness budget.
+    ///
+    /// Call on backgrounding and at session end, or up to one budget's worth
+    /// of completed windows is stranded. Same array shape as ``tickAll(nowMs:)``;
+    /// `nil` when the symbol is absent. Safe to call routinely: with nothing
+    /// pending it returns `[]`.
+    public func flushPending(nowMs: Int64) -> String? {
+        consumeCString(Self._flushPending?(handle, nowMs))
+    }
+
+    /// Push one typed behavior event as JSON (`{ "ts_ms", "kind", "value", "data"? }`).
+    /// Returns the runtime status (`0` = accepted), or `nil` when the symbol is absent.
+    public func pushBehaviorEventJson(_ eventJson: String) -> Int32? {
+        guard let fn = Self._pushBehaviorEvent else { return nil }
+        return eventJson.withCString { fn(handle, $0) }
+    }
+
+    /// Push one context event as externally-tagged JSON (`{ "Keyboard": {...} }`).
+    /// Returns the runtime status (`0` = accepted), or `nil` when the symbol is absent.
+    ///
+    /// Send interaction evidence, never a context label: the engine derives the
+    /// label itself, and two-letter application codes collide with live label codes.
+    public func pushContextEventJson(_ eventJson: String) -> Int32? {
+        guard let fn = Self._pushContextEvent else { return nil }
+        return eventJson.withCString { fn(handle, $0) }
+    }
+
+    /// Push a GPS-derived ground speed sample in metres per second.
+    ///
+    /// The high-confidence input for `locomotion_state`; without it that axis
+    /// runs on its low-confidence accelerometer-only fallback. Speed is drained
+    /// by window range and reduced to a median, so out-of-order samples are
+    /// never dropped.
+    public func pushSpeed(tsMs: Int64, speedMps: Double) {
+        Self._pushSpeed?(handle, tsMs, speedMps)
+    }
+
+    /// Declare where the accelerometer sits. See `AccelPlacement`.
+    public func setAccelPlacement(_ placementCode: Int32) {
+        Self._setAccelPlacement?(handle, placementCode)
+    }
+
+    /// Push one sample from a wrist-worn accelerometer, in m/s² including
+    /// gravity. The runtime keeps wrist motion separate from device motion.
+    public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
+        Self._pushWristAccel?(handle, tsMs, x, y, z)
+    }
+
+    /// Declare that the window containing `tsMs` is a rest window.
+    ///
+    /// Rest is composite — screen off for a sustained stretch, no interaction
+    /// and low motion — and the host is the only party that can see all three.
+    /// Without it Focus is never zeroed on a break and Capacity never takes the
+    /// recovery path. One-shot per rest *window*, not once per break.
+    public func declareRestWindow(tsMs: Int64) {
+        Self._declareRestWindow?(handle, tsMs)
+    }
+
+    /// Advance the daily accumulator to `dayIndex` (days since epoch in the
+    /// host's local zone). The index must strictly advance. Returns the runtime
+    /// status, or `nil` when the symbol is absent.
+    public func rollDay(_ dayIndex: Int32) -> Int32? {
+        guard let fn = Self._rollDay else { return nil }
+        return fn(handle, dayIndex)
+    }
+
+    /// Export the per-head session state as JSON, for restore on the next
+    /// launch. Call before `stopSession`; `nil` when the symbol is absent.
+    public func exportSessionState() -> String? {
+        consumeCString(Self._exportSessionState?(handle))
+    }
+
+    /// Restore a previously exported session state. Must run before the first
+    /// tick of the session, or the first window overwrites it. Returns `0` on
+    /// success, `nil` when the symbol is absent.
+    public func loadSessionState(_ json: String) -> Int32? {
+        guard let fn = Self._loadSessionState else { return nil }
+        return json.withCString { fn(handle, $0) }
+    }
+
+    /// Comparability key for anything the host caches. Opaque: compare for
+    /// equality, never parse. `nil` when the symbol is absent.
+    public func configId() -> String? {
+        consumeCString(Self._configId?(handle))
+    }
+
+    /// The most recent human-state vector as JSON, or `nil` before the first
+    /// window has closed (a normal early-session state) or when absent.
+    public func lastHsv() -> String? {
+        let out = consumeCString(Self._lastHsv?(handle))
+        return (out?.isEmpty ?? true) ? nil : out
+    }
+
+    /// The day's Strain score as JSON, computed from what the engine
+    /// accumulated. Call **before** ``rollDay(_:)`` — rolling finalises the day
+    /// and clears the inputs. `nil` when nothing is available or the symbol is absent.
+    public func attachStrainScoreJson() -> String? {
+        let out = consumeCString(Self._attachStrainScore?(handle))
+        return (out?.isEmpty ?? true) ? nil : out
+    }
+
     // MARK: - Ambient Capture
 
     /// Enable/disable ambient capture mode (HSI windows forwarded
