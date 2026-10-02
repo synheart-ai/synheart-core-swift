@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-02
+
 ### Added — per-instance HSI delivery
 - **`SynheartInstance` can now receive every HSI window it completes.**
   `setHsiListener`, `clearHsiListener`, `drainHsi` and `isHsiBuffered` are the
@@ -51,8 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opened notification counted twice, inflating the notification rate,
   Interruption Pressure and the lab `notification_count`. Follow-ups are no
   longer pushed to the runtime; `onBehaviorEvent` still carries them.
-
-## [0.3.0] - 2026-09-24
 
 ### Added — runtime version gate
 
@@ -390,6 +390,8 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.1.0
 [0.0.5]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.0.5
