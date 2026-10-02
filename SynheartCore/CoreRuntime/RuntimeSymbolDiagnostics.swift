@@ -217,6 +217,11 @@ enum RuntimeSymbolManifest {
         "synheart_core_current_workout_kind",
         "synheart_core_push_workout_event",
         "synheart_core_personalization_context_json",
+        // Buffered HSI delivery and stream-callback clearing (runtime ≥ 0.31.1).
+        "synheart_core_init_hsi_buffered",
+        "synheart_core_drain_hsi",
+        "synheart_core_dropped_hsi_frames",
+        "synheart_core_clear_stream_callback",
         // Runtime stream, buffered logging, and Syni cloud service.
         "synheart_core_init_logging_buffered",
         "synheart_core_drain_logs",

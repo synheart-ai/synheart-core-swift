@@ -138,6 +138,75 @@ public final class SynheartInstance {
         withShim { $0.ingestBatch(batchJson: json, nowMs: timestampMs) } ?? nil
     }
 
+    // MARK: - Mobile host surface (per-instance)
+
+    /// Whether the linked runtime takes rich behavior events on this instance.
+    /// Same probe as `Synheart.mobileHostAbiSupport["pushBehaviorEvent"]` for
+    /// the personal runtime. Both instances link one native library, but a
+    /// host feeding two handles should ask the handle it is about to feed.
+    public var supportsRichBehaviorEvents: Bool {
+        withShim { $0.mobileHostAbiSupport["pushBehaviorEvent"] == true } ?? false
+    }
+
+    /// Push one typed behavior event into this instance — most importantly a
+    /// windowed typing summary, which the legacy int-coded path cannot express.
+    /// Returns the runtime status (`0` = accepted), or `nil` when this instance
+    /// is disposed, the symbol is absent, or the event could not be encoded.
+    /// Do not also push the raw keystrokes behind a typing summary: the engine
+    /// counts both and every rate feature roughly doubles.
+    @discardableResult
+    public func pushBehaviorEvent(_ event: BehaviorEventInput) -> Int32? {
+        guard let json = event.toJSONString() else { return nil }
+        return withShim { $0.pushBehaviorEventJson(json) } ?? nil
+    }
+
+    // Context fan-in (app identity + keystroke context during a lab window).
+    //
+    // The static `Synheart.pushContextEvent` and app-foreground events reach
+    // the PERSONAL runtime only. A host running a second, research instance
+    // had no way to give it an app identity or context evidence, so every
+    // research window resolved to the `Unknown` app category (an all-zero
+    // interpretation-mask row) and carried `context_label: UK` with no
+    // evidence behind it. These are the per-instance equivalents.
+
+    /// Declare which application is in the foreground for THIS instance.
+    ///
+    /// Send at session start, on every foreground change, and on a slow
+    /// heartbeat — repeats are steady-state observations, not switches.
+    /// `app` is the bundle identifier. Returns the runtime status (`0` =
+    /// accepted), or `nil` when this instance is disposed or the runtime lacks
+    /// `push_behavior_event`.
+    @discardableResult
+    public func pushAppForeground(
+        _ app: String,
+        tsMs: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
+    ) -> Int32? {
+        pushBehaviorEvent(.appForeground(tsMs, app: app))
+    }
+
+    /// Push one privacy-preserving context event into this instance — the only
+    /// source of `context.deviation.*`, and therefore of CFI. Mirrors the
+    /// static `Synheart.pushContextEvent`; keyboard events must come from the
+    /// text layer via `ContextEventInput.textChange`, sent for both directions.
+    ///
+    /// Returns `0` on acceptance, `nil` when this instance is disposed or the
+    /// symbol is absent, and a non-zero status most often when the runtime was
+    /// built without the `app-context` feature.
+    @discardableResult
+    public func pushContextEvent(_ event: ContextEventInput) -> Int32? {
+        guard let json = event.toJSONString() else { return nil }
+        return withShim { $0.pushContextEventJson(json) } ?? nil
+    }
+
+    /// Raw-payload escape hatch for ``pushContextEvent(_:)``; prefer the typed
+    /// call — a payload that does not parse buffers nothing, and the failure is
+    /// indistinguishable from a runtime built without the context feature.
+    @discardableResult
+    public func pushContextEventJson(_ event: [String: Any]) -> Int32? {
+        guard let json = JSONValue.encode(event) else { return nil }
+        return withShim { $0.pushContextEventJson(json) } ?? nil
+    }
+
     public func tick(at date: Date = Date()) -> String? {
         withBridge { $0.tick(timestampMs: Int64(date.timeIntervalSince1970 * 1_000)) } ?? nil
     }
