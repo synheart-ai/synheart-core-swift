@@ -2,7 +2,7 @@
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 //
 // Package: SynheartCore
-// Next release: 0.3.0
+// Next release: 0.3.1
 // License: Apache-2.0
 // Description: Synheart Core SDK for iOS — Unified HSI-compatible data collection,
 //              on-device state computation, and module orchestration.
