@@ -14,6 +14,27 @@ public final class SynheartInstance {
     private let stateLock = NSLock()
     private var shim: SynheartCoreShim?
 
+    /// Creates an instance without blocking the calling thread.
+    ///
+    /// `init(config:dataDirectory:)` runs the native runtime create (store
+    /// open and migrations, cloud connector, identity restore) synchronously,
+    /// which takes 0.5-1.5 s on a mid-range device and freezes the UI when
+    /// called on the main thread. This runs the same initializer on a
+    /// background queue. Additive: the synchronous initializer is unchanged.
+    public static func create(config: SynheartConfig, dataDirectory: URL) async throws -> SynheartInstance {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    continuation.resume(
+                        returning: try SynheartInstance(config: config, dataDirectory: dataDirectory)
+                    )
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     public init(config: SynheartConfig, dataDirectory: URL) throws {
         try config.validate()
         let directory = dataDirectory.standardizedFileURL

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-07
+
+### Added
+- **`SynheartInstance.create(config:dataDirectory:) async throws`** — creates
+  an instance without blocking the calling thread. The synchronous initializer
+  runs the native runtime create (store open and migrations, cloud connector,
+  identity restore), which takes 0.5-1.5 s on a mid-range device and froze the
+  UI when called on the main thread. Additive: `init(config:dataDirectory:)`
+  is unchanged.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added — per-instance HSI delivery
