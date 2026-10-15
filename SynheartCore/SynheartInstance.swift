@@ -42,6 +42,7 @@ public final class SynheartInstance {
             throw SynheartCoreError.notConfigured("SynheartInstance requires a local data directory")
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        RuntimeDataDirectory.excludeFromBackup(directory)
 
         let key = directory.resolvingSymlinksInPath().path
         let claimed = Self.registryLock.synchronized { Self.activeDirectories.insert(key).inserted }

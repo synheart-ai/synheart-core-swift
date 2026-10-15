@@ -25,4 +25,20 @@ final class RuntimeDataDirectoryTests: XCTestCase {
             path
         )
     }
+
+    func testPrepareExcludesTheDirectoryFromBackup() throws {
+        let fileManager = FileManager.default
+        let testRoot = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: testRoot) }
+
+        let path = try RuntimeDataDirectory.prepare(
+            using: fileManager,
+            applicationSupportDirectory: testRoot
+        )
+
+        let values = try URL(fileURLWithPath: path)
+            .resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(values.isExcludedFromBackup, true)
+    }
 }
