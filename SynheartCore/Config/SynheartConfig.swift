@@ -105,6 +105,24 @@ public struct SynheartConfig {
     /// baseline, and analysis must report it as such. Off by default.
     public let researchBaseline: Bool
 
+    /// Sample the phone accelerometer at 50 Hz instead of 10 Hz for the raw
+    /// samples forwarded to the runtime, so it can derive motion-band features
+    /// and exercise its kinematic heads. Research capture turns it on even
+    /// when this is false; see ``resolvedEmitRawMotionSamples``.
+    public let emitRawMotionSamples: Bool
+
+    /// Whether the phone accelerometer runs at the 50 Hz raw-sample rate.
+    ///
+    /// The explicit ``emitRawMotionSamples`` wins when it is on. Research
+    /// capture (``SynheartMode/research`` or ``researchBaseline``) turns it on
+    /// as well: at 10 Hz the runtime's motion bands sit above the Nyquist
+    /// limit, so they read low and the kinematic heads cannot be validated.
+    /// Outside research capture the default stays at 10 Hz for its battery
+    /// cost.
+    public var resolvedEmitRawMotionSamples: Bool {
+        emitRawMotionSamples || mode == .research || researchBaseline
+    }
+
     /// Host declarations that change engine output — `sensing`,
     /// `device_class`, `mask_profile`, `cfi_structural_components`. Defaults
     /// to declaring nothing. See ``HostDeclarations``.
@@ -158,7 +176,8 @@ public struct SynheartConfig {
         extraHeads: [ExtraHead] = [],
         emitDiagnostics: Bool = false,
         researchBaseline: Bool = false,
-        hostDeclarations: HostDeclarations = HostDeclarations()
+        hostDeclarations: HostDeclarations = HostDeclarations(),
+        emitRawMotionSamples: Bool = false
     ) {
         self.appId = appId
         self.subjectId = subjectId
@@ -186,6 +205,7 @@ public struct SynheartConfig {
         self.emitDiagnostics = emitDiagnostics
         self.researchBaseline = researchBaseline
         self.hostDeclarations = hostDeclarations
+        self.emitRawMotionSamples = emitRawMotionSamples
     }
 
     /// Validate config and throw on violations.

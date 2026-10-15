@@ -52,8 +52,11 @@ public final class SynheartCoreShim {
         }
 
         guard let b = CoreRuntimeBridge(configJson: jsonString) else {
+            // Prefer the structured error (ABI 2.0); fall back to the
+            // runtime's plain last-error string on older runtimes.
             throw SynheartError.runtimeCreationFailed(
-                message: CoreRuntimeBridge.lastInitializationError()
+                message: CoreRuntimeBridge.lastCreateError?.description
+                    ?? CoreRuntimeBridge.lastInitializationError()
             )
         }
         self.bridge = b

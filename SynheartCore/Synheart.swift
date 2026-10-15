@@ -1106,6 +1106,27 @@ public class Synheart {
         // Create the native runtime before accepting any legacy capability
         // token so signature verification can never be silently skipped.
         let dataDirectory = try RuntimeDataDirectory.prepare()
+
+        // Version gate, run on the handle-free build info BEFORE
+        // synheart_core_new, so an incompatible runtime never gets a handle (or
+        // runs its init) at all. The C ABI is additive, so an old linked
+        // library resolves fine and diverges silently; this is where it becomes
+        // visible. A runtime that is not linked at all is reported by the shim
+        // below (`runtimeIncompatible`).
+        if CoreRuntimeBridge.symbolDiagnostics.runtimeEntrypointFound {
+            guard CoreRuntimeBridge.exportsBuildInfo else {
+                // The library links but lacks synheart_core_build_info, so
+                // nothing else it exports can be trusted either.
+                throw SynheartRuntimeError.unidentified(cause: "synheart_core_build_info not exported")
+            }
+            let compat = RuntimeCompat.check(buildInfo: CoreRuntimeBridge.handleFreeBuildInfo())
+            runtimeCompatibility = compat
+            SynheartLogger.log(compat.message)
+            if !compat.isAcceptable {
+                throw SynheartRuntimeError.incompatible(compat)
+            }
+        }
+
         self.coreRuntime = try SynheartCoreShim(
             config: resolvedConfig,
             dataDir: dataDirectory
@@ -1165,6 +1186,11 @@ public class Synheart {
         phoneModule = PhoneModule(
             capabilities: capabilityModule!,
             consent: consentModule!,
+            motionCollector: CoreMotionCollector(
+                updateInterval: resolvedConfig.resolvedEmitRawMotionSamples
+                    ? CoreMotionCollector.rawSampleInterval
+                    : CoreMotionCollector.defaultInterval
+            ),
             runtimeSink: coreRuntime
         )
         behaviorModule = BehaviorModule(
@@ -1228,19 +1254,6 @@ public class Synheart {
 
         if let cr = coreRuntime, let bridge = cr.bridge {
             SynheartLogger.log("[Synheart] Core runtime bridge loaded")
-
-            // Version gate. The C ABI is additive, so an old linked library
-            // resolves fine and diverges silently; this is where it becomes
-            // visible.
-            let compat = RuntimeCompat.check(buildInfo: bridge.buildInfo().flatMap(parseDict))
-            runtimeCompatibility = compat
-            SynheartLogger.log(compat.message)
-            if !compat.isAcceptable {
-                throw SynheartError.runtimeVersionTooOld(
-                    version: compat.version ?? "unknown",
-                    minimum: RuntimeCompat.minimum
-                )
-            }
 
             // Capture the canonical subject the runtime resolved (a device-auth
             // derive may have changed it) so SDK subject checks match native.
@@ -2072,13 +2085,22 @@ public class Synheart {
         shared.coreRuntime?.bridge?.loadSrmSnapshot(json: json) ?? false
     }
 
-    /// Result of the runtime version gate run at initialisation: the linked
-    /// runtime's version against ``RuntimeCompat/writtenAgainst`` /
-    /// ``RuntimeCompat/minimum``. `nil` before initialisation. Below the
-    /// minimum ``initialize`` throws ``SynheartError/runtimeVersionTooOld``;
-    /// between minimum and written-against it logs a warning once.
+    /// Result of the runtime gate run at initialisation: the linked runtime's
+    /// ABI against ``RuntimeCompat/abiRange``, and its version against
+    /// ``RuntimeCompat/minimum`` / ``RuntimeCompat/writtenAgainst``. `nil`
+    /// before initialisation. When it is not acceptable ``initialize`` throws
+    /// ``SynheartRuntimeError`` (kind `incompatible`) carrying the same
+    /// message; between minimum and written-against it logs a warning once.
     public static var runtimeCompatibility: RuntimeCompatResult? { shared.runtimeCompatibility }
     private var runtimeCompatibility: RuntimeCompatResult?
+
+    /// The structured error from the most recent runtime call that reported an
+    /// outcome, or `nil` when that call succeeded: `code`, `message`,
+    /// `retryable`, plus `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`,
+    /// `argument`, `hint`, `op`, `errorId` and `report`. Read it straight after
+    /// the failing call. Requires a runtime with ABI 2.0
+    /// (`synheart_core_last_error_json`); on older runtimes it stays `nil`.
+    public static var lastNativeError: SynheartNativeError? { shared.coreRuntime?.bridge?.lastError }
 
     /// Get the native core runtime version, or `nil` if unavailable.
     ///
@@ -2291,6 +2313,9 @@ public enum SynheartError: Error {
     case alreadyConfigured
     case runtimeIncompatible(missingSymbols: [String])
     /// The linked runtime reports a version below `RuntimeCompat.minimum`.
+    /// No longer thrown: ``Synheart/initialize(userId:config:)`` reports an
+    /// incompatible runtime as ``SynheartRuntimeError``. Kept so existing
+    /// exhaustive switches compile.
     case runtimeVersionTooOld(version: String, minimum: String)
     case runtimeCreationFailed(message: String?)
     case runtimeDependencyMissing(dependencies: [String])

@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-14
+
+### Changed
+- **Research capture samples the phone accelerometer at 50 Hz.**
+  `SynheartMode.research` and `researchBaseline` now run `CoreMotionCollector`
+  at 50 Hz (`rawSampleInterval`, 0.02 s) instead of 10 Hz. At 10 Hz the
+  runtime's motion bands sit above the Nyquist limit, so they read low and its
+  kinematic heads cannot be validated. The new
+  `SynheartConfig.emitRawMotionSamples` opts in from any mode
+  (`resolvedEmitRawMotionSamples`); outside research capture the default stays
+  10 Hz for its battery cost. `CoreMotionCollector(updateInterval:)` takes the
+  rate.
+- **Install hints now recommend runtime 0.38.0** (`synheart install runtime
+  --version 0.38.0`). It is the release these bindings were verified against
+  (`RuntimeCompat.writtenAgainst`, was 0.31.1) and the first with
+  `synheart_core_last_error_json`. Runtimes from 0.20.0 up to 0.38.0 still
+  initialise; they log as older than the bindings expect.
+- **BREAKING (behavior): `Synheart.initialize` now throws
+  `SynheartRuntimeError` (`kind: .incompatible`) for an incompatible
+  runtime**, before `synheart_core_new` runs. That covers an ABI outside
+  1.0–2.x, a runtime below 0.20.0 that reports no ABI, and a library without
+  `synheart_core_build_info`. It used to throw
+  `SynheartError.runtimeVersionTooOld` after the handle was created; that case
+  is kept so exhaustive switches compile, but is no longer thrown. Migration:
+  run the command in `error.installCommand`, or catch `SynheartRuntimeError`
+  where you call `initialize`. A runtime that is not linked at all still
+  throws `SynheartError.runtimeIncompatible`.
+- `SynheartError.runtimeCreationFailed` carries the runtime's structured
+  create error when the runtime reports one.
+
+### Added
+- **Every runtime failure explains itself.** `Synheart.lastNativeError`
+  returns a `SynheartNativeError` for the most recent runtime call that
+  reported an outcome: `code`, `message`, `retryable`, plus `ownerKind`
+  (`NativeErrorOwner`), `recoveryKind` (`NativeErrorRecovery`),
+  `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId` and `report`.
+  A call that succeeds clears it. Requires a runtime with ABI 2.0
+  (`synheart_core_last_error_json`, looked up as optional); on older runtimes
+  it stays `nil`. Also on `CoreRuntimeBridge.lastError`.
+- **`CoreRuntimeBridge.lastCreateError`** says why the runtime handle could
+  not be created (`CONFIGURATION_INVALID`, `INVALID_ARGUMENT`, …).
+- **ABI check.** `RuntimeCompat` reads the runtime's `abi` from `build_info`
+  (0.33.0+) and accepts ABI 1.x and 2.x (`requiredAbi`, `maxAbiMajor`).
+  ABI 2.0 removed only symbols this SDK never calls.
+- `CoreRuntimeBridge.exportsBuildInfo` and `handleFreeBuildInfo()`, so the
+  runtime can be checked before a handle exists.
+
 ## [0.3.1] - 2026-10-07
 
 ### Added
@@ -400,7 +447,9 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/synheart-ai/synheart-core-swift/releases/tag/v0.1.0

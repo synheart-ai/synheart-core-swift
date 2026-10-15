@@ -92,7 +92,19 @@ public final class CoreMotionCollector: MotionCollecting {
     }()
     #endif
 
-    public init() {}
+    /// Seconds between accelerometer samples: 0.1 (10 Hz) by default, 0.02
+    /// (50 Hz) for raw-sample capture.
+    public let updateInterval: TimeInterval
+
+    /// Rate used when ``SynheartConfig/resolvedEmitRawMotionSamples`` is on.
+    public static let rawSampleInterval: TimeInterval = 0.02
+
+    /// Rate used otherwise.
+    public static let defaultInterval: TimeInterval = 0.1
+
+    public init(updateInterval: TimeInterval = CoreMotionCollector.defaultInterval) {
+        self.updateInterval = updateInterval
+    }
 
     public var motionStream: AnyPublisher<MotionData, Error> {
         controller.eraseToAnyPublisher()
@@ -107,7 +119,7 @@ public final class CoreMotionCollector: MotionCollecting {
     public func start() async throws {
         #if os(iOS) && canImport(CoreMotion)
         guard manager.isAccelerometerAvailable, !manager.isAccelerometerActive else { return }
-        manager.accelerometerUpdateInterval = 0.1
+        manager.accelerometerUpdateInterval = updateInterval
         manager.startAccelerometerUpdates(to: queue) { [weak self] data, error in
             guard let self else { return }
             if let error {
