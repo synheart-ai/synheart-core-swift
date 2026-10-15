@@ -81,4 +81,3 @@ final class RuntimeCompatTests: XCTestCase {
         XCTAssertEqual(e.recommendedVersion, RuntimeCompat.writtenAgainst)
     }
 }
-
