@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
+### Fixed
+
+- **The runtime's data directory is excluded from iCloud / iTunes backup
+  and device migration.** Everything in it is sealed with keys held in
+  Keychain items that never leave the device, so a restored copy could never
+  be decrypted. It also brought back the runtime's
+  `.smk-provisioned-<subject>` markers without their key, and the runtime
+  then refused to mint a new storage master key on the new device
+  (`ERR_SECURE_STORAGE_UNAVAILABLE`). `RuntimeDataDirectory.prepare()` and
+  `SynheartInstance` (for the directory a host passes in) now set
+  `isExcludedFromBackup`, which covers everything inside the directory.
+
 ## [0.4.0] - 2026-10-14
 
 ### Changed
