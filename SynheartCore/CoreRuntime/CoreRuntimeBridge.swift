@@ -283,6 +283,8 @@ public final class CoreRuntimeBridge {
     private static let _freeString:    FreeStringFn?      = sym("synheart_core_free_string")
     private static let _lastInitError: LastInitErrorFn?   = sym("synheart_core_last_error")
     private static let _buildInfo:     BuildInfoFn?        = sym("synheart_core_build_info")
+    // ABI 2.0 (runtime 0.38.0). Optional: nil on older runtimes.
+    private static let _lastErrorJson: LastInitErrorFn?   = sym("synheart_core_last_error_json")
 
     // Session
     private static let _startSession:  StartSessionFn?    = sym("synheart_core_start_session")
@@ -421,9 +423,13 @@ public final class CoreRuntimeBridge {
     /// `device_id`, `app_version`, `platform`, `storage`, `sync`, `privacy`,
     /// `capability_token`, `capability_secret`.
     public init?(configJson: String) {
+        Self.setLastCreateError(nil)
         guard Self.isAvailable else { return nil }
         guard let newFn = Self._new else { return nil }
-        guard let ptr = configJson.withCString({ newFn($0) }) else { return nil }
+        guard let ptr = configJson.withCString({ newFn($0) }) else {
+            Self.setLastCreateError(Self.readNativeLastError())
+            return nil
+        }
         self.handle = ptr
     }
 
@@ -446,8 +452,93 @@ public final class CoreRuntimeBridge {
 
     /// Convert a C string pointer to a Swift String, freeing the C string afterward.
     /// Returns nil if the pointer is null.
+    ///
+    /// A nil result also reads the runtime's last error: nil is how most
+    /// getters report failure, and also how some report "nothing to return",
+    /// which the runtime tells apart by leaving no error behind.
     func consumeCString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
+        guard ptr != nil else {
+            noteFailure()
+            return nil
+        }
+        noteSuccess()
         return Self.consumeCString(ptr)
+    }
+
+    // MARK: - Structured last error
+
+    private let lastErrorLock = NSLock()
+    private var _lastError: SynheartNativeError?
+
+    /// The structured error from the most recent runtime call made through
+    /// this bridge that reports an outcome (a JSON result or a status code),
+    /// or nil when that call succeeded. It describes the latest call, not the
+    /// latest failure: a call that succeeds clears it, so a value here never
+    /// belongs to an earlier, unrelated call. This mirrors the runtime, which
+    /// clears its own per-thread slot on entry to every instrumented call.
+    /// ``SynheartNativeError/op`` still names the call.
+    ///
+    /// Nil on runtimes before ABI 2.0, which lack `synheart_core_last_error_json`.
+    public var lastError: SynheartNativeError? {
+        lastErrorLock.lock()
+        defer { lastErrorLock.unlock() }
+        return _lastError
+    }
+
+    private func setLastError(_ error: SynheartNativeError?) {
+        lastErrorLock.lock()
+        _lastError = error
+        lastErrorLock.unlock()
+    }
+
+    /// Record the runtime's last error after a call reported failure. Must run
+    /// on the calling thread before any other native call: the runtime keeps
+    /// the error per OS thread.
+    ///
+    /// Takes only the runtime's fresh error. A failure the runtime did not
+    /// describe (an older runtime, or a getter whose nil means "nothing to
+    /// return") leaves nil, never an older error.
+    private func noteFailure() {
+        setLastError(Self.readNativeLastError())
+    }
+
+    /// A call through this bridge succeeded: the last error no longer applies.
+    private func noteSuccess() {
+        setLastError(nil)
+    }
+
+    /// A status-code call: `0` is success; anything else reads the last error.
+    private func ok(_ rc: Int32) -> Bool {
+        let success = rc == 0
+        if success { noteSuccess() } else { noteFailure() }
+        return success
+    }
+
+    /// Read and free the runtime's structured last error for the calling OS
+    /// thread, or nil when the last call succeeded or the runtime predates
+    /// `synheart_core_last_error_json` (ABI 2.0). Call it on the same thread,
+    /// straight after the failing call.
+    public static func readNativeLastError() -> SynheartNativeError? {
+        guard let read = _lastErrorJson, let json = consumeCString(read()) else { return nil }
+        return SynheartNativeError(json: json)
+    }
+
+    private static let lastCreateErrorLock = NSLock()
+    private static var _lastCreateError: SynheartNativeError?
+
+    /// Why the most recent `init?(configJson:)` returned nil: the runtime's
+    /// structured error (`CONFIGURATION_INVALID`, `INVALID_ARGUMENT`, …), or
+    /// nil when it succeeded, the runtime is not linked, or it predates ABI 2.0.
+    public static var lastCreateError: SynheartNativeError? {
+        lastCreateErrorLock.lock()
+        defer { lastCreateErrorLock.unlock() }
+        return _lastCreateError
+    }
+
+    private static func setLastCreateError(_ error: SynheartNativeError?) {
+        lastCreateErrorLock.lock()
+        _lastCreateError = error
+        lastCreateErrorLock.unlock()
     }
 
     /// Static variant — used by per-module utilities (Priority, Resilience)
@@ -467,6 +558,18 @@ public final class CoreRuntimeBridge {
     /// Version, exact source commit, build profile, and compiled feature set.
     public func buildInfo() -> String? {
         Self.consumeCString(Self._buildInfo?())
+    }
+
+    /// Whether the linked library exports `synheart_core_build_info`. A
+    /// library without it is not a usable Synheart Core runtime build.
+    public static var exportsBuildInfo: Bool { _buildInfo != nil }
+
+    /// ``buildInfo()`` without a handle, parsed. Lets the init gate check the
+    /// runtime before `synheart_core_new` runs.
+    public static func handleFreeBuildInfo() -> [String: Any]? {
+        guard let json = consumeCString(_buildInfo?()),
+              let data = json.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     // MARK: - Session Lifecycle
@@ -501,7 +604,7 @@ public final class CoreRuntimeBridge {
             return report
         }
 
-        let succeeded = (Self._stopSession?(handle) ?? 1) == 0
+        let succeeded = ok(Self._stopSession?(handle) ?? 1)
         return .legacy(
             succeeded: succeeded,
             isRunning: isRunning(),
@@ -787,12 +890,12 @@ public final class CoreRuntimeBridge {
     /// "cloud_upload", "focus_estimation", "emotion_estimation", "syni").
     /// Returns true on success.
     public func grantConsent(type: String) -> Bool {
-        type.withCString { (Self._grantConsent?(handle, $0) ?? 1) == 0 }
+        type.withCString { ok(Self._grantConsent?(handle, $0) ?? 1) }
     }
 
     /// Revoke a consent type. Returns true on success.
     public func revokeConsent(type: String) -> Bool {
-        type.withCString { (Self._revokeConsent?(handle, $0) ?? 1) == 0 }
+        type.withCString { ok(Self._revokeConsent?(handle, $0) ?? 1) }
     }
 
     /// Check if a consent type is granted.
@@ -849,7 +952,7 @@ public final class CoreRuntimeBridge {
     public func loadCapabilityToken(tokenJson: String, secret: String) -> Bool {
         tokenJson.withCString { tj in
             secret.withCString { sec in
-                (Self._loadCapToken?(handle, tj, sec) ?? 1) == 0
+                ok(Self._loadCapToken?(handle, tj, sec) ?? 1)
             }
         }
     }
@@ -885,24 +988,24 @@ public final class CoreRuntimeBridge {
     ///
     /// JSON: `{ "name": "...", "timestamp_ms": 123, "value": ..., "tags": {...} }`
     public func recordMetric(json: String) -> Bool {
-        json.withCString { (Self._recordMetric?(handle, $0) ?? 1) == 0 }
+        json.withCString { ok(Self._recordMetric?(handle, $0) ?? 1) }
     }
 
     // MARK: - Deletion
 
     /// Delete a session and create a tombstone. Returns true on success.
     public func deleteSession(sessionId: String) -> Bool {
-        sessionId.withCString { (Self._deleteSession?(handle, $0) ?? 1) == 0 }
+        sessionId.withCString { ok(Self._deleteSession?(handle, $0) ?? 1) }
     }
 
     /// Mark a stranded active session as closed. This is idempotent.
     public func closeOrphanSession(sessionId: String) -> Bool {
-        sessionId.withCString { (Self._closeOrphan?(handle, $0) ?? -1) == 0 }
+        sessionId.withCString { ok(Self._closeOrphan?(handle, $0) ?? -1) }
     }
 
     /// Wipe all local data. Returns true on success.
     public func wipeLocalData() -> Bool {
-        (Self._wipeLocal?(handle) ?? 1) == 0
+        ok(Self._wipeLocal?(handle) ?? 1)
     }
 
     /// Set retention days. Returns number of deleted artifacts, or -1 on error.
@@ -943,7 +1046,7 @@ public final class CoreRuntimeBridge {
 
     /// Load SRM snapshot from JSON. Returns true on success.
     public func loadSrmSnapshot(json: String) -> Bool {
-        json.withCString { (Self._loadSrm?(handle, $0) ?? 1) == 0 }
+        json.withCString { ok(Self._loadSrm?(handle, $0) ?? 1) }
     }
 
     /// Get SRM overall baseline status as JSON.
@@ -1018,12 +1121,12 @@ public final class CoreRuntimeBridge {
 
     /// Request account deletion. Blocks. Returns true on success.
     public func requestAccountDeletion() -> Bool {
-        (Self._reqAcctDel?(handle) ?? 1) == 0
+        ok(Self._reqAcctDel?(handle) ?? 1)
     }
 
     /// Cancel account deletion. Blocks. Returns true on success.
     public func cancelAccountDeletion() -> Bool {
-        (Self._cancelAcctDel?(handle) ?? 1) == 0
+        ok(Self._cancelAcctDel?(handle) ?? 1)
     }
 
     // MARK: - Wearable SRM (Longitudinal)
@@ -1074,7 +1177,7 @@ public final class CoreRuntimeBridge {
     ///   - startedAtMs: epoch millis when the protocol started.
     /// - Returns: true on success.
     public func labStart(protocolJson: String, startedAtMs: Int64) -> Bool {
-        protocolJson.withCString { (Self._labStart?(handle, $0, startedAtMs) ?? 1) == 0 }
+        protocolJson.withCString { ok(Self._labStart?(handle, $0, startedAtMs) ?? 1) }
     }
 
     /// Open a new window within a running lab protocol.
@@ -1093,7 +1196,7 @@ public final class CoreRuntimeBridge {
     /// Close an open lab window.
     /// - Returns: true on success.
     public func labCloseWindow(windowId: String, endedAtMs: Int64) -> Bool {
-        windowId.withCString { (Self._labCloseWin?(handle, $0, endedAtMs) ?? 1) == 0 }
+        windowId.withCString { ok(Self._labCloseWin?(handle, $0, endedAtMs) ?? 1) }
     }
 
     /// Set values on a lab window.
@@ -1101,7 +1204,7 @@ public final class CoreRuntimeBridge {
     public func labSetWindowValues(windowId: String, valuesJson: String) -> Bool {
         windowId.withCString { wid in
             valuesJson.withCString { vj in
-                (Self._labSetWinVal?(handle, wid, vj) ?? 1) == 0
+                ok(Self._labSetWinVal?(handle, wid, vj) ?? 1)
             }
         }
     }
@@ -1109,7 +1212,7 @@ public final class CoreRuntimeBridge {
     /// Merge extra data into the running lab protocol.
     /// - Returns: true on success.
     public func labMergeExtraData(patchJson: String) -> Bool {
-        patchJson.withCString { (Self._labMergeExtra?(handle, $0) ?? 1) == 0 }
+        patchJson.withCString { ok(Self._labMergeExtra?(handle, $0) ?? 1) }
     }
 
     /// Set state overrides on a lab window.
@@ -1117,7 +1220,7 @@ public final class CoreRuntimeBridge {
     public func labSetStateOverrides(windowId: String, overridesJson: String) -> Bool {
         windowId.withCString { wid in
             overridesJson.withCString { oj in
-                (Self._labSetOverrides?(handle, wid, oj) ?? 1) == 0
+                ok(Self._labSetOverrides?(handle, wid, oj) ?? 1)
             }
         }
     }
@@ -1427,7 +1530,7 @@ public final class CoreRuntimeBridge {
     public func consentConfigureCloud(baseUrl: String, appId: String) -> Bool {
         baseUrl.withCString { b in
             appId.withCString { a in
-                (Self._consentConfigureCloud?(handle, b, a) ?? 1) == 0
+                ok(Self._consentConfigureCloud?(handle, b, a) ?? 1)
             }
         }
     }
@@ -1468,7 +1571,7 @@ public final class CoreRuntimeBridge {
 
     /// Clear any stored consent token. Returns true on success.
     public func consentClearStored() -> Bool {
-        (Self._consentClearStored?(handle) ?? 1) == 0
+        ok(Self._consentClearStored?(handle) ?? 1)
     }
 
     // MARK: - Device auth (crypto + storage callbacks + registration)
