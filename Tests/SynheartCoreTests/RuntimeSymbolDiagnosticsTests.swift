@@ -73,7 +73,9 @@ final class RuntimeSymbolDiagnosticsTests: XCTestCase {
             "synheart_core_is_lab_available",
             "synheart_core_close_orphan_session",
             "synheart_core_srm_push_wearable_daily",
-            "synheart_core_srm_trigger_wearable_recompute",
+            "synheart_core_srm_refresh_wearable_reference",
+            "synheart_core_export_baseline_snapshot",
+            "synheart_core_load_baseline_snapshot",
             "synheart_core_stop_session_v2",
             "synheart_core_wearable_reference_json",
         ]
@@ -82,6 +84,13 @@ final class RuntimeSymbolDiagnosticsTests: XCTestCase {
             "synheart_core_push_wearable_daily_value",
             "synheart_core_trigger_wearable_recompute",
             "synheart_core_get_wearable_reference",
+            // Removed by C ABI 3.0 / 4.0.
+            "synheart_core_roll_day",
+            "synheart_core_srm_trigger_wearable_recompute",
+            "synheart_core_export_srm_snapshot",
+            "synheart_core_load_srm_snapshot",
+            "synheart_core_export_longitudinal_snapshot",
+            "synheart_core_load_longitudinal_snapshot",
         ]
 
         XCTAssertTrue(currentNames.isSubset(of: RuntimeSymbolManifest.all))
