@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
 Requires runtime 0.42.0 or newer (C ABI 4.0); older runtimes are refused at
 initialization, and runtime 0.42 is refused by every earlier SDK. Install it
 with `synheart install runtime --version 0.42.1`. Expect one cold start on
@@ -537,7 +539,9 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.2.0...v0.3.0
