@@ -83,6 +83,17 @@ enum RuntimeConfigBuilder {
         for (key, value) in config.hostDeclarations.toJSON() {
             result[key] = value
         }
+        // `device_class` defaults to "auto" (resolved from `platform`): since
+        // runtime 0.42 an undeclared class files behaviour baselines under
+        // `unknown`, apart from the device's real class. Declaring it no longer
+        // resets anything else — one baseline snapshot holds every class.
+        if config.hostDeclarations.deviceClass == nil { result["device_class"] = "auto" }
+        // Behaviour is activated after the runtime is created, so whether this
+        // host captures input is not known here. Undeclared, a phone's quiet
+        // window would count as input-free only while capture is reported
+        // running, and a host that never reports would never learn its resting
+        // heart rate and HRV. See ``HostDeclarations/inputObservable``.
+        if config.hostDeclarations.inputObservable == nil { result["input_observable"] = false }
         return result
     }
 }

@@ -41,7 +41,7 @@ private enum ParityRuntimeSymbols {
     ) -> UnsafeMutablePointer<CChar>?
 
     typealias PushRrBatch = @convention(c) (
-        OpaquePointer?, Int64, UnsafePointer<Double>?, Int, Int32, UnsafePointer<CChar>?
+        OpaquePointer?, Int64, UnsafePointer<Double>?, Int, Int32, UnsafePointer<CChar>?, Int32
     ) -> Void
     typealias PushVendorHrv = @convention(c) (
         OpaquePointer?, Int64, Double, Double, Double, Double
@@ -77,8 +77,6 @@ private enum ParityRuntimeSymbols {
     static let attachRecoveryScore: HandleUInt8Int32? = CoreRuntimeBridge.lookupSymbol("synheart_core_attach_recovery_score_today")
     static let clearRecoveryScore: HandleInt32? = CoreRuntimeBridge.lookupSymbol("synheart_core_clear_recovery_score_today")
     static let lastSleepScore: HandleJson? = CoreRuntimeBridge.lookupSymbol("synheart_core_last_sleep_score_json")
-    static let exportLongitudinal: HandleJson? = CoreRuntimeBridge.lookupSymbol("synheart_core_export_longitudinal_snapshot")
-    static let loadLongitudinal: HandleStringInt32? = CoreRuntimeBridge.lookupSymbol("synheart_core_load_longitudinal_snapshot")
 
     static let requestDataDeletion: RequestDataDeletion? = CoreRuntimeBridge.lookupSymbol("synheart_core_request_data_deletion")
     static let getDataDeletion: HandleStringJson? = CoreRuntimeBridge.lookupSymbol("synheart_core_get_data_deletion")
@@ -254,14 +252,6 @@ extension CoreRuntimeBridge {
         json(ParityRuntimeSymbols.lastSleepScore?(runtimeHandle))
     }
 
-    func exportLongitudinalSnapshot() -> String? {
-        consumeCString(ParityRuntimeSymbols.exportLongitudinal?(runtimeHandle))
-    }
-
-    func loadLongitudinalSnapshot(_ snapshotJson: String) -> Int32 {
-        snapshotJson.withCString { ParityRuntimeSymbols.loadLongitudinal?(runtimeHandle, $0) ?? -1 }
-    }
-
     func requestDataDeletion(reason: String, contact: String, dryRun: Bool) -> [String: Any]? {
         reason.withCString { reasonPointer in
             contact.withCString { contactPointer in
@@ -295,6 +285,7 @@ extension CoreRuntimeBridge {
         provider: String = "default_sensor"
     ) {
         guard !intervalsMs.isEmpty else { return }
+        let offset = CoreRuntimeBridge.utcOffsetMin(atMs: anchorTimestampMs)
         intervalsMs.withUnsafeBufferPointer { values in
             provider.withCString { providerPointer in
                 ParityRuntimeSymbols.pushRrBatch?(
@@ -303,7 +294,8 @@ extension CoreRuntimeBridge {
                     values.baseAddress,
                     values.count,
                     newestFirst ? 1 : 0,
-                    providerPointer
+                    providerPointer,
+                    offset
                 )
             }
         }

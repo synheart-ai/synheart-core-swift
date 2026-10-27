@@ -108,12 +108,16 @@ public final class SynheartCoreShim {
         bridge?.pushRr(tsMs: tsMs, rrMs: rrMs, provider: provider)
     }
 
-    public func pushHr(tsMs: Int64, bpm: Double) {
-        bridge?.pushHr(tsMs: tsMs, bpm: bpm)
+    public func pushHr(tsMs: Int64, bpm: Double, provider: String? = nil) {
+        bridge?.pushHr(tsMs: tsMs, bpm: bpm, provider: provider)
     }
 
     public func pushAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
-        bridge?.pushAccel(tsMs: tsMs, x: x, y: y, z: z)
+        bridge?.pushAccel(tsMs: tsMs, x: x, y: y, z: z, provider: nil)
+    }
+
+    public func pushAccel(tsMs: Int64, x: Double, y: Double, z: Double, provider: String?) {
+        bridge?.pushAccel(tsMs: tsMs, x: x, y: y, z: z, provider: provider)
     }
 
     public func pushBehavior(tsMs: Int64, eventType: Int32, value: Double) {
@@ -134,14 +138,16 @@ public final class SynheartCoreShim {
     public func pushContextEventJson(_ json: String) -> Int32? { bridge?.pushContextEventJson(json) }
     public func pushSpeed(tsMs: Int64, speedMps: Double) { bridge?.pushSpeed(tsMs: tsMs, speedMps: speedMps) }
     public func setAccelPlacement(_ code: Int32) { bridge?.setAccelPlacement(code) }
-    public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
-        bridge?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z)
+    public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double, provider: String? = nil) {
+        bridge?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z, provider: provider)
     }
-    public func pushWornAccel(tsMs: Int64, x: Double, y: Double, z: Double, placementCode: Int32) {
-        bridge?.pushWornAccel(tsMs: tsMs, x: x, y: y, z: z, placementCode: placementCode)
+    public func pushWornAccel(
+        tsMs: Int64, x: Double, y: Double, z: Double, placementCode: Int32, provider: String? = nil
+    ) {
+        bridge?.pushWornAccel(tsMs: tsMs, x: x, y: y, z: z, placementCode: placementCode, provider: provider)
     }
     public func declareRestWindow(tsMs: Int64) { bridge?.declareRestWindow(tsMs: tsMs) }
-    public func rollDay(_ dayIndex: Int32) -> Int32? { bridge?.rollDay(dayIndex) }
+    public func attachClosedDayStrainJson() -> String? { bridge?.attachClosedDayStrainJson() }
     public func exportSessionState() -> String? { bridge?.exportSessionState() }
     public func loadSessionState(_ json: String) -> Int32? { bridge?.loadSessionState(json) }
     public func configId() -> String? { bridge?.configId() }
@@ -325,11 +331,11 @@ public final class SynheartCoreShim {
     // MARK: - SRM / Baselines
 
     public func baselinesJson() -> String? { bridge?.baselinesJson() }
-    public func exportSrmSnapshot() -> String? { bridge?.exportSrmSnapshot() }
+    public func exportBaselineSnapshot() -> String? { bridge?.exportBaselineSnapshot() }
 
     @discardableResult
-    public func loadSrmSnapshot(_ json: String) -> Bool {
-        bridge?.loadSrmSnapshot(json: json) ?? false
+    public func loadBaselineSnapshot(_ snapshotB64: String) -> Bool? {
+        bridge?.loadBaselineSnapshot(snapshotB64)
     }
 
     /// Overall SRM status string: "empty", "warming", or "ready".

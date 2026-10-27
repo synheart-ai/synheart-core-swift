@@ -124,8 +124,9 @@ public struct SynheartConfig {
     }
 
     /// Host declarations that change engine output — `sensing`,
-    /// `device_class`, `mask_profile`, `cfi_structural_components`. Defaults
-    /// to declaring nothing. See ``HostDeclarations``.
+    /// `device_class`, `mask_profile`, `cfi_structural_components`,
+    /// `input_observable`. Defaults to declaring nothing but `device_class`
+    /// `"auto"` and `input_observable` `false`. See ``HostDeclarations``.
     public let hostDeclarations: HostDeclarations
 
     public let cloudConfig: CloudConfig?
