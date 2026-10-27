@@ -84,7 +84,7 @@ These ship in the same target and are wired through the runtime, but only become
 | **Baselines** | Reactive snapshot of the user's wearable-baseline state — `AnyPublisher<BaselinesSnapshot, Never>` with `latestSleepScore` / `latestRecoveryScore` / `latestReadinessScore` / `reference` / 7-night recent-scores ring. | `Baselines.shared` |
 | **Breathing** | 4-pillar breathing-compliance detector. RR samples from `pushRr` feed it automatically; module configures target BPM / population / window. | `BreathingModule(bridge:)` |
 | **Syni** | Consent-gated facade around the [`SyniSwift`](https://github.com/synheart-ai/syni-swift) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `consent.syni` check. | `SyniModule(consent:)` |
-| **HealthKit backfill** | Cold-start SRM seeding from HealthKit sleep + overnight HR/HRV history. Pushes `sleep_need` / `deep_sleep_min` / `rem_sleep_min` / `hrv_rmssd` / `resting_hr` per wake-day. | `HealthKitRuntimeSink(reader:, pushDaily:, triggerRecompute:)` |
+| **HealthKit backfill** | Cold-start SRM seeding from HealthKit sleep + overnight HR/HRV history. Pushes `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` / `cardiac.overnight_rmssd_ms` / `cardiac.resting_hr_bpm` under each local wake date, provider `apple_health`. | `HealthKitRuntimeSink(reader:, bridge:)` |
 | **Scoring models** | Typed input + result types for the runtime's Sleep / Recovery / Readiness scorers, plus a self-report `SleepQuestionnaireAnswers`. | `Models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.swift` |
 | **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with Flutter + Kotlin siblings. | `Modules/Cloud/UploadModels.swift` |
 
@@ -114,18 +114,9 @@ case let .insufficient(reason):
 
 // HealthKit backfill — call on first launch after authorization
 let reader = HealthKitHistoryReader() // from synheart-wear-swift
-let sink = HealthKitRuntimeSink(
-    reader: reader,
-    pushDaily: { dim, day, value, conf, fid in
-        coreRuntime.pushWearableDailyValue(
-            dimension: dim, dayIndex: day, value: value,
-            confidence: conf, fidelity: fid
-        )
-    },
-    triggerRecompute: { coreRuntime.triggerWearableRecompute(triggerType: 0, asOfDay: 0) }
-)
+let sink = HealthKitRuntimeSink(reader: reader, bridge: coreRuntime)
 let result = try await sink.backfill(daysBack: 365)
-print("seeded \(result.daysIngested) days, \(result.dimensionsPushed) dimensions")
+print("seeded \(result.daysIngested) days, \(result.dimensionsPushed) values")
 
 // Syni — consent-gated agent
 let syni = SyniModule(consent: consentModule)
@@ -162,6 +153,10 @@ dependencies: [
 ]
 ```
 
+The SDK requires runtime ABI 4.x, which is runtime 0.42.0 or newer
+(`RuntimeCompat.requiredAbi`); older runtimes are refused at initialization.
+Install it with `synheart install runtime --version 0.42.1`.
+
 The SDK validates the linked native runtime ABI during initialization. If a
 required symbol is missing, initialization throws
 `SynheartError.runtimeIncompatible(missingSymbols:)`; optional symbols remain
@@ -173,6 +168,27 @@ does this automatically. `CoreRuntimeBridge.dependencyDiagnostics` exposes the
 result, and `Synheart.startSession()` reports a missing dependency instead of
 entering an unsafe native call. Edge runtimes are detected automatically and
 do not require ONNX Runtime.
+
+### Personal baselines on runtime 0.42+
+
+- **The runtime persists them.** It seals every personal baseline to its own
+  data directory and restores it at startup, so a host that keeps that
+  directory needs no snapshot calls. `Synheart.exportBaselineSnapshot()` /
+  `loadBaselineSnapshot(_:)` are for a host that persists elsewhere; the text
+  is opaque base64, to be stored as private health data.
+- **Daily values carry a date and a source.** Push them with
+  `Synheart.srmPushWearableDaily(provider:metric:date:value:)`, using a
+  `DailyMetric` name (the unit is in the name) and the local date the person
+  woke on. Call `srmRefreshWearableReference()` once after a batch.
+- **The engine closes days itself.** There is no `rollDay`. Attach Strain
+  before local midnight with `attachStrainScoreJson()`, or after it with
+  `attachClosedDayStrain()`.
+- **Rest needs known input.** The SDK declares `input_observable: false`
+  unless you set `HostDeclarations.inputObservable`, so a still window can
+  teach the resting heart rate and HRV on every host. Declare `true` when the
+  behaviour feature runs: the SDK then reports its in-app capture while it
+  collects and the app is active (`Synheart.reportsInputCapture`), and a host
+  that captures input elsewhere reports it with `Synheart.setInputCapture`.
 
 ### Runnable iOS example
 
@@ -399,7 +415,7 @@ personalization, Syni, and independent instances—is documented in
 | `currentState` | `String?` | Latest HSI JSON frame |
 | `currentHSIState` | `HSIState?` | Latest typed HSI state |
 | `isHsiDeliveryBuffered` | `Bool` | HSI is polled from the runtime's ring (runtime ≥ 0.31.1) instead of pushed through a callback |
-| `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `RuntimeCompat.abiRange` (1.0 to 2.x) and its version against `writtenAgainst` (0.38.0) and `minimum` (0.20.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
+| `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `writtenAgainst` (0.42.1) and `minimum` (0.42.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
 | `lastNativeError` | `SynheartNativeError?` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or `nil` when it succeeded; needs runtime ABI 2.0 |
 | `droppedHsiFrames` | `UInt64` | Frames the ring evicted since buffered delivery started |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |
