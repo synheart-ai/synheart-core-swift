@@ -416,7 +416,7 @@ personalization, Syni, and independent instances—is documented in
 | `currentHSIState` | `HSIState?` | Latest typed HSI state |
 | `isHsiDeliveryBuffered` | `Bool` | HSI is polled from the runtime's ring (runtime ≥ 0.31.1) instead of pushed through a callback |
 | `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `writtenAgainst` (0.42.1) and `minimum` (0.42.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
-| `lastNativeError` | `SynheartNativeError?` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or `nil` when it succeeded; needs runtime ABI 2.0 |
+| `lastNativeError` | `SynheartNativeError?` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or `nil` when it succeeded |
 | `droppedHsiFrames` | `UInt64` | Frames the ring evicted since buffered delivery started |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |
 | `isInitialized` | `Bool` | Whether SDK is initialized |
