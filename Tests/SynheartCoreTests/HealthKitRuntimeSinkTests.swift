@@ -23,24 +23,34 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
     // Test doubles                                                    //
     // ────────────────────────────────────────────────────────────── //
 
+    private struct LocalDay: Hashable {
+        let year: Int, month: Int, day: Int
+    }
+
     private struct PushCall: Equatable {
+        let provider: String
         let dimension: String
-        let dayIndex: Int
+        let date: LocalDay
         let value: Double
-        let confidence: Double
-        let fidelity: Int32
+        let vendorSummary: Bool
     }
 
     private final class Recorder: @unchecked Sendable {
         var pushes: [PushCall] = []
         var recomputeCount = 0
         private let lock = NSLock()
+        private let rc: Int32
+
+        init(rc: Int32 = 0) { self.rc = rc }
 
         var pushDaily: PushDailyCallback {
-            { [weak self] dim, day, v, c, f in
-                guard let self else { return }
+            { [weak self] provider, metric, y, m, d, v, vendor in
+                guard let self else { return -1 }
                 self.lock.lock(); defer { self.lock.unlock() }
-                self.pushes.append(PushCall(dimension: dim, dayIndex: day, value: v, confidence: c, fidelity: f))
+                self.pushes.append(PushCall(provider: provider, dimension: metric,
+                                            date: LocalDay(year: y, month: m, day: d),
+                                            value: v, vendorSummary: vendor))
+                return self.rc
             }
         }
         var triggerRecompute: TriggerRecomputeCallback {
@@ -132,20 +142,22 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         XCTAssertEqual(recorder.recomputeCount, 1)
 
         let dims = Dictionary(uniqueKeysWithValues: recorder.pushes.map { ($0.dimension, $0) })
-        XCTAssertEqual(Set(dims.keys),
-                       ["sleep_need", "deep_sleep_min", "rem_sleep_min", "hrv_rmssd", "resting_hr"])
+        XCTAssertEqual(Set(dims.keys), [
+            "sleep.duration_s", "sleep.deep_min", "sleep.rem_min",
+            "cardiac.overnight_rmssd_ms", "cardiac.resting_hr_bpm",
+        ])
+        XCTAssertTrue(Set(dims.keys).isSubset(of: DailyMetric.all))
 
-        XCTAssertEqual(dims["sleep_need"]!.value, 420.0 * 60.0, accuracy: 0.0001)
-        XCTAssertEqual(dims["deep_sleep_min"]!.value, 90.0, accuracy: 0.0001)
-        XCTAssertEqual(dims["rem_sleep_min"]!.value, 110.0, accuracy: 0.0001)
-        XCTAssertEqual(dims["hrv_rmssd"]!.value, 55.0, accuracy: 0.0001)
-        XCTAssertEqual(dims["resting_hr"]!.value, 58.0, accuracy: 0.0001)
+        XCTAssertEqual(dims["sleep.duration_s"]!.value, 420.0 * 60.0, accuracy: 0.0001)
+        XCTAssertEqual(dims["sleep.deep_min"]!.value, 90.0, accuracy: 0.0001)
+        XCTAssertEqual(dims["sleep.rem_min"]!.value, 110.0, accuracy: 0.0001)
+        XCTAssertEqual(dims["cardiac.overnight_rmssd_ms"]!.value, 55.0, accuracy: 0.0001)
+        XCTAssertEqual(dims["cardiac.resting_hr_bpm"]!.value, 58.0, accuracy: 0.0001)
 
-        let expectedDayIndex = HealthKitRuntimeSink.epochDay(for: day)
         for p in recorder.pushes {
-            XCTAssertEqual(p.confidence, 0.85, accuracy: 0.0001)
-            XCTAssertEqual(p.fidelity, 1)
-            XCTAssertEqual(p.dayIndex, expectedDayIndex)
+            XCTAssertEqual(p.provider, "apple_health")
+            XCTAssertTrue(p.vendorSummary)
+            XCTAssertEqual(p.date, LocalDay(year: 2026, month: 1, day: 15))
         }
     }
 
@@ -158,7 +170,7 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
 
         XCTAssertEqual(result.dimensionsPushed, 1)
         XCTAssertEqual(result.daysIngested, 1)
-        XCTAssertEqual(Set(recorder.pushes.map(\.dimension)), ["sleep_need"])
+        XCTAssertEqual(Set(recorder.pushes.map(\.dimension)), ["sleep.duration_s"])
     }
 
     func testSleepWithZeroAsleepMinutesPushesNothing() async throws {
@@ -184,7 +196,7 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         XCTAssertEqual(result.dimensionsPushed, 1)
         XCTAssertEqual(result.daysIngested, 1)
         XCTAssertEqual(recorder.recomputeCount, 1)
-        XCTAssertEqual(Set(recorder.pushes.map(\.dimension)), ["hrv_rmssd"])
+        XCTAssertEqual(Set(recorder.pushes.map(\.dimension)), ["cardiac.overnight_rmssd_ms"])
     }
 
     func testMultipleDaysAreAggregatedIndependently() async throws {
@@ -208,8 +220,39 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         XCTAssertEqual(result.daysIngested, 2)
         XCTAssertEqual(recorder.recomputeCount, 1)
 
-        let grouped = Dictionary(grouping: recorder.pushes, by: \.dayIndex)
-        XCTAssertEqual(grouped[HealthKitRuntimeSink.epochDay(for: d1)]?.count, 5)
-        XCTAssertEqual(grouped[HealthKitRuntimeSink.epochDay(for: d2)]?.count, 1)
+        let grouped = Dictionary(grouping: recorder.pushes, by: \.date)
+        XCTAssertEqual(grouped[LocalDay(year: 2026, month: 1, day: 10)]?.count, 5)
+        XCTAssertEqual(grouped[LocalDay(year: 2026, month: 1, day: 11)]?.count, 1)
+    }
+
+    func testNightsFileUnderTheLocalWakeDateEastOfUtc() async throws {
+        // The reader keys a night by the start of its local day. In Tokyo that
+        // instant is 15:00 UTC the day before; a UTC day index filed every
+        // night a day early.
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = tokyo
+        let wake = cal.date(from: DateComponents(year: 2026, month: 1, day: 15))!
+        let recorder = Recorder()
+        let sink = HealthKitRuntimeSink(
+            reader: FakeReader(overnight: [wake: OvernightPhysiologySummary(hrvRmssdMs: 50.0, restingHrBpm: nil)]),
+            pushDaily: recorder.pushDaily,
+            triggerRecompute: recorder.triggerRecompute,
+            timeZone: tokyo
+        )
+        _ = try await sink.backfill(daysBack: 30)
+        XCTAssertEqual(recorder.pushes.first?.date, LocalDay(year: 2026, month: 1, day: 15))
+    }
+
+    func testValuesTheRuntimeRefusesAreNotCountedAndSkipTheRefresh() async throws {
+        let reader = FakeReader(
+            sleep: [day: SleepNightSummary(totalAsleepMinutes: 420.0, deepMinutes: 90.0, remMinutes: 110.0)]
+        )
+        let (sink, recorder) = makeSink(reader: reader, recorder: Recorder(rc: 5002))
+        let result = try await sink.backfill(daysBack: 30)
+
+        XCTAssertEqual(recorder.pushes.count, 3)
+        XCTAssertEqual(result.dimensionsPushed, 0)
+        XCTAssertEqual(result.daysIngested, 0)
+        XCTAssertEqual(recorder.recomputeCount, 0)
     }
 }

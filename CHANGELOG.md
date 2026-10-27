@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Requires runtime 0.42.0 or newer (C ABI 4.0); older runtimes are refused at
+initialization, and runtime 0.42 is refused by every earlier SDK. Install it
+with `synheart install runtime --version 0.42.1`. Expect one cold start on
+the first launch after upgrading: 0.42 cannot read a baseline snapshot from
+an earlier runtime, and refuses an earlier session-state snapshot too (the
+engine logs code `7003` and starts the stateful heads cold). Neither is an
+error to handle.
+
+### Migrating
+
+- **`Synheart.rollDay(_:)` is removed.** The engine closes each local day
+  itself at the first input of the next. Attach Strain before local midnight
+  with `attachStrainScoreJson()`, or after it with the new
+  `attachClosedDayStrain()`.
+- **Baseline snapshots.** `exportRuntimeSRMSnapshot()` /
+  `loadRuntimeSRMSnapshot(_:)` and the longitudinal snapshot pair are
+  replaced by one opaque pair, `exportBaselineSnapshot()` /
+  `loadBaselineSnapshot(_:)`. The runtime now seals the baselines to its own
+  data directory and restores them at startup, so a host that keeps that
+  directory can drop its snapshot code.
+- **Daily values.** `CoreRuntimeBridge.pushWearableDailyValue` and
+  `triggerWearableRecompute` are replaced by `srmPushWearableDaily` (a
+  provider, a `DailyMetric` name and the person's local date; returns the
+  runtime's code `0`, `1004`, `5002` or `-1`) and
+  `srmRefreshWearableReference`, which rebuilds the reference from the dates
+  before the one given. The old dimension names (`hrv_rmssd`, `resting_hr`,
+  `sleep_need`, …) are refused; each `DailyMetric` keeps the old unit.
+- **`HealthKitRuntimeSink`.** `PushDailyCallback` takes `provider`, `metric`,
+  the local `year`, `month` and `day`, `value` and `vendorSummary`, and
+  returns the runtime's code. `HealthKitRuntimeSink(reader:bridge:)` wires the
+  defaults. `dimensionsPushed` counts values the runtime stored.
+
+### Added
+
+- `DailyMetric`: the twelve daily metric names the runtime accepts.
+- `Synheart.srmPushWearableDaily`, `srmRefreshWearableReference`,
+  `srmSetDayType`, `forgetBaselines`, `drainBaselineEventsJson`,
+  `baselineProfileJson`, `baselineRhythmJson`, `baselineWindowDigestJson`,
+  `baselineRequirementsJson`, `registerBaselineDirection` and
+  `beginBaselineRestBlock`; `setInputCapture` and `setCallActive`, level
+  reports that hold across sessions; `pushInputsJson` for the runtime's input
+  envelope; `attachClosedDayStrain`. All are optional lookups.
+- `HostDeclarations.inputObservable`, and `Synheart.reportsInputCapture`
+  (default on): the SDK reports its in-app capture running while the
+  behaviour module collects and the app is active.
+
+### Changed
+
+- Every sample push carries the device's UTC offset at the sample's own time,
+  so samples on either side of a daylight-saving change land on the right
+  local day. `pushHr`, `pushAccel`, `pushWristAccel` and `pushWornAccel`
+  accept a `provider`.
+- `device_class` defaults to `"auto"` when the host declares none: an
+  undeclared class now files behaviour baselines under `unknown`. Declaring it
+  no longer resets other baselines; one snapshot holds every class.
+- `input_observable` defaults to `false`, so a still window can be certified
+  rest on a host that reports no input capture. Behaviour is activated after
+  the runtime is created, so the SDK cannot tell at configuration whether a
+  host captures input; declare `inputObservable: true` for stricter rest.
+
+### Fixed
+
+- **HealthKit backfill and wearable vendor events reach the baselines again.**
+  Their daily values used names the runtime no longer accepts. They now push
+  `DailyMetric` names under their provider and the person's local date, then
+  refresh the reference. Vendor recovery scores are sent as a `0...1`
+  fraction, deep and REM sleep reported in seconds are sent in minutes, and
+  a provider calendar date (`2026-03-28`) is read as that date instead of now.
+- The HealthKit backfill filed each night under the UTC day of its local
+  start-of-day; east of UTC that is the day before. It now uses the local
+  date.
+- Registration that fails with `STORAGE_UNAVAILABLE` (a Keychain locked at
+  boot) reinstalls the crypto callbacks and re-reads the identity before
+  trying again, and registers only if the device is still unregistered, so a
+  second `device_id` is never minted over the first.
+
 ## [0.4.1] - 2026-10-15
 
 ### Fixed

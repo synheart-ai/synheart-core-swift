@@ -1,6 +1,9 @@
 import Foundation
 import Combine
 import SynheartAuth
+#if canImport(UIKit)
+import UIKit
+#endif
 @_exported import SynheartSession // re-exports SessionEvent, SessionConfig, etc.
 
 enum RuntimeVersionResolver {
@@ -372,14 +375,18 @@ public class Synheart {
     /// Push one sample from a wrist-worn accelerometer (a watch), in g
     /// including gravity, stamped with the sensor's own sample time. Kept
     /// apart from the device's motion; a no-op on a runtime without the symbol.
-    public static func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
-        shared.coreRuntime?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z)
+    public static func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double, provider: String? = nil) {
+        shared.coreRuntime?.pushWristAccel(tsMs: tsMs, x: x, y: y, z: z, provider: provider)
     }
 
     /// Push one sample from a body-worn accelerometer, in g, with the
     /// placement it was worn at. A no-op on a runtime without the symbol.
-    public static func pushWornAccel(tsMs: Int64, x: Double, y: Double, z: Double, placement: AccelPlacement) {
-        shared.coreRuntime?.pushWornAccel(tsMs: tsMs, x: x, y: y, z: z, placementCode: placement.code)
+    public static func pushWornAccel(
+        tsMs: Int64, x: Double, y: Double, z: Double, placement: AccelPlacement, provider: String? = nil
+    ) {
+        shared.coreRuntime?.pushWornAccel(
+            tsMs: tsMs, x: x, y: y, z: z, placementCode: placement.code, provider: provider
+        )
     }
 
     /// Declare the window containing `tsMs` to be a rest window. One-shot per
@@ -426,12 +433,43 @@ public class Synheart {
         return shared._deliverHsiArray(array)
     }
 
-    /// Advance the daily accumulator to `dayIndex` (days since epoch in the
-    /// host's local zone). Call ``attachStrainScoreJson()`` first if you want
-    /// the day's Strain score — rolling clears its inputs.
+    /// Score the local day the engine closed last and attach it to the next
+    /// frame: `{local_date, start_ms, end_ms, strain}`. The engine closes each
+    /// local day itself at the first input of the next (runtime 0.42+), so
+    /// call this once a day after local midnight, once that day's vendor
+    /// dailies are pushed. `nil` before any day has closed or when the closed
+    /// day has nothing to score. The runtime keeps the closed day until the
+    /// next one closes, so remember its `local_date` and attach each once.
+    public static func attachClosedDayStrain() -> String? {
+        shared.coreRuntime?.attachClosedDayStrainJson()
+    }
+
+    /// Report whether keyboard and pointer/touch capture is running, from
+    /// `tsMs` (default now) on. A still window counts as rest — and teaches
+    /// the resting heart rate and HRV — only while capture is reported
+    /// running. The SDK reports its own in-app capture (see
+    /// ``BehaviorConfig/reportInputCapture``); call this when the host
+    /// captures input elsewhere. A level: it holds across sessions.
     @discardableResult
-    public static func rollDay(_ dayIndex: Int32) -> Int32? {
-        shared.coreRuntime?.rollDay(dayIndex)
+    public static func setInputCapture(running: Bool, tsMs: Int64? = nil) -> Bool {
+        let ts = tsMs ?? Int64(Date().timeIntervalSince1970 * 1000)
+        return shared.coreRuntime?.bridge?.setInputCapture(running: running, tsMs: ts) == 0
+    }
+
+    /// Report whether a call is on, from `tsMs` (default now) on, as the OS
+    /// microphone or camera indicator shows it. A level, like
+    /// ``setInputCapture(running:tsMs:)``.
+    @discardableResult
+    public static func setCallActive(_ active: Bool, tsMs: Int64? = nil) -> Bool {
+        let ts = tsMs ?? Int64(Date().timeIntervalSince1970 * 1000)
+        return shared.coreRuntime?.bridge?.setCallActive(active, tsMs: ts) == 0
+    }
+
+    /// Push a batch of typed inputs in the runtime's input envelope. Returns
+    /// the batch account, or `nil` on a runtime without the call. Send each
+    /// interaction event one way only.
+    public static func pushInputsJson(_ inputsJson: String) -> String? {
+        shared.coreRuntime?.bridge?.pushInputsJson(inputsJson)
     }
 
     /// Export the per-head session state for restore on the next launch.
@@ -457,7 +495,9 @@ public class Synheart {
         shared.coreRuntime?.lastHsv()
     }
 
-    /// The day's Strain score as JSON. Call before ``rollDay(_:)``.
+    /// The day's Strain score as JSON. The engine closes each local day itself,
+    /// so call this before local midnight; after it,
+    /// ``attachClosedDayStrain()`` scores the day that just closed.
     public static func attachStrainScoreJson() -> String? {
         shared.coreRuntime?.attachStrainScoreJson()
     }
@@ -986,10 +1026,10 @@ public class Synheart {
                     return DeviceRegistrationResult(success: true, status: existing)
                 }
                 guard !clientId.isEmpty else { throw SynheartError.invalidArgument("Subject is empty") }
-                let map = try DeviceIdentityResponse.decode(
-                    bridge.registerDevice(clientId: clientId), operation: "Device registration")
+                let map = try self._registerHandlingStoreUnavailable(
+                    bridge, clientId: clientId, subject: bridge.runtimeSubjectId() ?? clientId)
                 let status = bridge.deviceAuthStatus().flatMap { self.parseDict($0) }
-                    .map(DeviceAuthStatus.init(runtimeMap:)) ?? DeviceAuthStatus(runtimeMap: map)
+                    .map(DeviceAuthStatus.init(runtimeMap:)) ?? DeviceAuthStatus(runtimeMap: map ?? [:])
                 guard status.isRegistered else {
                     throw NativeOperationFailure(code: "DEVICE_REGISTRATION_FAILED", reason: .unknown,
                         message: "Device registration did not complete")
@@ -1007,6 +1047,113 @@ public class Synheart {
             _ = await _ensureCloudConsentReady()
         }
         return result
+    }
+
+    // MARK: - Input capture
+
+    /// Whether the SDK reports its in-app input capture to the runtime
+    /// (runtime 0.42+). On by default; set before ``initialize`` to turn it
+    /// off when the host captures input outside the app and reports it itself
+    /// with ``setInputCapture(running:tsMs:)``. The reports decide rest only
+    /// when ``HostDeclarations/inputObservable`` is `true`.
+    nonisolated(unsafe) public static var reportsInputCapture = true
+
+    private var inputCaptureGate: InputCaptureGate?
+    private var inputCaptureObservers: [NSObjectProtocol] = []
+
+    /// Report input capture running while the behaviour module collects with
+    /// consent and the app is active. The interaction this SDK sees is the
+    /// app's own, so outside it nothing is captured and the runtime must not
+    /// read the person's quiet windows as input-free.
+    private func _attachInputCaptureReporter() {
+        guard inputCaptureGate == nil, let module = behaviorModule else { return }
+        let gate = InputCaptureGate { [weak self] running in
+            let ts = Int64(Date().timeIntervalSince1970 * 1000)
+            let rc = self?.coreRuntime?.bridge?.setInputCapture(running: running, tsMs: ts)
+            SynheartLogger.log("[Synheart] input capture \(running ? "running" : "stopped") (rc=\(rc.map(String.init) ?? "nil"))")
+        }
+        inputCaptureGate = gate
+        module.onInputCaptureChanged = { gate.setTracking($0) }
+        #if canImport(UIKit) && !os(watchOS)
+        let center = NotificationCenter.default
+        inputCaptureObservers = [
+            center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { _ in
+                gate.setForeground(true)
+            },
+            center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) { _ in
+                gate.setForeground(false)
+            },
+        ]
+        // Initialized while already active, the first notification has passed.
+        DispatchQueue.main.async {
+            if UIApplication.shared.applicationState == .active { gate.setForeground(true) }
+        }
+        #else
+        // No app lifecycle to gate on (macOS): the app's own capture runs
+        // while the module does.
+        gate.setForeground(true)
+        #endif
+    }
+
+    private func _detachInputCaptureReporter() {
+        inputCaptureObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        inputCaptureObservers = []
+        behaviorModule?.onInputCaptureChanged = nil
+        inputCaptureGate?.reset()
+        inputCaptureGate = nil
+    }
+
+    /// Set when registration last failed with `STORAGE_UNAVAILABLE`, so the
+    /// next attempt first tries to restore the stored identity.
+    private var identityStoreWasUnavailable = false
+
+    /// `sdk_register_device`, handling `STORAGE_UNAVAILABLE` (runtime 0.42.1+).
+    ///
+    /// That code means the Keychain did not answer (locked at boot, or waiting
+    /// on a prompt), so the runtime cannot tell whether an identity is already
+    /// stored. Registering anyway would mint a second device for the same
+    /// install. The remedy is to wait, install the crypto callbacks again
+    /// (which restores a stored identity), and register only if the device is
+    /// still unregistered — twice, after 1 s and 3 s. Returns the registration
+    /// map, or nil when the identity was restored instead. Runs on the
+    /// runtime's work queue, so the waits block no UI.
+    private func _registerHandlingStoreUnavailable(
+        _ bridge: CoreRuntimeBridge, clientId: String, subject: String
+    ) throws -> [String: Any]? {
+        if identityStoreWasUnavailable {
+            identityStoreWasUnavailable = false
+            if bridge.setSdkCryptoCallbacks() == 0, _restoredRegistration(bridge, subject: subject) { return nil }
+        }
+        let waits: [TimeInterval] = [1, 3]
+        var attempt = 0
+        while true {
+            do {
+                return try DeviceIdentityResponse.decode(
+                    bridge.registerDevice(clientId: clientId), operation: "Device registration")
+            } catch let failure as NativeOperationFailure where failure.code == "STORAGE_UNAVAILABLE" {
+                guard attempt < waits.count else {
+                    identityStoreWasUnavailable = true
+                    throw failure
+                }
+                SynheartLogger.log(
+                    "[Synheart] Credential store unavailable during registration; "
+                    + "retrying after \(Int(waits[attempt]))s."
+                )
+                Thread.sleep(forTimeInterval: waits[attempt])
+                attempt += 1
+                if bridge.setSdkCryptoCallbacks() == 0, _restoredRegistration(bridge, subject: subject) {
+                    return nil
+                }
+            }
+        }
+    }
+
+    /// Whether reinstalling the crypto callbacks restored a registration for
+    /// `subject`.
+    private func _restoredRegistration(_ bridge: CoreRuntimeBridge, subject: String) -> Bool {
+        guard let status = bridge.deviceAuthStatus().flatMap({ parseDict($0) })
+            .map(DeviceAuthStatus.init(runtimeMap:)) else { return false }
+        return status.isRegistered && status.matchesSubject(subject)
     }
 
     // MARK: - Activation API
@@ -1204,6 +1351,7 @@ public class Synheart {
         behaviorModule?.onRuntimeBehaviorEvent = { [weak self] event in
             self?.runtimeBehaviorEventSubject.send(event)
         }
+        if Synheart.reportsInputCapture { _attachInputCaptureReporter() }
 
         try moduleManager.registerModule(wearModule!, dependsOn: ["capabilities", "consent"])
         try moduleManager.registerModule(phoneModule!, dependsOn: ["capabilities", "consent"])
@@ -2074,15 +2222,128 @@ public class Synheart {
         shared.coreRuntime?.bridge?.baselinesJson()
     }
 
-    /// Export the native runtime SRM snapshot as JSON for cross-session persistence.
-    public static func exportRuntimeSRMSnapshot() -> String? {
-        shared.coreRuntime?.bridge?.exportSrmSnapshot()
+    /// Every personal baseline as one opaque base64 snapshot, or `nil`.
+    ///
+    /// The runtime seals the same snapshot to its own data directory at
+    /// session end, after every reference refresh and every 15 minutes while
+    /// windows close, and restores it at startup, so a host that keeps that
+    /// directory needs neither this nor ``loadBaselineSnapshot(_:)``. Store the
+    /// text as private health data; never parse it.
+    public static func exportBaselineSnapshot() -> String? {
+        // Without a pipeline the runtime has no baselines to export and returns
+        // nil, which a host would persist as "nothing", silently.
+        shared.coreRuntime?.bridge?.ensurePipeline()
+        return shared.coreRuntime?.bridge?.exportBaselineSnapshot()
     }
 
-    /// Load a native runtime SRM snapshot from JSON. Returns true on success.
+    /// Restore a snapshot from ``exportBaselineSnapshot()``. `false` when the
+    /// runtime refused it (damaged, from a newer build, or another subject's);
+    /// the baselines are then left as they were. A snapshot from a runtime
+    /// before 0.42 is always refused, and the baselines start cold once.
     @discardableResult
-    public static func loadRuntimeSRMSnapshot(_ json: String) -> Bool {
-        shared.coreRuntime?.bridge?.loadSrmSnapshot(json: json) ?? false
+    public static func loadBaselineSnapshot(_ snapshotB64: String) -> Bool {
+        // A host restores at startup, before any session has built the
+        // pipeline; the load needs one. A no-op when one exists.
+        shared.coreRuntime?.bridge?.ensurePipeline()
+        return shared.coreRuntime?.bridge?.loadBaselineSnapshot(snapshotB64) ?? false
+    }
+
+    /// Write one night's or day's value of a daily `metric` into the personal
+    /// baselines, for the person's local `date` under `provider`.
+    ///
+    /// `metric` is a ``DailyMetric`` name, and the value is in the unit the
+    /// name ends with. A night belongs to the date the person woke on. Returns
+    /// `0` stored, `1004` refused (unknown metric or a value that is not
+    /// finite), `5002` outside the metric's bounds or of a stream the person
+    /// has not permitted, `-1` without a pipeline or runtime. Call
+    /// ``srmRefreshWearableReference(asOf:)`` once after a batch.
+    @discardableResult
+    public static func srmPushWearableDaily(
+        provider: String,
+        metric: String,
+        date: Date,
+        value: Double,
+        vendorSummary: Bool = true,
+        timeZone: TimeZone = .current
+    ) -> Int32 {
+        let d = localDate(date, timeZone)
+        return shared.coreRuntime?.bridge?.srmPushWearableDaily(
+            provider: provider, metric: metric,
+            year: d.year, month: d.month, day: d.day,
+            value: value, vendorSummary: vendorSummary
+        ) ?? -1
+    }
+
+    /// Rebuild the wearable reference from the daily values of the local dates
+    /// before `asOf` (default: now), so no day is in its own baseline. Returns
+    /// `0`, `1004`, `-1` (no pipeline), or `nil` without the call.
+    @discardableResult
+    public static func srmRefreshWearableReference(asOf: Date = Date(), timeZone: TimeZone = .current) -> Int32? {
+        let d = localDate(asOf, timeZone)
+        return shared.coreRuntime?.bridge?.srmRefreshWearableReference(year: d.year, month: d.month, day: d.day)
+    }
+
+    /// Declare what kind of day `date` is: `0` workday, `1` free day, `2`
+    /// leave, `3` sick, `4` travel, `5` on-call.
+    @discardableResult
+    public static func srmSetDayType(_ date: Date, dayType: Int32, timeZone: TimeZone = .current) -> Int32? {
+        let d = localDate(date, timeZone)
+        return shared.coreRuntime?.bridge?.srmSetDayType(year: d.year, month: d.month, day: d.day, dayType: dayType)
+    }
+
+    /// Forget part of the personal baselines at the person's request, e.g.
+    /// `{"scope":"everything"}`. `0` on success, `nil` without the call.
+    @discardableResult
+    public static func forgetBaselines(scopeJson: String) -> Int32? {
+        shared.coreRuntime?.bridge?.srmForgetBaselines(scopeJson: scopeJson)
+    }
+
+    /// Baseline events queued since the last drain, as a JSON array.
+    public static func drainBaselineEventsJson() -> String? {
+        shared.coreRuntime?.bridge?.srmDrainEventsJson()
+    }
+
+    /// Whether this host feeds the baselines what they need, requirement by
+    /// requirement, as JSON.
+    public static func baselineRequirementsJson(nowMs: Int64? = nil) -> String? {
+        let ts = nowMs ?? Int64(Date().timeIntervalSince1970 * 1000)
+        return shared.coreRuntime?.bridge?.baselineRequirementsJson(nowMs: ts)
+    }
+
+    /// What the baselines know about the person, as JSON.
+    public static func baselineProfileJson() -> String? {
+        shared.coreRuntime?.bridge?.baselineProfileJson()
+    }
+
+    /// The person's daily rhythm as the baselines learned it, as JSON.
+    public static func baselineRhythmJson() -> String? {
+        shared.coreRuntime?.bridge?.baselineRhythmJson()
+    }
+
+    /// The per-window digest of one local date, as JSON.
+    public static func baselineWindowDigestJson(_ date: Date, timeZone: TimeZone = .current) -> String? {
+        let d = localDate(date, timeZone)
+        return shared.coreRuntime?.bridge?.baselineWindowDigestJson(year: d.year, month: d.month, day: d.day)
+    }
+
+    /// Register an episode direction. Returns the registration JSON, or `nil`.
+    public static func registerBaselineDirection(_ directionJson: String) -> String? {
+        shared.coreRuntime?.bridge?.srmRegisterDirection(directionJson)
+    }
+
+    /// Mark the start of a deliberate rest block at `tsMs` (default now).
+    @discardableResult
+    public static func beginBaselineRestBlock(tsMs: Int64? = nil) -> Int32? {
+        let ts = tsMs ?? Int64(Date().timeIntervalSince1970 * 1000)
+        return shared.coreRuntime?.bridge?.baselineBeginRestBlock(tsMs: ts)
+    }
+
+    /// The calendar date of `date` in `timeZone`.
+    static func localDate(_ date: Date, _ timeZone: TimeZone) -> (year: Int, month: Int, day: Int) {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = timeZone
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        return (c.year ?? 1970, c.month ?? 1, c.day ?? 1)
     }
 
     /// Result of the runtime gate run at initialisation: the linked runtime's
@@ -2147,14 +2408,16 @@ public class Synheart {
         shared.coreRuntime?.pushRr(tsMs: tsMs, rrMs: rrMs, provider: provider)
     }
 
-    /// Push a heart rate sample to the core runtime.
-    public static func pushHr(tsMs: Int64, bpm: Double) {
-        shared.coreRuntime?.pushHr(tsMs: tsMs, bpm: bpm)
+    /// Push a heart rate sample to the core runtime. `provider` names the
+    /// source; nil uses the runtime's default.
+    public static func pushHr(tsMs: Int64, bpm: Double, provider: String? = nil) {
+        shared.coreRuntime?.pushHr(tsMs: tsMs, bpm: bpm, provider: provider)
     }
 
-    /// Push an accelerometer sample to the core runtime.
-    public static func pushAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
-        shared.coreRuntime?.pushAccel(tsMs: tsMs, x: x, y: y, z: z)
+    /// Push an accelerometer sample to the core runtime. `provider` names the
+    /// source; nil uses the runtime's default.
+    public static func pushAccel(tsMs: Int64, x: Double, y: Double, z: Double, provider: String? = nil) {
+        shared.coreRuntime?.pushAccel(tsMs: tsMs, x: x, y: y, z: z, provider: provider)
     }
 
     /// Push a behavior event to the core runtime.
@@ -2284,6 +2547,7 @@ public class Synheart {
         currentTokenSubject = nil
 
         coreRuntime?.bridge?.clearHsiCallback()
+        _detachInputCaptureReporter()
         coreRuntime = nil
 
         hsiDeliveryDeduplicator.reset()

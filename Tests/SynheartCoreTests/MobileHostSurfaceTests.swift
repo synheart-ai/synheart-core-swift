@@ -10,9 +10,31 @@ final class MobileHostSurfaceTests: XCTestCase {
     func testDefaultsEmitNoneOfTheNewKeys() {
         let map = RuntimeConfigBuilder.build(SynheartConfig(appId: "a", subjectId: "s"))
         for key in ["window_ms", "extra_heads", "emit_diagnostics", "research_baseline",
-                    "sensing", "device_class", "mask_profile", "cfi_structural_components"] {
+                    "sensing", "mask_profile", "cfi_structural_components"] {
             XCTAssertNil(map[key], "\(key) must be absent unless the host asked for it")
         }
+    }
+
+    func testDeviceClassDefaultsToAuto() {
+        // Since runtime 0.42 an undeclared class files behaviour baselines
+        // under `unknown`, so the SDK declares "auto" when the host does not.
+        let map = RuntimeConfigBuilder.build(SynheartConfig(appId: "a", subjectId: "s"))
+        XCTAssertEqual(map["device_class"] as? String, "auto")
+        let tablet = RuntimeConfigBuilder.build(SynheartConfig(
+            appId: "a", subjectId: "s",
+            hostDeclarations: HostDeclarations(deviceClass: .explicit(.tablet))))
+        XCTAssertEqual(tablet["device_class"] as? String, "tablet")
+    }
+
+    func testInputObservableDefaultsToFalseUnlessDeclared() {
+        // Undeclared, a phone never certifies rest without capture reports.
+        let map = RuntimeConfigBuilder.build(SynheartConfig(appId: "a", subjectId: "s"))
+        XCTAssertEqual(map["input_observable"] as? Bool, false)
+        let declared = RuntimeConfigBuilder.build(SynheartConfig(
+            appId: "a", subjectId: "s",
+            hostDeclarations: HostDeclarations(inputObservable: true)))
+        XCTAssertEqual(declared["input_observable"] as? Bool, true)
+        XCTAssertNil(HostDeclarations().toJSON()["input_observable"])
     }
 
     func testFlagsAreEmittedOnlyWhenTrue() {
@@ -103,9 +125,12 @@ final class MobileHostSurfaceTests: XCTestCase {
             "synheart_core_push_behavior_event", "synheart_core_push_context_event",
             "synheart_core_push_speed", "synheart_core_set_accel_placement",
             "synheart_core_declare_rest_window", "synheart_core_push_wrist_accel",
-            "synheart_core_roll_day", "synheart_core_export_session_state",
+            "synheart_core_attach_closed_day_strain_json", "synheart_core_export_session_state",
             "synheart_core_load_session_state", "synheart_core_config_id",
             "synheart_core_last_hsv", "synheart_core_attach_strain_score_json",
+            "synheart_core_set_input_capture", "synheart_core_set_call_active",
+            "synheart_core_push_inputs_json", "synheart_core_export_baseline_snapshot",
+            "synheart_core_load_baseline_snapshot", "synheart_core_srm_refresh_wearable_reference",
         ]
         for s in symbols {
             XCTAssertTrue(RuntimeSymbolManifest.optional.contains(s), "\(s) should be an optional capability")
@@ -125,7 +150,13 @@ final class MobileHostSurfaceTests: XCTestCase {
         XCTAssertNil(Synheart.tick(nowMs: 1))
         XCTAssertNil(Synheart.tickAll(nowMs: 1))
         XCTAssertNil(Synheart.flushPending(nowMs: 1))
-        XCTAssertNil(Synheart.rollDay(1))
+        XCTAssertNil(Synheart.attachClosedDayStrain())
+        XCTAssertFalse(Synheart.setInputCapture(running: true, tsMs: 1))
+        XCTAssertEqual(Synheart.srmPushWearableDaily(
+            provider: "apple_health", metric: DailyMetric.restingHrBpm, date: Date(), value: 58), -1)
+        XCTAssertNil(Synheart.srmRefreshWearableReference())
+        XCTAssertNil(Synheart.exportBaselineSnapshot())
+        XCTAssertFalse(Synheart.loadBaselineSnapshot("AAAA"))
         XCTAssertNil(Synheart.exportSessionState())
         XCTAssertNil(Synheart.configId)
         XCTAssertNil(Synheart.lastHsv())

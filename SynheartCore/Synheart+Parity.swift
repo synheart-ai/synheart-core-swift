@@ -149,17 +149,6 @@ public extension Synheart {
         shared.coreRuntime?.bridge?.lastSleepScore()
     }
 
-    static func exportLongitudinalSnapshot() -> String? {
-        shared.coreRuntime?.bridge?.ensurePipeline()
-        return shared.coreRuntime?.bridge?.exportLongitudinalSnapshot()
-    }
-
-    @discardableResult
-    static func loadLongitudinalSnapshot(_ snapshotJson: String) -> Int32 {
-        shared.coreRuntime?.bridge?.ensurePipeline()
-        return shared.coreRuntime?.bridge?.loadLongitudinalSnapshot(snapshotJson) ?? -1
-    }
-
     // MARK: - Customer data deletion and research
 
     static func requestDataDeletion(

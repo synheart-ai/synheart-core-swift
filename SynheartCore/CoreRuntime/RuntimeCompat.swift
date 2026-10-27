@@ -15,29 +15,29 @@ public enum RuntimeCompat {
     /// release every install hint recommends. Bump it when the bindings adopt a
     /// new symbol or a moved shape, or once they are verified on a newer
     /// release.
-    public static let writtenAgainst = "0.38.0"
+    public static let writtenAgainst = "0.42.1"
 
     /// Oldest runtime the bindings are known to load and behave on. Below this
     /// the SDK refuses to initialise rather than run with entrypoints that no
-    /// longer mean what the code assumes. `0.20.0` is the baseline of the
-    /// runtime's `SDK-CONTRACT-CHANGES.md`.
-    public static let minimum = "0.20.0"
+    /// longer mean what the code assumes. `0.42.0` is the first runtime with
+    /// C ABI 4.0, which these bindings require.
+    public static let minimum = "0.42.0"
 
     /// The C ABI this SDK requires, as `MAJOR.MINOR`. The runtime bumps MAJOR on
     /// any removal, rename or signature change and MINOR on additions only, so a
     /// runtime is compatible when its MAJOR equals ``requiredAbiMajor`` and its
     /// MINOR is at least ``requiredAbiMinor``. This, not the release version, is
     /// the contract; the version checks only grade runtimes that satisfy it.
-    public static let requiredAbi = "1.0"
-    public static let requiredAbiMajor = 1
+    public static let requiredAbi = "4.0"
+    public static let requiredAbiMajor = 4
     public static let requiredAbiMinor = 0
 
-    /// Newest ABI major the bindings also accept. ABI 2.0 only removed symbols
-    /// these bindings never call, and its one addition
-    /// (`synheart_core_last_error_json`) is looked up as optional, so runtimes on
-    /// either major load. Raise it only after checking a new major's removals
-    /// against the bindings.
-    public static let maxAbiMajor = 2
+    /// Newest ABI major the bindings also accept: 4 only. ABI 4.0 re-signed
+    /// the sample pushes and the daily calls, and `dlsym` checks no signature,
+    /// so a binding for one major calling a runtime of another passes the
+    /// wrong arguments — a native crash, not an error. Raise it only after
+    /// checking a new major's removals and signatures against the bindings.
+    public static let maxAbiMajor = 4
 
     /// The accepted ABI range, for messages.
     public static var abiRange: String {

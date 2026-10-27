@@ -23,6 +23,10 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
     /// runtime; see `Synheart.onRuntimeBehaviorEvent`.
     var onRuntimeBehaviorEvent: ((BehaviorEventInput) -> Void)?
 
+    /// Told `true` once the collector runs with behaviour consent and `false`
+    /// when it stops, so the facade can report input capture to the runtime.
+    var onInputCaptureChanged: ((Bool) -> Void)?
+
     /// Context-channel bookkeeping, readable for diagnostics.
     private(set) var contextEventsAccepted = 0
     private(set) var contextEventsRejected = 0
@@ -100,6 +104,7 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
             self?.eventStream.record(event)
         }
         try collector?.start(sessionId: sessionIdProvider())
+        if collector != nil { onInputCaptureChanged?(true) }
 
         cleanupTimer = Timer.publish(every: 60.0, on: .main, in: .common)
             .autoconnect()
@@ -110,6 +115,7 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
 
     public override func onStop() async throws {
         SynheartLogger.log("[BehaviorModule] Stopping behavior tracking...")
+        onInputCaptureChanged?(false)
 
         eventSubscription?.cancel()
         eventSubscription = nil

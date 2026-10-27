@@ -170,9 +170,12 @@ public final class CoreRuntimeBridge {
     private typealias IsRunningFn         = @convention(c) (OpaquePointer?) -> Int32
 
     // Sensor push
-    private typealias PushRrFn            = @convention(c) (OpaquePointer?, Int64, Double, UnsafePointer<CChar>?) -> Void
-    private typealias PushHrFn            = @convention(c) (OpaquePointer?, Int64, Double) -> Void
-    private typealias PushAccelFn         = @convention(c) (OpaquePointer?, Int64, Double, Double, Double) -> Void
+    // C ABI 4.0: every sample push ends in the source's `provider` and the
+    // person's `utc_offset_min` at the sample. `dlsym` checks no signature, so
+    // a typedef that disagrees with the runtime is a native crash, not an error.
+    private typealias PushRrFn            = @convention(c) (OpaquePointer?, Int64, Double, UnsafePointer<CChar>?, Int32) -> Void
+    private typealias PushHrFn            = @convention(c) (OpaquePointer?, Int64, Double, UnsafePointer<CChar>?, Int32) -> Void
+    private typealias PushAccelFn         = @convention(c) (OpaquePointer?, Int64, Double, Double, Double, UnsafePointer<CChar>?, Int32) -> Void
     private typealias PushBehaviorFn      = @convention(c) (OpaquePointer?, Int64, Int32, Double) -> Void
     private typealias PushSleepStagesFn   = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Void
     private typealias IngestBatchFn       = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Int64) -> UnsafeMutablePointer<CChar>?
@@ -213,8 +216,8 @@ public final class CoreRuntimeBridge {
 
     // SRM / Baselines
     private typealias BaselinesJsonFn     = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
-    private typealias ExportSrmFn         = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
-    private typealias LoadSrmFn           = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
+    private typealias ExportBaselineFn    = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias LoadBaselineFn      = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
     private typealias SrmOverallFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
 
     // Cloud
@@ -233,10 +236,17 @@ public final class CoreRuntimeBridge {
     private typealias ReqAcctDelFn        = @convention(c) (OpaquePointer?) -> Int32
     private typealias CancelAcctDelFn     = @convention(c) (OpaquePointer?) -> Int32
 
-    // Wearable SRM (longitudinal)
-    private typealias PushWearDailyFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Int32, Double, Double, Int32) -> Void
-    private typealias TriggerWearRecompFn = @convention(c) (OpaquePointer?, Int32, Int32) -> Void
+    // Personal baselines: daily values and the wearable reference (C ABI 4.0
+    // takes the person's calendar date as year, month, day).
+    private typealias PushWearDailyFn     = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int32, Int32, Int32, Double, Int32) -> Int32
+    private typealias DateCallFn          = @convention(c) (OpaquePointer?, Int32, Int32, Int32) -> Int32
+    private typealias DateJsonFn          = @convention(c) (OpaquePointer?, Int32, Int32, Int32) -> UnsafeMutablePointer<CChar>?
+    private typealias SetDayTypeFn        = @convention(c) (OpaquePointer?, Int32, Int32, Int32, Int32) -> Int32
+    private typealias LevelAtFn           = @convention(c) (OpaquePointer?, Int32, Int64) -> Int32
+    private typealias TsCallFn            = @convention(c) (OpaquePointer?, Int64) -> Int32
+    private typealias TsJsonFn            = @convention(c) (OpaquePointer?, Int64) -> UnsafeMutablePointer<CChar>?
     private typealias GetWearRefFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
+    private typealias IngestStringJsonFn  = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
 
     // Priority + Resilience — handle-less FFI (pure functions). Cached
     // here so SynheartPriority + SynheartResilience don't each need
@@ -343,8 +353,8 @@ public final class CoreRuntimeBridge {
 
     // SRM / Baselines
     private static let _baselines:     BaselinesJsonFn?   = sym("synheart_core_baselines_json")
-    private static let _exportSrm:     ExportSrmFn?       = sym("synheart_core_export_srm_snapshot")
-    private static let _loadSrm:       LoadSrmFn?         = sym("synheart_core_load_srm_snapshot")
+    private static let _exportBaseline: ExportBaselineFn? = sym("synheart_core_export_baseline_snapshot")
+    private static let _loadBaseline:  LoadBaselineFn?    = sym("synheart_core_load_baseline_snapshot")
     private static let _srmStatus:     SrmOverallFn?      = sym("synheart_core_srm_overall_status")
 
     // Cloud
@@ -369,9 +379,18 @@ public final class CoreRuntimeBridge {
     private static let _reqAcctDel:    ReqAcctDelFn?      = sym("synheart_core_request_account_deletion")
     private static let _cancelAcctDel: CancelAcctDelFn?   = sym("synheart_core_cancel_account_deletion")
 
-    // Wearable SRM (longitudinal)
+    // Personal baselines (all optional)
     private static let _pushWearDaily: PushWearDailyFn?     = sym("synheart_core_srm_push_wearable_daily")
-    private static let _triggerWearRe: TriggerWearRecompFn? = sym("synheart_core_srm_trigger_wearable_recompute")
+    private static let _refreshWearRef: DateCallFn?         = sym("synheart_core_srm_refresh_wearable_reference")
+    private static let _setDayType:    SetDayTypeFn?        = sym("synheart_core_srm_set_day_type")
+    private static let _windowDigest:  DateJsonFn?          = sym("synheart_core_baseline_window_digest_json")
+    private static let _drainEvents:   GetWearRefFn?        = sym("synheart_core_srm_drain_events_json")
+    private static let _forgetBaselines: LoadBaselineFn?    = sym("synheart_core_srm_forget_baselines")
+    private static let _registerDirection: IngestStringJsonFn? = sym("synheart_core_srm_register_direction")
+    private static let _beginRestBlock: TsCallFn?           = sym("synheart_core_baseline_begin_rest_block")
+    private static let _baselineProfile: GetWearRefFn?      = sym("synheart_core_baseline_profile_json")
+    private static let _baselineRhythm: GetWearRefFn?       = sym("synheart_core_baseline_rhythm_json")
+    private static let _baselineRequirements: TsJsonFn?     = sym("synheart_core_baseline_requirements_json")
     private static let _getWearRef:    GetWearRefFn?        = sym("synheart_core_wearable_reference_json")
 
     // Priority + Resilience (handle-less, read by per-module utilities)
@@ -651,19 +670,42 @@ public final class CoreRuntimeBridge {
 
     // MARK: - Sensor Push
 
+    /// The device's offset from UTC in minutes at `tsMs`, clamped to the
+    /// runtime's ±840.
+    ///
+    /// The offset in force at the sample, not now: a sample from before a
+    /// daylight-saving change or a flight files under its own local day.
+    public static func utcOffsetMin(atMs tsMs: Int64, timeZone: TimeZone = .current) -> Int32 {
+        let date = Date(timeIntervalSince1970: Double(tsMs) / 1000.0)
+        let minutes = timeZone.secondsFromGMT(for: date) / 60
+        return Int32(max(-840, min(840, minutes)))
+    }
+
+    /// Run `body` with `provider` as a C string, or nil when it is nil (the
+    /// runtime then uses its default source).
+    private func withProvider<R>(_ provider: String?, _ body: (UnsafePointer<CChar>?) -> R) -> R {
+        guard let provider else { return body(nil) }
+        return provider.withCString { body($0) }
+    }
+
     /// Push an RR-interval sample.
     public func pushRr(tsMs: Int64, rrMs: Double, provider: String = "default_sensor") {
-        provider.withCString { Self._pushRr?(handle, tsMs, rrMs, $0) }
+        let offset = Self.utcOffsetMin(atMs: tsMs)
+        provider.withCString { Self._pushRr?(handle, tsMs, rrMs, $0, offset) }
     }
 
-    /// Push a heart-rate sample.
-    public func pushHr(tsMs: Int64, bpm: Double) {
-        Self._pushHr?(handle, tsMs, bpm)
+    /// Push a heart-rate sample. `provider` names the source; nil uses the
+    /// runtime's default.
+    public func pushHr(tsMs: Int64, bpm: Double, provider: String? = nil) {
+        let offset = Self.utcOffsetMin(atMs: tsMs)
+        withProvider(provider) { Self._pushHr?(handle, tsMs, bpm, $0, offset) }
     }
 
-    /// Push a tri-axis accelerometer sample.
-    public func pushAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
-        Self._pushAccel?(handle, tsMs, x, y, z)
+    /// Push a tri-axis accelerometer sample. `provider` names the source; nil
+    /// uses the runtime's default.
+    public func pushAccel(tsMs: Int64, x: Double, y: Double, z: Double, provider: String? = nil) {
+        let offset = Self.utcOffsetMin(atMs: tsMs)
+        withProvider(provider) { Self._pushAccel?(handle, tsMs, x, y, z, $0, offset) }
     }
 
     /// Push a behavior event.
@@ -694,11 +736,10 @@ public final class CoreRuntimeBridge {
     private typealias PushSpeedFn         = @convention(c) (OpaquePointer?, Int64, Double) -> Void
     private typealias SetAccelPlacementFn = @convention(c) (OpaquePointer?, Int32) -> Void
     private typealias DeclareRestWindowFn = @convention(c) (OpaquePointer?, Int64) -> Void
-    private typealias RollDayFn           = @convention(c) (OpaquePointer?, Int32) -> Int32
     private typealias ReadStringFn        = @convention(c) (OpaquePointer?) -> UnsafeMutablePointer<CChar>?
     private typealias LoadStringFn        = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?) -> Int32
-    private typealias PushWristAccelFn    = @convention(c) (OpaquePointer?, Int64, Double, Double, Double) -> Void
-    private typealias PushWornAccelFn     = @convention(c) (OpaquePointer?, Int64, Double, Double, Double, Int32) -> Void
+    private typealias PushWristAccelFn    = @convention(c) (OpaquePointer?, Int64, Double, Double, Double, UnsafePointer<CChar>?, Int32) -> Void
+    private typealias PushWornAccelFn     = @convention(c) (OpaquePointer?, Int64, Double, Double, Double, Int32, UnsafePointer<CChar>?, Int32) -> Void
 
     private static let _tick:              TickFn?              = sym("synheart_core_tick")
     private static let _tickAll:           TickFn?              = sym("synheart_core_tick_all")
@@ -710,7 +751,10 @@ public final class CoreRuntimeBridge {
     private static let _declareRestWindow: DeclareRestWindowFn? = sym("synheart_core_declare_rest_window")
     private static let _pushWristAccel:    PushWristAccelFn?    = sym("synheart_core_push_wrist_accel")
     private static let _pushWornAccel:     PushWornAccelFn?     = sym("synheart_core_push_worn_accel")
-    private static let _rollDay:           RollDayFn?           = sym("synheart_core_roll_day")
+    private static let _attachClosedDayStrain: ReadStringFn?    = sym("synheart_core_attach_closed_day_strain_json")
+    private static let _setInputCapture:   LevelAtFn?           = sym("synheart_core_set_input_capture")
+    private static let _setCallActive:     LevelAtFn?           = sym("synheart_core_set_call_active")
+    private static let _pushInputsJson:    IngestStringJsonFn?  = sym("synheart_core_push_inputs_json")
     private static let _exportSessionState: ReadStringFn?       = sym("synheart_core_export_session_state")
     private static let _loadSessionState:  LoadStringFn?        = sym("synheart_core_load_session_state")
     private static let _configId:          ReadStringFn?        = sym("synheart_core_config_id")
@@ -731,7 +775,14 @@ public final class CoreRuntimeBridge {
             "declareRestWindow": Self._declareRestWindow != nil,
             "pushWristAccel": Self._pushWristAccel != nil,
             "pushWornAccel": Self._pushWornAccel != nil,
-            "rollDay": Self._rollDay != nil,
+            "attachClosedDayStrainJson": Self._attachClosedDayStrain != nil,
+            "setInputCapture": Self._setInputCapture != nil,
+            "setCallActive": Self._setCallActive != nil,
+            "pushInputsJson": Self._pushInputsJson != nil,
+            "srmPushWearableDaily": Self._pushWearDaily != nil,
+            "srmRefreshWearableReference": Self._refreshWearRef != nil,
+            "srmSetDayType": Self._setDayType != nil,
+            "exportBaselineSnapshot": Self._exportBaseline != nil,
             "exportSessionState": Self._exportSessionState != nil,
             "loadSessionState": Self._loadSessionState != nil,
             "configId": Self._configId != nil,
@@ -806,16 +857,20 @@ public final class CoreRuntimeBridge {
 
     /// Push one sample from a wrist-worn accelerometer, in g including
     /// gravity. The runtime keeps wrist motion separate from device motion.
-    public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double) {
-        Self._pushWristAccel?(handle, tsMs, x, y, z)
+    public func pushWristAccel(tsMs: Int64, x: Double, y: Double, z: Double, provider: String? = nil) {
+        let offset = Self.utcOffsetMin(atMs: tsMs)
+        withProvider(provider) { Self._pushWristAccel?(handle, tsMs, x, y, z, $0, offset) }
     }
 
     /// Push one sample from a body-worn accelerometer, in g, tagged with the
     /// placement it was worn at so the engine can pick the kinematic model for
     /// that mount. Unlike `setAccelPlacement`, which declares where the
     /// *device* sits, the placement here travels with every sample.
-    public func pushWornAccel(tsMs: Int64, x: Double, y: Double, z: Double, placementCode: Int32) {
-        Self._pushWornAccel?(handle, tsMs, x, y, z, placementCode)
+    public func pushWornAccel(
+        tsMs: Int64, x: Double, y: Double, z: Double, placementCode: Int32, provider: String? = nil
+    ) {
+        let offset = Self.utcOffsetMin(atMs: tsMs)
+        withProvider(provider) { Self._pushWornAccel?(handle, tsMs, x, y, z, placementCode, $0, offset) }
     }
 
     /// Declare that the window containing `tsMs` is a rest window.
@@ -828,12 +883,47 @@ public final class CoreRuntimeBridge {
         Self._declareRestWindow?(handle, tsMs)
     }
 
-    /// Advance the daily accumulator to `dayIndex` (days since epoch in the
-    /// host's local zone). The index must strictly advance. Returns the runtime
-    /// status, or `nil` when the symbol is absent.
-    public func rollDay(_ dayIndex: Int32) -> Int32? {
-        guard let fn = Self._rollDay else { return nil }
-        return fn(handle, dayIndex)
+    /// Score the local day the engine closed last and queue it for the next
+    /// frame: `{local_date, start_ms, end_ms, strain}`.
+    ///
+    /// The engine closes each local day itself at the first input of the next
+    /// (C ABI 4.0 removed `roll_day`), so call this once a day after local
+    /// midnight, once that day's vendor dailies (steps) are pushed. `nil`
+    /// before any day has closed, when the closed day has nothing to score, or
+    /// when the symbol is absent.
+    public func attachClosedDayStrainJson() -> String? {
+        let out = consumeCString(Self._attachClosedDayStrain?(handle))
+        return (out?.isEmpty ?? true) ? nil : out
+    }
+
+    /// Report whether keyboard and pointer/touch capture is running from
+    /// `tsMs` on. A still window counts as rest — and teaches the resting
+    /// heart rate and HRV — only while capture is reported running. A level,
+    /// not an event: it holds across sessions. `0` when accepted, `nil` when
+    /// the symbol is absent.
+    @discardableResult
+    public func setInputCapture(running: Bool, tsMs: Int64) -> Int32? {
+        guard let fn = Self._setInputCapture else { return nil }
+        let rc = fn(handle, running ? 1 : 0, tsMs)
+        if rc != 0 { noteFailure() }
+        return rc
+    }
+
+    /// Report a call on or off from `tsMs`, as the OS microphone or camera
+    /// indicator shows it. A level, like ``setInputCapture(running:tsMs:)``.
+    @discardableResult
+    public func setCallActive(_ active: Bool, tsMs: Int64) -> Int32? {
+        guard let fn = Self._setCallActive else { return nil }
+        let rc = fn(handle, active ? 1 : 0, tsMs)
+        if rc != 0 { noteFailure() }
+        return rc
+    }
+
+    /// Push a batch of typed inputs in the runtime's input envelope. Returns
+    /// the batch account (what went in and why the rest did not), or `nil`.
+    public func pushInputsJson(_ inputsJson: String) -> String? {
+        guard let fn = Self._pushInputsJson else { return nil }
+        return consumeCString(inputsJson.withCString { fn(handle, $0) })
     }
 
     /// Export the per-head session state as JSON, for restore on the next
@@ -864,8 +954,10 @@ public final class CoreRuntimeBridge {
     }
 
     /// The day's Strain score as JSON, computed from what the engine
-    /// accumulated. Call **before** ``rollDay(_:)`` — rolling finalises the day
-    /// and clears the inputs. `nil` when nothing is available or the symbol is absent.
+    /// accumulated. The engine closes each local day itself at the first input
+    /// of the next, so call this before local midnight; after it,
+    /// ``attachClosedDayStrainJson()`` scores the day that just closed. `nil`
+    /// when nothing is available or the symbol is absent.
     public func attachStrainScoreJson() -> String? {
         let out = consumeCString(Self._attachStrainScore?(handle))
         return (out?.isEmpty ?? true) ? nil : out
@@ -1039,14 +1131,23 @@ public final class CoreRuntimeBridge {
         consumeCString(Self._baselines?(handle))
     }
 
-    /// Export SRM snapshot as JSON, or nil.
-    public func exportSrmSnapshot() -> String? {
-        consumeCString(Self._exportSrm?(handle))
+    /// Export every personal baseline as one opaque base64 snapshot, or nil.
+    ///
+    /// The runtime seals this snapshot to its own data directory at session
+    /// end, after each reference refresh and every 15 minutes while windows
+    /// close, and restores it at startup, so a host that keeps that directory
+    /// needs neither this nor ``loadBaselineSnapshot(_:)``. Store the text as
+    /// private health data; it is not meant to be read.
+    public func exportBaselineSnapshot() -> String? {
+        consumeCString(Self._exportBaseline?(handle))
     }
 
-    /// Load SRM snapshot from JSON. Returns true on success.
-    public func loadSrmSnapshot(json: String) -> Bool {
-        json.withCString { ok(Self._loadSrm?(handle, $0) ?? 1) }
+    /// Load a snapshot from ``exportBaselineSnapshot()``. `true` when loaded,
+    /// `false` when refused (`3001` for an earlier build's snapshot: the
+    /// baselines start cold), `nil` when the symbol is absent.
+    public func loadBaselineSnapshot(_ snapshotB64: String) -> Bool? {
+        guard let fn = Self._loadBaseline else { return nil }
+        return snapshotB64.withCString { ok(fn(handle, $0)) }
     }
 
     /// Get SRM overall baseline status as JSON.
@@ -1129,16 +1230,107 @@ public final class CoreRuntimeBridge {
         ok(Self._cancelAcctDel?(handle) ?? 1)
     }
 
-    // MARK: - Wearable SRM (Longitudinal)
+    // MARK: - Personal baselines
 
-    /// Push a daily wearable dimension value for longitudinal SRM computation.
-    public func pushWearableDailyValue(dimension: String, dayIndex: Int, value: Double, confidence: Double, fidelity: Int32) {
-        dimension.withCString { Self._pushWearDaily?(handle, $0, Int32(dayIndex), value, confidence, fidelity) }
+    /// Write one night's or day's value of a daily `metric` (a ``DailyMetric``
+    /// name, in the unit the name ends with) for the person's local date
+    /// `year`-`month`-`day`, under `provider`.
+    ///
+    /// Returns `0` stored, `1004` refused (unknown metric, a date that does not
+    /// exist, a value that is not finite), `5002` outside the metric's bounds
+    /// or of a stream the person has not permitted, `-1` no pipeline — or
+    /// `nil` when the symbol is absent. Pass `vendorSummary: false` only for a
+    /// value computed from raw samples.
+    @discardableResult
+    public func srmPushWearableDaily(
+        provider: String,
+        metric: String,
+        year: Int, month: Int, day: Int,
+        value: Double,
+        vendorSummary: Bool = true
+    ) -> Int32? {
+        guard let fn = Self._pushWearDaily else { return nil }
+        let rc = provider.withCString { p in
+            metric.withCString { m in
+                fn(handle, p, m, Int32(year), Int32(month), Int32(day), value, vendorSummary ? 1 : 0)
+            }
+        }
+        if rc != 0 { noteFailure() }
+        return rc
     }
 
-    /// Trigger a wearable SRM recompute.
-    public func triggerWearableRecompute(triggerType: Int32, asOfDay: Int) {
-        Self._triggerWearRe?(handle, triggerType, Int32(asOfDay))
+    /// Rebuild the wearable reference from the dates **before**
+    /// `year`-`month`-`day`. Call with today after a batch of daily values, so
+    /// every complete day is in and no day is in its own baseline.
+    @discardableResult
+    public func srmRefreshWearableReference(year: Int, month: Int, day: Int) -> Int32? {
+        guard let fn = Self._refreshWearRef else { return nil }
+        let rc = fn(handle, Int32(year), Int32(month), Int32(day))
+        if rc != 0 { noteFailure() }
+        return rc
+    }
+
+    /// Declare what kind of day `year`-`month`-`day` is: `0` workday, `1` free
+    /// day, `2` leave, `3` sick, `4` travel, `5` on-call. Sick, leave and
+    /// travel days teach a separate side reference.
+    @discardableResult
+    public func srmSetDayType(year: Int, month: Int, day: Int, dayType: Int32) -> Int32? {
+        guard let fn = Self._setDayType else { return nil }
+        let rc = fn(handle, Int32(year), Int32(month), Int32(day), dayType)
+        if rc != 0 { noteFailure() }
+        return rc
+    }
+
+    /// The per-window digest of one local date, as JSON.
+    public func baselineWindowDigestJson(year: Int, month: Int, day: Int) -> String? {
+        consumeCString(Self._windowDigest?(handle, Int32(year), Int32(month), Int32(day)))
+    }
+
+    /// Drain the baseline events (a baseline turning Ready, a candidate
+    /// direction, …) queued since the last drain, as a JSON array.
+    public func srmDrainEventsJson() -> String? {
+        consumeCString(Self._drainEvents?(handle))
+    }
+
+    /// Forget part of the personal baselines, for a person who asks. `0` on
+    /// success, `nil` when the symbol is absent.
+    @discardableResult
+    public func srmForgetBaselines(scopeJson: String) -> Int32? {
+        guard let fn = Self._forgetBaselines else { return nil }
+        let rc = scopeJson.withCString { fn(handle, $0) }
+        if rc != 0 { noteFailure() }
+        return rc
+    }
+
+    /// Register an episode direction. Returns the registration JSON, or nil.
+    public func srmRegisterDirection(_ directionJson: String) -> String? {
+        guard let fn = Self._registerDirection else { return nil }
+        return consumeCString(directionJson.withCString { fn(handle, $0) })
+    }
+
+    /// Mark the start of a deliberate rest block at `tsMs`.
+    @discardableResult
+    public func baselineBeginRestBlock(tsMs: Int64) -> Int32? {
+        guard let fn = Self._beginRestBlock else { return nil }
+        let rc = fn(handle, tsMs)
+        if rc != 0 { noteFailure() }
+        return rc
+    }
+
+    /// What the baselines know about the person, as JSON.
+    public func baselineProfileJson() -> String? {
+        consumeCString(Self._baselineProfile?(handle))
+    }
+
+    /// The person's daily rhythm as the baselines learned it, as JSON.
+    public func baselineRhythmJson() -> String? {
+        consumeCString(Self._baselineRhythm?(handle))
+    }
+
+    /// Whether this host feeds the baselines what they need, requirement by
+    /// requirement, as JSON.
+    public func baselineRequirementsJson(nowMs: Int64) -> String? {
+        consumeCString(Self._baselineRequirements?(handle, nowMs))
     }
 
     /// Get the current wearable reference JSON from the longitudinal SRM engine.

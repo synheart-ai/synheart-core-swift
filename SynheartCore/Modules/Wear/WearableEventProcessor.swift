@@ -182,8 +182,20 @@ public final class WearableEventProcessor {
         return f
     }()
 
+    /// A provider's calendar date (`2026-03-28`, Garmin's `calendarDate`),
+    /// read as local midnight so it keeps its date in the person's zone.
+    private static func dateOnlyFormatter() -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }
+
     private static func parseIso8601(_ string: String) -> Date? {
-        isoFormatter.date(from: string) ?? isoFormatterNoFrac.date(from: string)
+        isoFormatter.date(from: string)
+            ?? isoFormatterNoFrac.date(from: string)
+            ?? dateOnlyFormatter().date(from: string)
     }
 
     // MARK: - Event Mapping Registry
