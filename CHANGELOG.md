@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
 Requires runtime 0.45.0 or newer (C ABI 4.2); older runtimes are refused at
 initialization. Install it with `synheart install runtime --version 0.45.0`.
 The daily score inputs changed shape with ABI 4.2 and neither shape parses on
@@ -589,7 +591,8 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.3.1...v0.4.0
