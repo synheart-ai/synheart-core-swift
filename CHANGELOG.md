@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-30
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.6.0 does.
+
 ### Added
 
 - **`Synheart.syncPairingStatus(token:)`: know when a pairing code was
@@ -630,7 +634,8 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.0...v0.4.1
