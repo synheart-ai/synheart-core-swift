@@ -2,7 +2,7 @@
 //
 // Apple Health XML backfill sink — Swift bindings.
 //
-// Mirror of `synheart-core-flutter/lib/src/backfill/apple_xml_backfill_sink.dart`.
+// Same API shape as the sibling platform SDKs' Apple XML backfill sink.
 // Bridges the `AppleXmlIngestSink` protocol from `synheart-wear-swift`'s
 // `AppleHealthXmlImport` orchestrator to the runtime's backfill SQLite
 // ingest via three new C-ABI symbols:

@@ -30,13 +30,15 @@ final class Abi4ContractTests: XCTestCase {
         XCTAssertEqual(d.day, 15)
     }
 
-    func testDailyMetricNamesExactlyTheTwelveTheRuntimeAccepts() {
+    func testDailyMetricNamesExactlyTheFifteenTheRuntimeAccepts() {
         // The runtime refuses any other name with 1004, including the names
         // these replaced, so this set is the contract.
         XCTAssertEqual(DailyMetric.all, [
             "sleep.duration_s",
             "sleep.midpoint_h",
             "cardiac.overnight_rmssd_ms",
+            "cardiac.rest_rmssd_ms",
+            "cardiac.overnight_hr_bpm",
             "cardiac.overnight_sdnn_ms",
             "cardiac.resting_hr_bpm",
             "vendor.recovery_frac",
@@ -44,6 +46,7 @@ final class Abi4ContractTests: XCTestCase {
             "sleep.rem_min",
             "vendor.strain_frac",
             "motion.steps_count",
+            "motion.active_min",
             "cardiac.hrr_load_au",
             "cardiac.overnight_hr_sd_bpm",
         ])

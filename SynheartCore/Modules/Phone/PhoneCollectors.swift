@@ -183,7 +183,9 @@ public final class IOSScreenStateTracker: ScreenStateTracking {
         observe(center, name: UIApplication.willResignActiveNotification, state: .off)
         observe(center, name: UIApplication.protectedDataWillBecomeUnavailableNotification, state: .locked)
         observe(center, name: UIApplication.protectedDataDidBecomeAvailableNotification, state: .unlocked)
-        currentState = UIApplication.shared.applicationState == .active ? .on : .off
+        // `applicationState` is main-thread only; a session starts from any thread.
+        let active = await MainActor.run { UIApplication.shared.applicationState == .active }
+        currentState = active ? .on : .off
         controller.send(currentState)
         #endif
     }

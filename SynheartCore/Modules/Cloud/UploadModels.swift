@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Typed Swift models for the snapshot-upload request / response pair.
-// Mirrors the Flutter reference at `lib/src/modules/cloud/upload_models.dart`
-// and the Kotlin sibling at `modules/cloud/UploadModels.kt`. snake_case
-// wire keys for cross-language byte-equivalent JSON.
+// snake_case wire keys, byte-equivalent with the JSON the sibling platform
+// SDKs send.
 
 import Foundation
 
@@ -52,7 +51,7 @@ public struct UploadMetadata: Equatable, Sendable {
 /// artifact / HSI APIs and serialise to dictionaries for this call.
 // Not `Sendable` because `snapshots: [[String: Any]]` contains
 // arbitrary nested JSON the backend defines (Any is not Sendable).
-// Match Flutter's `List<Map<String, dynamic>>` shape exactly.
+// An array of JSON objects, exactly as the backend defines it.
 public struct UploadRequest {
     public let userId: String
     public let metadata: UploadMetadata

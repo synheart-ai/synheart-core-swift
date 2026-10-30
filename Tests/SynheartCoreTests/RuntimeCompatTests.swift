@@ -22,17 +22,13 @@ final class RuntimeCompatTests: XCTestCase {
         XCTAssertTrue(r.isAcceptable)
     }
 
-    func testCheckIsOlderBetweenMinimumAndWrittenAgainstStillAcceptable() {
-        let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.42.0"])
-        XCTAssertEqual(r.status, .older)
-        XCTAssertTrue(r.isAcceptable)
-        XCTAssertTrue(r.message.contains("0.42.0"))
-    }
-
     func testCheckRefusesTooOldBelowMinimum() {
-        let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.41.0"])
-        XCTAssertEqual(r.status, .tooOld)
-        XCTAssertFalse(r.isAcceptable)
+        // 0.44.0 is the last ABI 4.1 release.
+        for v in ["0.42.1", "0.43.0", "0.44.0"] {
+            let r = RuntimeCompat.check(buildInfo: ["core_runtime": v])
+            XCTAssertEqual(r.status, .tooOld, v)
+            XCTAssertFalse(r.isAcceptable, v)
+        }
     }
 
     func testCheckIsUnknownWithoutVersionStillAcceptable() {
@@ -45,23 +41,32 @@ final class RuntimeCompatTests: XCTestCase {
         // 1.x–3.x take the old push and daily-call signatures: refused, since
         // calling them with ABI 4 arguments would crash rather than fail.
         for abi in ["0.9", "1.0", "2.1", "3.5", "5.0"] {
-            let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.42.1", "abi": abi])
+            let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.45.0", "abi": abi])
             XCTAssertEqual(r.status, .incompatibleAbi, abi)
             XCTAssertFalse(r.isAcceptable)
             XCTAssertTrue(r.message.contains(RuntimeCompat.installCommand))
         }
     }
 
-    func testCheckAcceptsAbiFour() {
-        for abi in ["4.0", "4.3"] {
-            let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.42.1", "abi": abi])
+    func testCheckAcceptsAbiFourTwoAndNewerMinors() {
+        for abi in ["4.2", "4.3"] {
+            let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.45.0", "abi": abi])
             XCTAssertTrue(r.isAcceptable, abi)
             XCTAssertEqual(r.abi, abi)
         }
     }
 
+    func testCheckRefusesAbiFourZeroAndFourOne() {
+        // The daily score inputs changed shape in 4.2; neither parses on the other.
+        for abi in ["4.0", "4.1"] {
+            let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.43.0", "abi": abi])
+            XCTAssertEqual(r.status, .incompatibleAbi, abi)
+            XCTAssertFalse(r.isAcceptable, abi)
+        }
+    }
+
     func testMalformedAbiFallsBackToVersionChecks() {
-        let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.42.1", "abi": "two"])
+        let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.45.0", "abi": "two"])
         XCTAssertEqual(r.status, .ok)
         XCTAssertNil(r.abi)
     }

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Result of evaluating breathing compliance over the current RR window.
-// Mirrors the breathing runtime's `ComplianceResult` JSON shape and
-// the Flutter / Kotlin references. See RFC-Breathing-001 for verdict
-// semantics.
+// Mirrors the breathing runtime's `ComplianceResult` JSON shape. See
+// RFC-Breathing-001 for verdict semantics.
 
 import Foundation
 

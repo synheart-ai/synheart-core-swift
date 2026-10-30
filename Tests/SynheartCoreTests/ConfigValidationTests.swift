@@ -94,7 +94,7 @@ final class ConfigValidationTests: XCTestCase {
     }
 
     func testSDKVersionMatchesPlannedRelease() {
-        XCTAssertEqual(Synheart.sdkVersion, "0.5.0")
+        XCTAssertEqual(Synheart.sdkVersion, "0.6.0")
         XCTAssertEqual(Synheart.sdkVersion, SynheartCoreVersion.current)
     }
 }

@@ -18,6 +18,14 @@ struct RuntimeDataView: View {
                     CloudIngestionCard()
                 }
 
+                Section {
+                    DailyScoresCard()
+                } header: {
+                    Text("Daily scores")
+                } footer: {
+                    Text("Report last night to score it. Baselines show value @ confidence; — is withheld. Start a session first so the night's values are stored.")
+                }
+
                 Section("On-device storage") {
                     LabeledContent("Total", value: ByteCountFormatter.string(fromByteCount: model.storageUsage?.totalBytes ?? 0, countStyle: .file))
                     LabeledContent("Pending sync", value: "\(model.storageUsage?.pendingSync ?? 0)")
@@ -424,5 +432,84 @@ private struct CloudIngestionCard: View {
 
     private func formatted(_ date: Date?) -> String {
         date?.formatted(date: .abbreviated, time: .shortened) ?? "never"
+    }
+}
+
+/// The daily scores on runtime 0.45+ (C ABI 4.2): report last night to score
+/// it against the personal baselines the runtime keeps, and check Readiness
+/// takes its input.
+private struct DailyScoresCard: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var bed = DailyScoresCard.today(hour: 23)
+    @State private var wake = DailyScoresCard.today(hour: 7)
+    @State private var recovery = "70"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DatePicker("Bed", selection: $bed, displayedComponents: .hourAndMinute)
+            DatePicker("Wake", selection: $wake, displayedComponents: .hourAndMinute)
+            Button {
+                logLastNight()
+            } label: {
+                Label("Log last night", systemImage: "bed.double")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!model.isInitialized)
+
+            if let score = model.lastSleepScore {
+                LabeledContent("Sleep score", value: score.score.map(String.init) ?? "—")
+                LabeledContent("Mode", value: score.mode.rawValue)
+                LabeledContent("Confidence", value: String(format: "%.2f", score.confidence))
+                LabeledContent("Pipeline", value: score.pipelineVersion)
+                LabeledContent("Night values stored", value: model.lastNightPushes ?? "—")
+            }
+            LabeledContent("Midpoint baseline", value: AppModel.describeRef(model.sleepBaselines?.midpointH))
+            LabeledContent("Overnight HR baseline", value: AppModel.describeRef(model.sleepBaselines?.overnightHrBpm))
+            LabeledContent("Deep baseline", value: AppModel.describeRef(model.sleepBaselines?.deepMin))
+            LabeledContent("REM baseline", value: AppModel.describeRef(model.sleepBaselines?.remMin))
+            LabeledContent("Recovery refs", value: model.baselineRefsSummary)
+
+            Text("Readiness needs today's Recovery Score, which needs overnight HRV this example has no source for. Enter one to check the runtime takes the input; nothing is stored.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                TextField("Recovery", text: $recovery)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                Button("Compute readiness") {
+                    if let r = Int(recovery) { model.computeReadiness(recoveryScore: r) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.lastSleepScore?.score == nil || Int(recovery) == nil)
+            }
+            if let r = model.lastReadiness {
+                LabeledContent("Readiness", value: "\(r.score) (\(r.band.label))")
+                LabeledContent("Confidence", value: String(format: "%.2f", r.confidence))
+                LabeledContent("Model", value: r.modelVersion)
+                LabeledContent("Explanation", value: r.explanation.map(\.rawValue).joined(separator: ", "))
+            }
+        }
+        .onAppear { if model.isInitialized { model.refreshDailyBaselines() } }
+    }
+
+    private func logLastNight() {
+        let calendar = Calendar.current
+        let now = Date()
+        let wakeAt = Self.onDay(now, timeOf: wake, calendar: calendar)
+        var bedAt = Self.onDay(now, timeOf: bed, calendar: calendar)
+        // A bedtime later in the day than the wake time was last night.
+        if bedAt >= wakeAt { bedAt = calendar.date(byAdding: .day, value: -1, to: bedAt)! }
+        model.logSelfReportedSleep(bedtime: bedAt, wakeTime: wakeAt)
+    }
+
+    private static func today(hour: Int) -> Date {
+        Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date())!
+    }
+
+    private static func onDay(_ day: Date, timeOf time: Date, calendar: Calendar) -> Date {
+        let t = calendar.dateComponents([.hour, .minute], from: time)
+        return calendar.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: day)!
     }
 }

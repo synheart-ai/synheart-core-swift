@@ -2,14 +2,13 @@
 //
 // Synheart-side gate around the Syni on-device agent SDK.
 //
-// Mirrors the Flutter shape: `SyniAgent` actor + install lifecycle
+// Shape: `SyniAgent` actor + install lifecycle
 // state machine + typed `chat()` / `chatStream()` returning
 // `SyniChatResponse` and `SyniChatEvent` respectively. The underlying
 // `SyniSwift.SyniAgent` is wrapped with a `consent.syni` gate so
 // consumers can't accidentally bypass the consent check.
 //
-// API note: matches the post-alignment SyniSwift package (0.0.2+,
-// `chore/align-public-api-to-flutter-shape` and later). The earlier
+// API note: matches the SyniSwift package 0.0.2 and later. The earlier
 // `Syni` singleton shape is gone.
 
 #if canImport(SyniSwift)

@@ -153,6 +153,24 @@ public struct BaselineRefs: Sendable, Equatable {
         self.restingHrBpm = restingHrBpm; self.rhrConfidence = rhrConfidence
     }
 
+    /// `nil` unless `json` carries all four fields as numbers.
+    public static func fromJson(_ json: [String: Any]) -> BaselineRefs? {
+        guard let hrv = optDouble(json, "hrv_rmssd_ms"),
+              let hrvConf = optDouble(json, "hrv_confidence"),
+              let rhr = optDouble(json, "resting_hr_bpm"),
+              let rhrConf = optDouble(json, "rhr_confidence")
+        else { return nil }
+        return BaselineRefs(hrvRmssdMs: hrv, hrvConfidence: hrvConf,
+                            restingHrBpm: rhr, rhrConfidence: rhrConf)
+    }
+
+    /// Maturity of the overnight HR/HRV baselines, `0...1`: the lower of the
+    /// two confidences. Readiness reads it as its `baseline_maturity`.
+    public var maturity: Double {
+        let m = min(hrvConfidence, rhrConfidence)
+        return m.isFinite ? min(max(m, 0), 1) : 0
+    }
+
     public func toJson() -> [String: Any] {
         return [
             "hrv_rmssd_ms": hrvRmssdMs,

@@ -1,6 +1,6 @@
 # Synheart Core SDK — Swift
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-FA7343.svg)](https://swift.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -28,14 +28,6 @@ Synheart runtime native binary
     |-- HSI computation
     |-- Storage, Crypto, Sync, Auth, Consent, Capabilities
 ```
-
-## Repositories
-
-| Repository | Purpose |
-|------------|---------|
-| **[synheart-core-flutter](https://github.com/synheart-ai/synheart-core-flutter)** | Flutter/Dart platform SDK |
-| **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin platform SDK |
-| **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift platform SDK (this repository) |
 
 ## Overview
 
@@ -86,7 +78,7 @@ These ship in the same target and are wired through the runtime, but only become
 | **Syni** | Consent-gated facade around the [`SyniSwift`](https://github.com/synheart-ai/syni-swift) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `consent.syni` check. | `SyniModule(consent:)` |
 | **HealthKit backfill** | Cold-start SRM seeding from HealthKit sleep + overnight HR/HRV history. Pushes `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` / `cardiac.overnight_rmssd_ms` / `cardiac.resting_hr_bpm` under each local wake date, provider `apple_health`. | `HealthKitRuntimeSink(reader:, bridge:)` |
 | **Scoring models** | Typed input + result types for the runtime's Sleep / Recovery / Readiness scorers, plus a self-report `SleepQuestionnaireAnswers`. | `Models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.swift` |
-| **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with Flutter + Kotlin siblings. | `Modules/Cloud/UploadModels.swift` |
+| **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Byte-equivalent JSON with the sibling platform SDKs. | `Modules/Cloud/UploadModels.swift` |
 
 Examples:
 
@@ -149,13 +141,13 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.5.0")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.6.0")
 ]
 ```
 
-The SDK requires runtime ABI 4.x, which is runtime 0.42.0 or newer
-(`RuntimeCompat.requiredAbi`); older runtimes are refused at initialization.
-Install it with `synheart install runtime --version 0.42.1`.
+The SDK requires runtime ABI 4.2 or a newer 4.x, which is runtime 0.45.0 or
+newer (`RuntimeCompat.requiredAbi`); older runtimes are refused at
+initialization. Install it with `synheart install runtime --version 0.45.0`.
 
 The SDK validates the linked native runtime ABI during initialization. If a
 required symbol is missing, initialization throws
@@ -180,6 +172,13 @@ do not require ONNX Runtime.
   `Synheart.srmPushWearableDaily(provider:metric:date:value:)`, using a
   `DailyMetric` name (the unit is in the name) and the local date the person
   woke on. Call `srmRefreshWearableReference()` once after a batch.
+- **The daily scores read the runtime's baselines (runtime 0.45+).** After the
+  refresh, `Synheart.dailySleepBaselines()` goes on `SleepScoreInput.baselines`
+  with the night's `tonightMidpointH`, and `Synheart.dailyBaselineRefs()` on
+  `RecoveryScoreInput.baselines`; its `maturity` is the Readiness input's
+  `baselineMaturity`. Push `sleep.midpoint_h`, `sleep.deep_min`,
+  `sleep.rem_min` and `cardiac.overnight_hr_bpm` each night so the Sleep Score
+  leaves cold start.
 - **The engine closes days itself.** There is no `rollDay`. Attach Strain
   before local midnight with `attachStrainScoreJson()`, or after it with
   `attachClosedDayStrain()`.
@@ -416,7 +415,7 @@ personalization, Syni, and independent instances—is documented in
 | `currentState` | `String?` | Latest HSI JSON frame |
 | `currentHSIState` | `HSIState?` | Latest typed HSI state |
 | `isHsiDeliveryBuffered` | `Bool` | HSI is polled from the runtime's ring (runtime ≥ 0.31.1) instead of pushed through a callback |
-| `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `writtenAgainst` (0.42.1) and `minimum` (0.42.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
+| `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `requiredAbi` (4.2, within `RuntimeCompat.abiRange` 4.x) and its version against `writtenAgainst` (0.45.0) and `minimum` (0.45.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
 | `lastNativeError` | `SynheartNativeError?` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or `nil` when it succeeded |
 | `droppedHsiFrames` | `UInt64` | Frames the ring evicted since buffered delivery started |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |
@@ -578,8 +577,7 @@ import SynheartCore
 // 1. Construct (optionally with a Delegate).
 let ingest = EdgeIngest()
 
-// 2. Observe the broadcast `events` publisher (parity with Kotlin's
-//    `SharedFlow` and Dart's `Stream<EdgeEvent>`).
+// 2. Observe the broadcast `events` publisher.
 let cancellable = ingest.events.sink { event in
     switch event {
     case .hr(let s):        // …
@@ -612,9 +610,8 @@ parsed body three ways, all firing in lock-step, so you wire only what you need:
   transport adapter or tests when you want to branch on the result of a single
   body without holding state.
 
-For parity awareness: the Kotlin SDK additionally exposes `Listener` hooks
-`onUnsupportedHsiVersion(...)` / `onHashMismatch(...)`; Swift folds those signals
-into the `Outcome` return value (`.artifactHashMismatch`) and logging.
+Unsupported HSI versions and hash mismatches surface through the `Outcome`
+return value (`.artifactHashMismatch`) and logging rather than separate hooks.
 
 **Delivery hardening.** Because the watch outbox is delete-on-ACK, ingest is
 hardened against two failure modes:
@@ -636,16 +633,6 @@ hardened against two failure modes:
 `WCSession` adapter that routes incoming bodies into an `EdgeIngest` core by the
 body `type` and sends the produced `artifact_ack` back. Nothing in the SDK wires
 it in by default.
-
-## Related Repositories
-
-This iOS implementation is part of a multi-platform SDK:
-
-- **Flutter:** `synheart-core-flutter` (Dart/Flutter implementation)
-- **iOS:** `synheart-core-swift` (this repository)
-- **Android:** `synheart-core-kotlin` (Kotlin implementation)
-
-All three implementations share the same modular architecture. See the Flutter repository for comprehensive documentation.
 
 ## Local Development with `synheart local`
 
