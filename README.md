@@ -29,14 +29,6 @@ Synheart runtime native binary
     |-- Storage, Crypto, Sync, Auth, Consent, Capabilities
 ```
 
-## Repositories
-
-| Repository | Purpose |
-|------------|---------|
-| **[synheart-core-flutter](https://github.com/synheart-ai/synheart-core-flutter)** | Flutter/Dart platform SDK |
-| **[synheart-core-kotlin](https://github.com/synheart-ai/synheart-core-kotlin)** | Android/Kotlin platform SDK |
-| **[synheart-core-swift](https://github.com/synheart-ai/synheart-core-swift)** | iOS/Swift platform SDK (this repository) |
-
 ## Overview
 
 The Synheart Core SDK consolidates all Synheart signal channels into one SDK:
@@ -86,7 +78,7 @@ These ship in the same target and are wired through the runtime, but only become
 | **Syni** | Consent-gated facade around the [`SyniSwift`](https://github.com/synheart-ai/syni-swift) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `consent.syni` check. | `SyniModule(consent:)` |
 | **HealthKit backfill** | Cold-start SRM seeding from HealthKit sleep + overnight HR/HRV history. Pushes `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` / `cardiac.overnight_rmssd_ms` / `cardiac.resting_hr_bpm` under each local wake date, provider `apple_health`. | `HealthKitRuntimeSink(reader:, bridge:)` |
 | **Scoring models** | Typed input + result types for the runtime's Sleep / Recovery / Readiness scorers, plus a self-report `SleepQuestionnaireAnswers`. | `Models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.swift` |
-| **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Round-trips byte-equivalent JSON with Flutter + Kotlin siblings. | `Modules/Cloud/UploadModels.swift` |
+| **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Byte-equivalent JSON with the sibling platform SDKs. | `Modules/Cloud/UploadModels.swift` |
 
 Examples:
 
@@ -577,8 +569,7 @@ import SynheartCore
 // 1. Construct (optionally with a Delegate).
 let ingest = EdgeIngest()
 
-// 2. Observe the broadcast `events` publisher (parity with Kotlin's
-//    `SharedFlow` and Dart's `Stream<EdgeEvent>`).
+// 2. Observe the broadcast `events` publisher.
 let cancellable = ingest.events.sink { event in
     switch event {
     case .hr(let s):        // …
@@ -611,9 +602,8 @@ parsed body three ways, all firing in lock-step, so you wire only what you need:
   transport adapter or tests when you want to branch on the result of a single
   body without holding state.
 
-For parity awareness: the Kotlin SDK additionally exposes `Listener` hooks
-`onUnsupportedHsiVersion(...)` / `onHashMismatch(...)`; Swift folds those signals
-into the `Outcome` return value (`.artifactHashMismatch`) and logging.
+Unsupported HSI versions and hash mismatches surface through the `Outcome`
+return value (`.artifactHashMismatch`) and logging rather than separate hooks.
 
 **Delivery hardening.** Because the watch outbox is delete-on-ACK, ingest is
 hardened against two failure modes:
@@ -635,16 +625,6 @@ hardened against two failure modes:
 `WCSession` adapter that routes incoming bodies into an `EdgeIngest` core by the
 body `type` and sends the produced `artifact_ack` back. Nothing in the SDK wires
 it in by default.
-
-## Related Repositories
-
-This iOS implementation is part of a multi-platform SDK:
-
-- **Flutter:** `synheart-core-flutter` (Dart/Flutter implementation)
-- **iOS:** `synheart-core-swift` (this repository)
-- **Android:** `synheart-core-kotlin` (Kotlin implementation)
-
-All three implementations share the same modular architecture. See the Flutter repository for comprehensive documentation.
 
 ## Local Development with `synheart local`
 

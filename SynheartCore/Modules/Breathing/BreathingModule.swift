@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // High-level Swift wrapper around the native breathing compliance
-// detector. Mirrors the Flutter / Kotlin references.
+// detector.
 //
 // All RR samples pushed via `CoreRuntimeBridge.pushRr` (i.e. Tier-1
 // BLE chest-strap data) automatically feed the breathing detector.

@@ -18,8 +18,6 @@ public enum WindowType {
 // Legacy 4-case SleepStage removed — superseded by the richer
 // SleepStage enum in Models/SleepScore.swift (adds `.unknown`,
 // adopts String raw values matching the runtime wire format).
-// Matches Flutter's `hide SleepStage` on the feature-provider
-// export.
 
 // MARK: - Wear Module
 

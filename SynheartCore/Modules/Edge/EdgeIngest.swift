@@ -16,8 +16,8 @@ import Combine
 /// (``EdgeIngestSessionAdapter``) feeds raw `[String: Any]` bodies in and
 /// sends the produced ACK back; all parsing/validation/dedupe lives here.
 ///
-/// The Kotlin phone SDK uses the same `EdgeIngest` concept with the same
-/// callback semantics for cross-platform parity.
+/// The sibling platform SDKs use the same `EdgeIngest` concept with the same
+/// callback semantics.
 ///
 /// ## Contract mapping
 /// - `hr_sample`   → ``Delegate/edgeIngestDidReceiveHrSample(_:)``     (contract §3.1)
@@ -112,12 +112,11 @@ public final class EdgeIngest {
 
     // MARK: - Reactive event family
 
-    /// Sealed family of typed edge events emitted on ``events``. Mirrors the
-    /// Dart role model's `EdgeEvent` (`HrEvent | BioEvent | ArtifactEvent |
-    /// SessionEventWrap`) and the Kotlin `EdgeEvent` sealed class, so all three
-    /// SDKs expose the same reactive surface. Each case fires in lock-step with
-    /// the corresponding ``Delegate`` callback (additive — the delegate is
-    /// unchanged).
+    /// Sealed family of typed edge events emitted on ``events``: the same
+    /// reactive surface (`HrEvent | BioEvent | ArtifactEvent |
+    /// SessionEventWrap`) the sibling platform SDKs expose. Each case fires in
+    /// lock-step with the corresponding ``Delegate`` callback (additive — the
+    /// delegate is unchanged).
     public enum EdgeEvent {
         /// §3.1 — an HR sample was parsed.
         case hr(HrSample)
@@ -182,10 +181,10 @@ public final class EdgeIngest {
     private let eventsSubject = PassthroughSubject<EdgeEvent, Never>()
 
     /// Broadcast publisher of typed edge events (Combine ergonomics, parity
-    /// with the Dart role model's broadcast `Stream<EdgeEvent>` and the Kotlin
-    /// `SharedFlow<EdgeEvent>`). Emits in lock-step with the ``Delegate``
-    /// callbacks; supports multiple subscribers. Additive — does not alter any
-    /// existing delegate/`Outcome` behaviour.
+    /// with the sibling platform SDKs' broadcast event streams). Emits in
+    /// lock-step with the ``Delegate`` callbacks; supports multiple
+    /// subscribers. Additive — does not alter any existing delegate/`Outcome`
+    /// behaviour.
     ///
     /// NOT AUTHORITATIVE: the synchronous ``Delegate`` is the source of truth for
     /// "received"; `acked + seen` state is updated independently of whether any
@@ -254,8 +253,8 @@ public final class EdgeIngest {
             return drop("missing `type` field")
         }
         // Contract §1: every body MUST carry `type`, so an empty `type` is
-        // malformed → drop (parity with Kotlin/Dart, which both drop it; Swift
-        // previously mis-routed an empty type as a session event).
+        // malformed → drop (as the sibling platform SDKs do; Swift previously
+        // mis-routed an empty type as a session event).
         guard !typeRaw.isEmpty else {
             return drop("empty `type` field")
         }
@@ -418,8 +417,8 @@ public final class EdgeIngest {
         }
 
         // Version check (contract §0): prefer the envelope `hsi_version`, fall
-        // back to the payload_json's own `hsi_version` (parity with the Dart
-        // role model and Kotlin's `extractHsiVersionFromPayload`). Flag/log
+        // back to the payload_json's own `hsi_version` (as the sibling
+        // platform SDKs do). Flag/log
         // drift (out-of-set OR absent) but still surface.
         let envelopeVersion = (body["hsi_version"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let hsiVersion = envelopeVersion ?? EdgeIngest.extractHsiVersionFromPayload(payloadJson)
@@ -498,8 +497,8 @@ public final class EdgeIngest {
         }
     }
 
-    /// Parity with the Dart/Kotlin `extractHsiVersionFromPayload`: read
-    /// `hsi_version` from the opaque payload when the envelope omits it. Returns
+    /// Read `hsi_version` from the opaque payload when the envelope omits it,
+    /// as the sibling platform SDKs do. Returns
     /// nil on any parse failure or absence (the payload may not be JSON).
     private static func extractHsiVersionFromPayload(_ payloadJson: String) -> String? {
         guard let data = payloadJson.data(using: .utf8),
