@@ -153,9 +153,9 @@ dependencies: [
 ]
 ```
 
-The SDK requires runtime ABI 4.x, which is runtime 0.42.0 or newer
-(`RuntimeCompat.requiredAbi`); older runtimes are refused at initialization.
-Install it with `synheart install runtime --version 0.42.1`.
+The SDK requires runtime ABI 4.2 or a newer 4.x, which is runtime 0.45.0 or
+newer (`RuntimeCompat.requiredAbi`); older runtimes are refused at
+initialization. Install it with `synheart install runtime --version 0.45.0`.
 
 The SDK validates the linked native runtime ABI during initialization. If a
 required symbol is missing, initialization throws
@@ -180,6 +180,13 @@ do not require ONNX Runtime.
   `Synheart.srmPushWearableDaily(provider:metric:date:value:)`, using a
   `DailyMetric` name (the unit is in the name) and the local date the person
   woke on. Call `srmRefreshWearableReference()` once after a batch.
+- **The daily scores read the runtime's baselines (runtime 0.45+).** After the
+  refresh, `Synheart.dailySleepBaselines()` goes on `SleepScoreInput.baselines`
+  with the night's `tonightMidpointH`, and `Synheart.dailyBaselineRefs()` on
+  `RecoveryScoreInput.baselines`; its `maturity` is the Readiness input's
+  `baselineMaturity`. Push `sleep.midpoint_h`, `sleep.deep_min`,
+  `sleep.rem_min` and `cardiac.overnight_hr_bpm` each night so the Sleep Score
+  leaves cold start.
 - **The engine closes days itself.** There is no `rollDay`. Attach Strain
   before local midnight with `attachStrainScoreJson()`, or after it with
   `attachClosedDayStrain()`.
@@ -415,7 +422,7 @@ personalization, Syni, and independent instances—is documented in
 | `currentState` | `String?` | Latest HSI JSON frame |
 | `currentHSIState` | `HSIState?` | Latest typed HSI state |
 | `isHsiDeliveryBuffered` | `Bool` | HSI is polled from the runtime's ring (runtime ≥ 0.31.1) instead of pushed through a callback |
-| `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `RuntimeCompat.abiRange` (4.x) and its version against `writtenAgainst` (0.42.1) and `minimum` (0.42.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
+| `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `requiredAbi` (4.2, within `RuntimeCompat.abiRange` 4.x) and its version against `writtenAgainst` (0.45.0) and `minimum` (0.45.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
 | `lastNativeError` | `SynheartNativeError?` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or `nil` when it succeeded |
 | `droppedHsiFrames` | `UInt64` | Frames the ring evicted since buffered delivery started |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |

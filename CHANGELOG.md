@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Requires runtime 0.45.0 or newer (C ABI 4.2); older runtimes are refused at
+initialization. Install it with `synheart install runtime --version 0.45.0`.
+The daily score inputs changed shape with ABI 4.2 and neither shape parses on
+the other runtime, so there is no fallback.
+
+### Migrating
+
+- **`ReadinessScoreInput` is rebuilt for the engine's readiness model
+  (`readiness_score/3.0.0`).** It takes today's `recoveryScore` and
+  `sleepScore`, an optional `OvernightAlignment` (overnight HR and RMSSD
+  against their baselines), `recoveryColdStart` / `sleepColdStart`, and
+  `baselineMaturity` (`0...1`): the lower of the two confidences in
+  `Synheart.dailyBaselineRefs()` (`BaselineRefs.maturity`), or `0` when it
+  returns `nil`. `AcuteWorkloadContext`, `FatigueContext`, `HistoryContext`,
+  `recoveryConfidence` and `fromRecovery(_:)` are removed: the runtime no
+  longer reads them.
+- **`ReadinessScoreResult`** gains `sleepAnchor` and `toJson()`; its
+  `ReadinessComponents` are `recovery`, `sleep`, `baselineAlignment`,
+  `hrAlignment` and `hrvAlignment`, and `ReadinessFactor` follows the engine's
+  reasons. `ReadinessBand` keeps its case names but reads the engine's wire
+  names (`low`, `reduced`, `normal`, `high`), so the band the runtime returns
+  is no longer read as `.rest`; `fromWire(_:score:)` falls back to the band
+  the score falls in.
+- **`SleepScoreInput` gains `tonightMidpointH` and `baselines`.** Pass the
+  night's local sleep midpoint (`nil` when the source gives no start and end
+  time) and `Synheart.dailySleepBaselines()`; without the baselines the score
+  stays in its cold-start mode. Only the two newest `priorsNewestFirst` nights
+  are read now, for sleep debt.
+- **`RecoveryScoreInput.baselines`**: take them from
+  `Synheart.dailyBaselineRefs()`.
+
+### Added
+
+- `Synheart.dailyBaselineRefs()` and `Synheart.dailySleepBaselines()`: the
+  daily scores' personal baselines, read after `srmRefreshWearableReference`.
+  Both are optional lookups. `SleepBaselines`, `DailyRef`,
+  `BaselineRefs.fromJson(_:)` and `BaselineRefs.maturity`.
+- `DailyMetric.overnightHrBpm` (`cardiac.overnight_hr_bpm`, the Sleep Score's
+  heart-rate baseline), `DailyMetric.activeMin` (`motion.active_min`, pushed
+  once the day is over) and `DailyMetric.restRmssdMs`
+  (`cardiac.rest_rmssd_ms`, written by the engine; do not push it).
+
+### Changed
+
+- `HealthKitRuntimeSink` pushes each night's asleep mean heart rate as both
+  `cardiac.overnight_hr_bpm` and `cardiac.resting_hr_bpm`: it is the night's
+  only heart-rate figure, and Recovery and Readiness need a resting-HR
+  baseline. It pushes no `sleep.midpoint_h`, since the reader's summaries
+  carry no sleep start or end.
+
 ## [0.5.0] - 2026-10-27
 
 Requires runtime 0.42.0 or newer (C ABI 4.0); older runtimes are refused at

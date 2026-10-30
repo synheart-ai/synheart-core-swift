@@ -247,6 +247,9 @@ enum RuntimeSymbolManifest {
         "synheart_core_set_input_capture",
         "synheart_core_set_call_active",
         "synheart_core_push_inputs_json",
+        // The daily scores' baselines (C ABI 4.2).
+        "synheart_core_daily_baseline_refs_json",
+        "synheart_core_daily_sleep_baselines_json",
     ]
 
     static var all: Set<String> {

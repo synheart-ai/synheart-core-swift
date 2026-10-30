@@ -2,9 +2,9 @@
 //
 // Multi-source priority resolver — Swift bindings.
 //
-// Mirrors `synheart-core-flutter/lib/src/priority/synheart_priority.dart`
-// in API shape. When the Synheart native runtime (5.4.0+) is loaded, all
-// calls route through the FFI symbols. Older runtimes (or unit tests
+// Same API shape as the sibling platform SDKs' priority resolver. When
+// the Synheart native runtime (5.4.0+) is loaded, all calls route through
+// the FFI symbols. Older runtimes (or unit tests
 // running headless) fall back to a pure-Swift in-memory store with
 // the same semantics so consumer apps can still develop without a
 // freshly-built native lib.
@@ -68,7 +68,7 @@ public let kPriorityUnranked: Int = Int(Int32.max)
 public final class SynheartPriority {
 
     // Symbol resolution lives in CoreRuntimeBridge so the FFI surface
-    // stays in one place — mirrors Kotlin's CoreRuntimeNative pattern.
+    // stays in one place.
 
     // MARK: - Mode
 
