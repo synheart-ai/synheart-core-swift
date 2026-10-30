@@ -103,7 +103,10 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
         collector?.onEvent = { [weak self] event in
             self?.eventStream.record(event)
         }
-        try collector?.start(sessionId: sessionIdProvider())
+        // The collector attaches to the app's windows, which UIKit allows only
+        // on the main thread; a session starts from any thread.
+        let sessionId = sessionIdProvider()
+        try await MainActor.run { try self.collector?.start(sessionId: sessionId) }
         if collector != nil { onInputCaptureChanged?(true) }
 
         cleanupTimer = Timer.publish(every: 60.0, on: .main, in: .common)
@@ -124,7 +127,7 @@ public class BehaviorModule: BaseSynheartModule, RawBehaviorDataProvider {
         cleanupTimer = nil
 
         collector?.onEvent = nil
-        collector?.stop()
+        await MainActor.run { self.collector?.stop() }
     }
 
     public override func onDispose() async throws {
