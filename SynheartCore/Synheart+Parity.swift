@@ -43,10 +43,9 @@ public extension Synheart {
     }
 
     static var syncStatusSnapshot: [String: Any]? {
-        guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        guard let raw = bridge.syncStatus(),
-              let data = raw.data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        // The status payload, or the flattened failure, like the other raw
+        // sync calls.
+        shared.coreRuntime?.syncStatusMap()
     }
 
     static var syncReadinessSnapshot: [String: Any]? {

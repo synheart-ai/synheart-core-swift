@@ -753,14 +753,15 @@ public class Synheart {
             throw SynheartError.notInitialized
         }
         guard let bridge = cr.bridge else { throw SynheartError.notInitialized }
-        let status = await bridge.performAsync { _ in
+        let map = await bridge.performAsync { _ in
             cr.setSyncEnabled(enabled)
-            return cr.syncStatus()
+            return cr.syncStatusMap()
         }
-        guard let status else {
+        guard let map else {
             throw SynheartError.runtimeOperationFailed("Unable to read sync status")
         }
-        guard status.enabled == enabled else {
+        if let failure = SynheartCoreShim.syncFailure(map) { throw failure }
+        guard SyncStatus(runtimeMap: map).enabled == enabled else {
             throw SynheartError.runtimeOperationFailed(
                 enabled ? "Native sync prerequisites are not satisfied" : "Unable to disable native sync"
             )
@@ -773,22 +774,29 @@ public class Synheart {
             throw SynheartError.notInitialized
         }
         guard let bridge = cr.bridge else { throw SynheartError.notInitialized }
-        let result = await bridge.performAsync { _ in cr.syncNow() }
-        guard let result else {
+        let map = await bridge.performAsync { _ in cr.syncNowMap() }
+        guard let map else {
             throw SynheartError.runtimeOperationFailed("Native sync cycle failed")
         }
-        return result
+        // A failed cycle throws the runtime's reason rather than reporting a
+        // successful sync of zero records.
+        if let failure = SynheartCoreShim.syncFailure(map) { throw failure }
+        return SyncResult(runtimeMap: map)
     }
 
     /// Get current sync status.
+    ///
+    /// - Throws: ``NativeOperationFailure`` when the runtime reports a failure,
+    ///   e.g. `STORAGE_UNAVAILABLE` in a build without local storage.
     public static func getSyncStatus() throws -> SyncStatus {
         guard let cr = shared.coreRuntime, cr.isAvailable else {
             throw SynheartError.notInitialized
         }
-        guard let status = cr.syncStatus() else {
+        guard let map = cr.syncStatusMap() else {
             throw SynheartError.runtimeOperationFailed("Unable to read sync status")
         }
-        return status
+        if let failure = SynheartCoreShim.syncFailure(map) { throw failure }
+        return SyncStatus(runtimeMap: map)
     }
 
     // MARK: - Cloud Ingestion & Device Auth

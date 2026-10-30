@@ -106,4 +106,44 @@ final class RuntimeSyncPayloadTests: XCTestCase {
         XCTAssertTrue(SyncPairingStatus(state: .expired).isExpired(at: .distantPast))
         XCTAssertFalse(SyncPairingStatus(state: .unknown).isExpired(at: .distantFuture))
     }
+
+    // MARK: - The {ok, data | error} envelope
+
+    func testSyncStatusIsReadFromTheEnvelopesData() {
+        let envelope: [String: Any] = [
+            "ok": true,
+            "data": ["enabled": true, "sync_space_id": "sp_1", "pending_count": 2],
+        ]
+        let map = CoreRuntimeBridge.unwrapSyncEnvelope(envelope)!
+        XCTAssertNil(SynheartCoreShim.syncFailure(map))
+        let status = SyncStatus(runtimeMap: map)
+        XCTAssertTrue(status.enabled)
+        XCTAssertEqual(status.syncSpaceId, "sp_1")
+        XCTAssertEqual(status.pendingCount, 2)
+        // Read as the payload, the envelope has none of the fields.
+        XCTAssertFalse(SyncStatus(runtimeMap: envelope).enabled)
+    }
+
+    func testSyncResultIsReadFromTheEnvelopesData() {
+        let map = CoreRuntimeBridge.unwrapSyncEnvelope(
+            ["ok": true, "data": ["pushed": 4, "pulled": 1]]
+        )!
+        let result = SyncResult(runtimeMap: map)
+        XCTAssertEqual(result.pushed, 4)
+        XCTAssertEqual(result.pulled, 1)
+    }
+
+    func testAFailedSyncCallCarriesTheRuntimesReason() {
+        let map = CoreRuntimeBridge.unwrapSyncEnvelope([
+            "ok": false,
+            "error": [
+                "code": "SYNC_NOT_CONFIGURED",
+                "message": "no sync space",
+                "retryable": false,
+            ],
+        ])!
+        let failure = SynheartCoreShim.syncFailure(map)
+        XCTAssertEqual(failure?.code, "SYNC_NOT_CONFIGURED")
+        XCTAssertEqual(failure?.retryable, false)
+    }
 }

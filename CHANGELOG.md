@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `nil` when the runtime did not send it, never zero. An empty space id reads
   as `nil`.
 
+### Fixed
+
+- **`syncNow()`, `getSyncStatus()`, `setSyncEnabled(_:)` and
+  `syncStatusSnapshot` read the runtime's sync envelope.** These calls answer
+  `{"ok": true, "data": {...}}` or `{"ok": false, "error": {...}}`, and the
+  four read the envelope as the payload: `syncNow()` reported zero records
+  pushed and pulled after every cycle, `getSyncStatus().enabled` was always
+  `false`, `setSyncEnabled(true)` always threw, and `syncStatusSnapshot`
+  returned the envelope. They now read `data`, and `syncNow()` and
+  `getSyncStatus()` throw `NativeOperationFailure` with the runtime's code and
+  reason when it reports a failure, instead of reporting zeros.
+
 ### Deprecated
 
 - **`SyncStatus.deviceCount`** is always `0`. The runtime no longer reports a
