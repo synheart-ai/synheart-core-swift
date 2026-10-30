@@ -396,6 +396,7 @@ personalization, Syni, and independent instances—is documented in
 | `activate(_:)` | Enable a feature (wear, behavior, phoneContext, etc.) |
 | `deactivate(_:)` | Disable a feature |
 | `syncNow()` | Execute a sync cycle (push + pull) |
+| `syncPairingStatus(token:)` | Whether a pairing code this device minted was redeemed; poll every 2–3 s while it is shown |
 | `enrolResearchStudy(accessCode:studyCode:)` | Asynchronously enrol using the device-signed credential |
 | `validateResearchStudyCodes(accessCode:studyCode:)` | Asynchronously validate study codes without redeeming them |
 | `withdrawResearchStudy()` | Asynchronously withdraw the current study enrolment |

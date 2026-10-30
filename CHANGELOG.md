@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Synheart.syncPairingStatus(token:)`: know when a pairing code was
+  used.** The device that minted a code with `syncGeneratePairing()` polls
+  it every 2–3 seconds while the code is on screen and gets a
+  `SyncPairingStatus`: `state` (`waiting`, `joined`, `expired`, or `unknown`
+  for a state this SDK does not know — keep waiting), `syncSpaceId`,
+  `joinedDevice`, `joinedAt` and `expiresAt`. Stop on a terminal state or
+  past `expiresAt`. `expired` is a state, not an error; a failure such as
+  `PAIRING_INVALID` throws `NativeOperationFailure`. Returns `nil` when the
+  runtime predates the call. Inferring a successful pairing from the device
+  list is no longer needed.
+- **`SyncStatus` reports what the runtime sends:** `pendingCount`,
+  `lastSuccessMs`, `srkReady`, `accountOwned`, and `hasActiveSpace`. Each is
+  `nil` when the runtime did not send it, never zero. An empty space id reads
+  as `nil`.
+
+### Deprecated
+
+- **`SyncStatus.deviceCount`** is always `0`. The runtime no longer reports a
+  device count (it was always `0`); count the devices with
+  `syncListDevices()`.
+
 ## [0.5.0] - 2026-10-27
 
 Requires runtime 0.42.0 or newer (C ABI 4.0); older runtimes are refused at

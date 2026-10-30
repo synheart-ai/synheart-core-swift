@@ -57,6 +57,7 @@ private enum ParityRuntimeSymbols {
 
     static let syncCreateSpace: HandleStringJson? = CoreRuntimeBridge.lookupSymbol("synheart_core_sync_create_space")
     static let syncGeneratePairing: HandleJson? = CoreRuntimeBridge.lookupSymbol("synheart_core_sync_generate_pairing")
+    static let syncPairingStatus: HandleStringJson? = CoreRuntimeBridge.lookupSymbol("synheart_core_sync_pairing_status")
     static let syncJoinSpace: SyncJoin? = CoreRuntimeBridge.lookupSymbol("synheart_core_sync_join_space")
     static let syncReadiness: HandleJson? = CoreRuntimeBridge.lookupSymbol("synheart_core_sync_readiness")
     static let syncRecoverSpace: SyncRecover? = CoreRuntimeBridge.lookupSymbol("synheart_core_sync_recover_space")
@@ -168,6 +169,18 @@ extension CoreRuntimeBridge {
 
     func syncGeneratePairing() -> [String: Any]? {
         syncJson(ParityRuntimeSymbols.syncGeneratePairing?(runtimeHandle))
+    }
+
+    /// Whether the linked runtime exports `synheart_core_sync_pairing_status`.
+    var syncPairingStatusAvailable: Bool { ParityRuntimeSymbols.syncPairingStatus != nil }
+
+    /// The server's verdict on a pairing token this device minted:
+    /// `{status, sync_space_id, joined_device, joined_at, expires_at}`, or the
+    /// flattened failure envelope. Network call. `nil` when the runtime
+    /// predates it.
+    func syncPairingStatus(token: String) -> [String: Any]? {
+        guard let fn = ParityRuntimeSymbols.syncPairingStatus else { return nil }
+        return token.withCString { syncJson(fn(runtimeHandle, $0)) }
     }
 
     func syncJoinSpace(pairingToken: String, deviceName: String = "") -> [String: Any]? {

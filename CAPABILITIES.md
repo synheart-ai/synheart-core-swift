@@ -24,6 +24,11 @@ before enabling a capability that may not exist in an older bundled runtime.
 
 - Full sync-space lifecycle: create, pair, join, inspect readiness, recover,
   list or revoke devices, leave, delete, and clear local state.
+- `syncPairingStatus(token:)` tells the device that minted a pairing code
+  whether it was redeemed (`waiting`, `joined`, `expired`, `unknown`); poll
+  it every 2–3 seconds while the code is on screen. `getSyncStatus()` reports
+  the pending count, last success, space-key readiness and account ownership;
+  count the devices with `syncListDevices()`.
 - `BaselineEnvelope` provides typed reference, HSI-axis, session-SRM, and
   longitudinal-wear snapshots while preserving unknown payload fields.
 - Sleep, recovery, and readiness scores can be computed through the runtime;
