@@ -289,7 +289,7 @@ struct SetupView: View {
                     model.activeOperation == "Re-attest device"
                         ? "Re-attesting…"
                         : "Re-attest Device",
-                    systemImage: "arrow.clockwise.shield",
+                    systemImage: "checkmark.shield",
                     isWorking: model.activeOperation == "Re-attest device"
                 )
             }
