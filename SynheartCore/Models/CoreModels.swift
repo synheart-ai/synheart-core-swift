@@ -37,28 +37,180 @@ public struct SyncResult {
     }
 }
 
-/// Whether background sync is currently enabled.
+/// Local Device Sync state, read from the runtime with no network call.
+///
+/// Runtime 0.39.0 and later report every field; on an older runtime the
+/// fields it never sent stay `nil` (absent, not zero). The device roster is
+/// not part of this: it lives on the server, so read it with
+/// `Synheart.syncListDevices()`.
 public struct SyncStatus {
+    /// The sync engine is built.
     public let enabled: Bool
+
+    /// The sync space this device is in, or `nil` when it is in none.
     public let syncSpaceId: String?
-    public let deviceCount: Int
+
+    /// Local artifacts waiting for the next push.
+    public let pendingCount: Int?
+
+    /// Unix ms of the last successful sync cycle since the engine was built.
+    /// `nil` before the first success; it does not survive a restart.
+    public let lastSuccessMs: Int64?
+
+    /// The space key is unlocked, so pairing and pull can run.
+    public let srkReady: Bool?
+
+    /// The space is bound to a cloud account.
+    public let accountOwned: Bool?
+
+    /// Always `0`: the runtime no longer reports a device count (it never
+    /// counted anything).
+    @available(*, deprecated, message: "Always 0. Count the devices from Synheart.syncListDevices().")
+    public var deviceCount: Int { 0 }
+
+    /// This device is in a sync space.
+    public var hasActiveSpace: Bool { syncSpaceId != nil }
 
     public init(
         enabled: Bool,
         syncSpaceId: String? = nil,
-        deviceCount: Int = 0
+        pendingCount: Int? = nil,
+        lastSuccessMs: Int64? = nil,
+        srkReady: Bool? = nil,
+        accountOwned: Bool? = nil
     ) {
         self.enabled = enabled
         self.syncSpaceId = syncSpaceId
-        self.deviceCount = deviceCount
+        self.pendingCount = pendingCount
+        self.lastSuccessMs = lastSuccessMs
+        self.srkReady = srkReady
+        self.accountOwned = accountOwned
     }
 
+    @available(*, deprecated, message: "deviceCount is always 0; use init(enabled:syncSpaceId:pendingCount:lastSuccessMs:srkReady:accountOwned:).")
+    public init(enabled: Bool, syncSpaceId: String? = nil, deviceCount: Int) {
+        self.init(enabled: enabled, syncSpaceId: syncSpaceId)
+    }
+
+    /// Parses the runtime's `sync_status` payload. Missing or mistyped fields
+    /// become `nil`; a missing `enabled` reads as `false`.
     init(runtimeMap map: [String: Any]) {
+        let spaceId = map["sync_space_id"] as? String
         self.init(
             enabled: map["enabled"] as? Bool ?? false,
-            syncSpaceId: map["sync_space_id"] as? String,
-            deviceCount: (map["device_count"] as? NSNumber)?.intValue ?? 0
+            syncSpaceId: spaceId?.isEmpty == false ? spaceId : nil,
+            pendingCount: (map["pending_count"] as? NSNumber)?.intValue,
+            lastSuccessMs: (map["last_success_ms"] as? NSNumber)?.int64Value,
+            srkReady: map["srk_ready"] as? Bool,
+            accountOwned: map["account_owned"] as? Bool
         )
+    }
+}
+
+/// The server's verdict on a pairing token this device minted.
+public enum SyncPairingState: String, Sendable {
+    /// The code is valid and nobody has used it yet. Keep polling.
+    case waiting
+    /// Another device joined with the code. Stop polling.
+    case joined
+    /// The code expired unused. Stop polling and offer a new code.
+    case expired
+    /// The server sent a state this SDK does not know. Treat it as still
+    /// pending: keep the code on screen, keep polling until `expiresAt`, and
+    /// claim neither success nor failure.
+    case unknown
+
+    /// The state for the runtime's `status`; anything unrecognised is
+    /// ``unknown``.
+    public static func parse(_ raw: Any?) -> SyncPairingState {
+        guard let raw = raw as? String, let state = SyncPairingState(rawValue: raw) else {
+            return .unknown
+        }
+        return state
+    }
+
+    /// Polling can stop: the pairing reached a final state.
+    public var isTerminal: Bool { self == .joined || self == .expired }
+}
+
+/// The device that joined with a pairing code.
+public struct SyncPairedDevice: Equatable, Sendable {
+    public let deviceId: String
+    public let deviceName: String?
+
+    public init(deviceId: String, deviceName: String? = nil) {
+        self.deviceId = deviceId
+        self.deviceName = deviceName
+    }
+}
+
+/// Pairing status for a token from `Synheart.syncGeneratePairing()`.
+///
+/// Read it with `Synheart.syncPairingStatus(token:)` while the pairing code is
+/// on screen, every 2–3 seconds, and stop when ``state`` is terminal
+/// (``SyncPairingState/joined`` or ``SyncPairingState/expired``) or
+/// ``expiresAt`` has passed.
+public struct SyncPairingStatus: Equatable, Sendable {
+    public let state: SyncPairingState
+
+    /// The space the code invites into.
+    public let syncSpaceId: String?
+
+    /// The device that joined, once ``state`` is ``SyncPairingState/joined``.
+    public let joinedDevice: SyncPairedDevice?
+
+    /// When the other device joined.
+    public let joinedAt: Date?
+
+    /// When the code stops working. Bound the polling loop on it.
+    public let expiresAt: Date?
+
+    public init(
+        state: SyncPairingState,
+        syncSpaceId: String? = nil,
+        joinedDevice: SyncPairedDevice? = nil,
+        joinedAt: Date? = nil,
+        expiresAt: Date? = nil
+    ) {
+        self.state = state
+        self.syncSpaceId = syncSpaceId
+        self.joinedDevice = joinedDevice
+        self.joinedAt = joinedAt
+        self.expiresAt = expiresAt
+    }
+
+    /// The code is past its expiry, whatever the server last said.
+    public func isExpired(at now: Date = Date()) -> Bool {
+        if state == .expired { return true }
+        guard let expiresAt else { return false }
+        return now >= expiresAt
+    }
+
+    /// Parses the runtime's `sync_pairing_status` payload.
+    init(runtimeMap map: [String: Any]) {
+        let spaceId = map["sync_space_id"] as? String
+        var device: SyncPairedDevice?
+        if let d = map["joined_device"] as? [String: Any], let id = d["device_id"] as? String {
+            device = SyncPairedDevice(deviceId: id, deviceName: d["device_name"] as? String)
+        }
+        self.init(
+            state: SyncPairingState.parse(map["status"]),
+            syncSpaceId: spaceId?.isEmpty == false ? spaceId : nil,
+            joinedDevice: device,
+            joinedAt: Self.parseDate(map["joined_at"]),
+            expiresAt: Self.parseDate(map["expires_at"])
+        )
+    }
+
+    /// RFC 3339, with or without fractional seconds.
+    static func parseDate(_ raw: Any?) -> Date? {
+        guard let raw = raw as? String else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: raw) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: raw)
     }
 }
 

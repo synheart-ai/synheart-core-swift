@@ -313,19 +313,37 @@ public final class SynheartCoreShim {
         bridge?.setSyncEnabled(enabled: enabled)
     }
 
-    /// Run a push/pull sync cycle. Returns a `SyncResult`.
+    /// Run a push/pull sync cycle. Returns a `SyncResult`, or `nil` when the
+    /// runtime is unavailable or reports a failure.
     public func syncNow() -> SyncResult? {
-        guard let json = bridge?.syncNow(), let dict = parseJsonDict(json) else {
-            return nil
-        }
-        return SyncResult(runtimeMap: dict)
+        guard let map = syncNowMap(), Self.syncFailure(map) == nil else { return nil }
+        return SyncResult(runtimeMap: map)
     }
 
+    /// Local sync state, or `nil` when the runtime is unavailable or reports a
+    /// failure.
     public func syncStatus() -> SyncStatus? {
-        guard let json = bridge?.syncStatus(), let dict = parseJsonDict(json) else {
-            return nil
-        }
-        return SyncStatus(runtimeMap: dict)
+        guard let map = syncStatusMap(), Self.syncFailure(map) == nil else { return nil }
+        return SyncStatus(runtimeMap: map)
+    }
+
+    // The sync calls answer `{"ok": true, "data": {...}}` or `{"ok": false,
+    // "error": {...}}`; reading the envelope as the payload found none of its
+    // fields. These unwrap it: the payload, or the flattened failure.
+
+    func syncNowMap() -> [String: Any]? {
+        guard let json = bridge?.syncNow() else { return nil }
+        return CoreRuntimeBridge.unwrapSyncEnvelope(parseJsonDict(json))
+    }
+
+    func syncStatusMap() -> [String: Any]? {
+        guard let json = bridge?.syncStatus() else { return nil }
+        return CoreRuntimeBridge.unwrapSyncEnvelope(parseJsonDict(json))
+    }
+
+    /// The failure an unwrapped sync map carries, or `nil` for a payload.
+    static func syncFailure(_ map: [String: Any]) -> NativeOperationFailure? {
+        NativeOperationFailure.fromRuntimeMap(map, fallback: "Native sync call failed")
     }
 
     // MARK: - SRM / Baselines

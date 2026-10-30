@@ -1,6 +1,6 @@
 # Synheart Core SDK — Swift
 
-[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-FA7343.svg)](https://swift.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -141,7 +141,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.6.0")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.7.0")
 ]
 ```
 
@@ -395,6 +395,7 @@ personalization, Syni, and independent instances—is documented in
 | `activate(_:)` | Enable a feature (wear, behavior, phoneContext, etc.) |
 | `deactivate(_:)` | Disable a feature |
 | `syncNow()` | Execute a sync cycle (push + pull) |
+| `syncPairingStatus(token:)` | Whether a pairing code this device minted was redeemed; poll every 2–3 s while it is shown |
 | `enrolResearchStudy(accessCode:studyCode:)` | Asynchronously enrol using the device-signed credential |
 | `validateResearchStudyCodes(accessCode:studyCode:)` | Asynchronously validate study codes without redeeming them |
 | `withdrawResearchStudy()` | Asynchronously withdraw the current study enrolment |

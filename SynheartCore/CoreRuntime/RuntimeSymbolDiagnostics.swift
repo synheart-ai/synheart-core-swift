@@ -168,6 +168,7 @@ enum RuntimeSymbolManifest {
         // Additive sync-space lifecycle.
         "synheart_core_sync_create_space",
         "synheart_core_sync_generate_pairing",
+        "synheart_core_sync_pairing_status",
         "synheart_core_sync_join_space",
         "synheart_core_sync_readiness",
         "synheart_core_sync_recover_space",

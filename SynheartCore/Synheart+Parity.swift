@@ -13,6 +13,28 @@ public extension Synheart {
         return await bridge.performAsync { bridge in bridge.syncGeneratePairing() }
     }
 
+    /// Whether a pairing token minted with ``syncGeneratePairing()`` was
+    /// redeemed. Poll it every 2–3 seconds while the code is on screen, and
+    /// stop when the state is terminal (`joined` or `expired`) or the code is
+    /// past ``SyncPairingStatus/expiresAt``. `expired` is a normal state, not
+    /// an error. `unknown` means a newer service sent a state this SDK does
+    /// not know: keep waiting, and claim neither success nor failure.
+    ///
+    /// Network call, run off the caller's thread. `nil` without a runtime or
+    /// when it predates the call.
+    ///
+    /// - Throws: ``NativeOperationFailure`` when the runtime reports a failure,
+    ///   e.g. `PAIRING_INVALID` for an unknown token or one from another space.
+    static func syncPairingStatus(token: String) async throws -> SyncPairingStatus? {
+        guard let bridge = shared.coreRuntime?.bridge, bridge.syncPairingStatusAvailable else { return nil }
+        let map = await bridge.performAsync { bridge in bridge.syncPairingStatus(token: token) }
+        guard let map else { return nil }
+        if let failure = NativeOperationFailure.fromRuntimeMap(map, fallback: "Sync pairing status failed") {
+            throw failure
+        }
+        return SyncPairingStatus(runtimeMap: map)
+    }
+
     static func syncJoinSpace(pairingToken: String, deviceName: String? = nil) async -> [String: Any]? {
         guard let bridge = shared.coreRuntime?.bridge else { return nil }
         return await bridge.performAsync { bridge in
@@ -21,10 +43,9 @@ public extension Synheart {
     }
 
     static var syncStatusSnapshot: [String: Any]? {
-        guard let bridge = shared.coreRuntime?.bridge else { return nil }
-        guard let raw = bridge.syncStatus(),
-              let data = raw.data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        // The status payload, or the flattened failure, like the other raw
+        // sync calls.
+        shared.coreRuntime?.syncStatusMap()
     }
 
     static var syncReadinessSnapshot: [String: Any]? {

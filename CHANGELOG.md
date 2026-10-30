@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-30
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.6.0 does.
+
+### Added
+
+- **`Synheart.syncPairingStatus(token:)`: know when a pairing code was
+  used.** The device that minted a code with `syncGeneratePairing()` polls
+  it every 2–3 seconds while the code is on screen and gets a
+  `SyncPairingStatus`: `state` (`waiting`, `joined`, `expired`, or `unknown`
+  for a state this SDK does not know — keep waiting), `syncSpaceId`,
+  `joinedDevice`, `joinedAt` and `expiresAt`. Stop on a terminal state or
+  past `expiresAt`. `expired` is a state, not an error; a failure such as
+  `PAIRING_INVALID` throws `NativeOperationFailure`. Returns `nil` when the
+  runtime predates the call. Inferring a successful pairing from the device
+  list is no longer needed.
+- **`SyncStatus` reports what the runtime sends:** `pendingCount`,
+  `lastSuccessMs`, `srkReady`, `accountOwned`, and `hasActiveSpace`. Each is
+  `nil` when the runtime did not send it, never zero. An empty space id reads
+  as `nil`.
+
+### Fixed
+
+- **Starting a session no longer calls UIKit off the main thread.** The
+  behavior collector attaches to the app's windows, and the screen tracker
+  reads `UIApplication.shared.applicationState`; both ran on whatever thread
+  started the session, and UIKit asserted. Both now run on the main actor.
+- **`syncNow()`, `getSyncStatus()`, `setSyncEnabled(_:)` and
+  `syncStatusSnapshot` read the runtime's sync envelope.** These calls answer
+  `{"ok": true, "data": {...}}` or `{"ok": false, "error": {...}}`, and the
+  four read the envelope as the payload: `syncNow()` reported zero records
+  pushed and pulled after every cycle, `getSyncStatus().enabled` was always
+  `false`, `setSyncEnabled(true)` always threw, and `syncStatusSnapshot`
+  returned the envelope. They now read `data`, and `syncNow()` and
+  `getSyncStatus()` throw `NativeOperationFailure` with the runtime's code and
+  reason when it reports a failure, instead of reporting zeros.
+
+### Deprecated
+
+- **`SyncStatus.deviceCount`** is always `0`. The runtime no longer reports a
+  device count (it was always `0`); count the devices with
+  `syncListDevices()`.
+
 ## [0.6.0] - 2026-10-30
 
 Requires runtime 0.45.0 or newer (C ABI 4.2); older runtimes are refused at
@@ -591,7 +634,8 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.0...v0.4.1
