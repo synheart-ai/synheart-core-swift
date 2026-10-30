@@ -16,7 +16,7 @@ public class WearModule: BaseSynheartModule, RawWearDataProvider {
     private let vendorSyncSubject = CurrentValueSubject<Bool, Never>(false)
     private var cancellables = Set<AnyCancellable>()
 
-    /// Publisher of raw wear samples (mirrors Dart rawSampleStream / Kotlin sampleFlow).
+    /// Publisher of raw wear samples.
     public var rawSamplePublisher: AnyPublisher<WearSample, Never> {
         rawSampleSubject.eraseToAnyPublisher()
     }

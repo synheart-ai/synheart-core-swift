@@ -4,7 +4,7 @@ import SynheartSession
 
 /// Thin adapter around `SynheartSession` for core session management.
 ///
-/// Follows the `WatchSessionModule` pattern from the Flutter integration:
+/// Follows the `WatchSessionModule` pattern:
 /// - Wraps a `SynheartSession` composed with `BiosignalProvider` + `BehaviorProvider`
 /// - Bridges the session's `AsyncStream<SessionEvent>` into a Combine publisher
 ///   so core consumers can stay on Combine

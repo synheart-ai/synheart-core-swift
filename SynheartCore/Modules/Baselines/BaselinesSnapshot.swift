@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Typed aggregate of host-visible baseline state at a point in time.
-// Mirrors Flutter's `lib/src/modules/baselines/baselines_snapshot.dart`
-// and Kotlin's `modules/baselines/BaselinesSnapshot.kt`.
+// Same shape as the sibling platform SDKs' baselines snapshot.
 
 import Foundation
 

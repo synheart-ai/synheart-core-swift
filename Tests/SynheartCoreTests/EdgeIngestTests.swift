@@ -322,7 +322,7 @@ final class EdgeIngestTests: XCTestCase {
         XCTAssertEqual(received.count, 1, "duplicate artifact_id must not re-emit on the stream")
     }
 
-    // MARK: - hsi_version payload fallback (parity with Dart/Kotlin)
+    // MARK: - hsi_version payload fallback
 
     func testHsiVersionFallsBackToPayloadWhenEnvelopeOmitted() {
         let r = Recorder()
@@ -431,7 +431,7 @@ final class EdgeIngestTests: XCTestCase {
         XCTAssertEqual(recent, .artifactDuplicate(artifactId: "hsi_\(cap + 99)"))
     }
 
-    // MARK: - empty-`type` parity — Swift now DROPS empty type (matches Kotlin/Dart)
+    // MARK: - empty `type` is dropped
 
     func testEmptyTypeIsDropped() {
         let r = Recorder()
