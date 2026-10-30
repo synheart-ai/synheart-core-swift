@@ -3,7 +3,7 @@
 // HRV-CV resilience score — Swift bindings.
 //
 // Stateless wrapper around `synheart_core_resilience_compute_v1`.
-// Mirror of `synheart-core-flutter/lib/src/resilience/synheart_resilience.dart`.
+// Same API shape as the sibling platform SDKs' resilience score.
 // When the runtime symbol is missing (older library, headless test
 // builds without the compiled artifact), `compute()` throws
 // `ResilienceError.runtimeUnavailable`.
@@ -152,7 +152,7 @@ public final class SynheartResilience {
     // MARK: C aliases
 
     // Symbol resolution lives in CoreRuntimeBridge so the FFI surface
-    // stays in one place — mirrors Kotlin's CoreRuntimeNative pattern.
+    // stays in one place.
 
     /// `forceUnavailable: true` skips the symbol check — used by tests.
     public init(forceUnavailable: Bool = false) {

@@ -17,10 +17,12 @@
 //
 // Core stays HealthKit-agnostic. All HealthKit SDK calls, authorization
 // gating, and availability checks live in wear. Core only knows: given
-// these typed daily summaries, push five daily metrics per night
+// these typed daily summaries, push up to six daily metrics per night
 // (sleep.duration_s, sleep.deep_min, sleep.rem_min,
-// cardiac.overnight_rmssd_ms, cardiac.resting_hr_bpm) into the runtime's
-// personal baselines under the local wake date.
+// cardiac.overnight_rmssd_ms, cardiac.overnight_hr_bpm,
+// cardiac.resting_hr_bpm) into the runtime's personal baselines under the
+// local wake date. The summaries carry no sleep start or end, so no
+// sleep.midpoint_h: a midpoint is never derived from totals.
 //
 // Apple HealthKit retention is effectively user-owned — the OS preserves
 // data as long as the user keeps it, so years of history are routinely
@@ -222,8 +224,13 @@ public final class HealthKitRuntimeSink: @unchecked Sendable {
                 if let hrv = o.hrvRmssdMs, hrv > 0, push(DailyMetric.overnightRmssdMs, hrv) {
                     dayDidPush = true
                 }
-                if let hr = o.restingHrBpm, hr > 0, push(DailyMetric.restingHrBpm, hr) {
-                    dayDidPush = true
+                // The reader's heart rate is the mean while asleep, the
+                // night's only HR figure: it is the Sleep Score's HR baseline
+                // and also stands in for resting HR, so Recovery and
+                // Readiness keep a resting-HR baseline.
+                if let hr = o.restingHrBpm, hr > 0 {
+                    if push(DailyMetric.overnightHrBpm, hr) { dayDidPush = true }
+                    if push(DailyMetric.restingHrBpm, hr) { dayDidPush = true }
                 }
             }
 

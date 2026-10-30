@@ -3,8 +3,7 @@
 // Typed Swift models for the RFC-SLEEP-SCORE-PIPELINE-0001 batch
 // scorer. Mirrors the JSON shapes produced by the Synheart Runtime's
 // `SleepScore` computation. snake_case wire keys for cross-language
-// portability — Flutter (`lib/src/models/sleep_score.dart`) and
-// Kotlin emit the same JSON.
+// portability — the sibling platform SDKs emit the same JSON.
 
 import Foundation
 
@@ -167,24 +166,106 @@ public struct NightRaw: Sendable {
     }
 }
 
-/// Full input to the scorer.
-public struct SleepScoreInput: Sendable {
-    public let tonight: NightRaw
-    public let priorsNewestFirst: [NightRaw]
-    public let pipelineVersion: String
+/// One of the personal baselines' daily references: its value and the
+/// runtime's confidence in it, `0...1`.
+public struct DailyRef: Sendable, Equatable {
+    public let value: Double
+    public let confidence: Double
 
-    public init(tonight: NightRaw, priorsNewestFirst: [NightRaw] = [], pipelineVersion: String = "") {
-        self.tonight = tonight
-        self.priorsNewestFirst = priorsNewestFirst
-        self.pipelineVersion = pipelineVersion
+    public init(value: Double, confidence: Double) {
+        self.value = value
+        self.confidence = confidence
+    }
+
+    /// `nil` unless `json` is an object with numeric `value` and `confidence`.
+    public static func fromJson(_ json: Any?) -> DailyRef? {
+        guard let obj = json as? [String: Any],
+              let v = optDouble(obj, "value"),
+              let c = optDouble(obj, "confidence")
+        else { return nil }
+        return DailyRef(value: v, confidence: c)
+    }
+
+    public func toJson() -> [String: Any] {
+        return ["value": value, "confidence": confidence]
+    }
+}
+
+/// The personal baselines the Sleep Score reads, from
+/// ``Synheart/dailySleepBaselines()``. A reference is `nil` until the
+/// baselines hold enough nights for it; which ones exist sets the score's mode.
+public struct SleepBaselines: Sendable, Equatable {
+    /// Typical sleep midpoint, local hour of day `0..<24` (`sleep.midpoint_h`).
+    public let midpointH: DailyRef?
+    /// Typical whole-night mean heart rate, bpm (`cardiac.overnight_hr_bpm`).
+    public let overnightHrBpm: DailyRef?
+    /// Typical nightly deep-sleep minutes (`sleep.deep_min`).
+    public let deepMin: DailyRef?
+    /// Typical nightly REM minutes (`sleep.rem_min`).
+    public let remMin: DailyRef?
+
+    public init(midpointH: DailyRef? = nil, overnightHrBpm: DailyRef? = nil,
+                deepMin: DailyRef? = nil, remMin: DailyRef? = nil) {
+        self.midpointH = midpointH
+        self.overnightHrBpm = overnightHrBpm
+        self.deepMin = deepMin
+        self.remMin = remMin
+    }
+
+    public static func fromJson(_ json: [String: Any]) -> SleepBaselines {
+        return SleepBaselines(
+            midpointH: DailyRef.fromJson(json["midpoint_h"]),
+            overnightHrBpm: DailyRef.fromJson(json["overnight_hr_bpm"]),
+            deepMin: DailyRef.fromJson(json["deep_min"]),
+            remMin: DailyRef.fromJson(json["rem_min"])
+        )
     }
 
     public func toJson() -> [String: Any] {
         return [
+            "midpoint_h": midpointH?.toJson() as Any? ?? NSNull(),
+            "overnight_hr_bpm": overnightHrBpm?.toJson() as Any? ?? NSNull(),
+            "deep_min": deepMin?.toJson() as Any? ?? NSNull(),
+            "rem_min": remMin?.toJson() as Any? ?? NSNull(),
+        ]
+    }
+}
+
+/// Full input to the scorer.
+public struct SleepScoreInput: Sendable {
+    public let tonight: NightRaw
+    /// Prior nights, newest first. Only the two newest are read, for the
+    /// sleep-debt chain; the personal baselines come from ``baselines``.
+    public let priorsNewestFirst: [NightRaw]
+    /// Tonight's sleep midpoint, local hour of day `0..<24`: the value pushed
+    /// as `sleep.midpoint_h`. `nil` when the night has no start and end time,
+    /// which leaves consistency out of the score; never derive it from totals.
+    public let tonightMidpointH: Double?
+    /// The personal baselines as of tonight, from
+    /// ``Synheart/dailySleepBaselines()``. Without them the score stays in its
+    /// cold-start mode.
+    public let baselines: SleepBaselines?
+    public let pipelineVersion: String
+
+    public init(tonight: NightRaw, priorsNewestFirst: [NightRaw] = [],
+                tonightMidpointH: Double? = nil, baselines: SleepBaselines? = nil,
+                pipelineVersion: String = "") {
+        self.tonight = tonight
+        self.priorsNewestFirst = priorsNewestFirst
+        self.tonightMidpointH = tonightMidpointH
+        self.baselines = baselines
+        self.pipelineVersion = pipelineVersion
+    }
+
+    public func toJson() -> [String: Any] {
+        var json: [String: Any] = [
             "tonight": tonight.toJson(),
             "priors_newest_first": priorsNewestFirst.map { $0.toJson() },
+            "tonight_midpoint_h": tonightMidpointH as Any? ?? NSNull(),
             "pipeline_version": pipelineVersion,
         ]
+        if let baselines { json["baselines"] = baselines.toJson() }
+        return json
     }
 
     public func toJsonString() -> String {

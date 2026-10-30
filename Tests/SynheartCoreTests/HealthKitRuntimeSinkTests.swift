@@ -129,7 +129,7 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
     // Push semantics                                                  //
     // ────────────────────────────────────────────────────────────── //
 
-    func testFullSleepPlusOvernightDayPushesAll5Dimensions() async throws {
+    func testFullSleepPlusOvernightDayPushesAll6Dimensions() async throws {
         let reader = FakeReader(
             sleep: [day: SleepNightSummary(totalAsleepMinutes: 420.0, deepMinutes: 90.0, remMinutes: 110.0)],
             overnight: [day: OvernightPhysiologySummary(hrvRmssdMs: 55.0, restingHrBpm: 58.0)]
@@ -137,14 +137,14 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         let (sink, recorder) = makeSink(reader: reader)
         let result = try await sink.backfill(daysBack: 30)
 
-        XCTAssertEqual(result.dimensionsPushed, 5)
+        XCTAssertEqual(result.dimensionsPushed, 6)
         XCTAssertEqual(result.daysIngested, 1)
         XCTAssertEqual(recorder.recomputeCount, 1)
 
         let dims = Dictionary(uniqueKeysWithValues: recorder.pushes.map { ($0.dimension, $0) })
         XCTAssertEqual(Set(dims.keys), [
             "sleep.duration_s", "sleep.deep_min", "sleep.rem_min",
-            "cardiac.overnight_rmssd_ms", "cardiac.resting_hr_bpm",
+            "cardiac.overnight_rmssd_ms", "cardiac.overnight_hr_bpm", "cardiac.resting_hr_bpm",
         ])
         XCTAssertTrue(Set(dims.keys).isSubset(of: DailyMetric.all))
 
@@ -152,7 +152,10 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         XCTAssertEqual(dims["sleep.deep_min"]!.value, 90.0, accuracy: 0.0001)
         XCTAssertEqual(dims["sleep.rem_min"]!.value, 110.0, accuracy: 0.0001)
         XCTAssertEqual(dims["cardiac.overnight_rmssd_ms"]!.value, 55.0, accuracy: 0.0001)
+        // The asleep mean is the night's one HR figure: both baselines get it.
+        XCTAssertEqual(dims["cardiac.overnight_hr_bpm"]!.value, 58.0, accuracy: 0.0001)
         XCTAssertEqual(dims["cardiac.resting_hr_bpm"]!.value, 58.0, accuracy: 0.0001)
+        XCTAssertNil(dims[DailyMetric.sleepMidpointH])
 
         for p in recorder.pushes {
             XCTAssertEqual(p.provider, "apple_health")
@@ -216,12 +219,12 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         let (sink, recorder) = makeSink(reader: reader)
         let result = try await sink.backfill(daysBack: 30)
 
-        XCTAssertEqual(result.dimensionsPushed, 6) // d1=5, d2=1
+        XCTAssertEqual(result.dimensionsPushed, 7) // d1=6, d2=1
         XCTAssertEqual(result.daysIngested, 2)
         XCTAssertEqual(recorder.recomputeCount, 1)
 
         let grouped = Dictionary(grouping: recorder.pushes, by: \.date)
-        XCTAssertEqual(grouped[LocalDay(year: 2026, month: 1, day: 10)]?.count, 5)
+        XCTAssertEqual(grouped[LocalDay(year: 2026, month: 1, day: 10)]?.count, 6)
         XCTAssertEqual(grouped[LocalDay(year: 2026, month: 1, day: 11)]?.count, 1)
     }
 

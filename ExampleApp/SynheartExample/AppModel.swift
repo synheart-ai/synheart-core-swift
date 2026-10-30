@@ -137,6 +137,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var lastSuccess: String?
     @Published private(set) var events: [String] = []
+    @Published private(set) var lastSleepScore: SleepScoreResult?
+    @Published private(set) var lastReadiness: ReadinessScoreResult?
+    /// How the last night's daily values fared, `accepted/attempted`.
+    @Published private(set) var lastNightPushes: String?
+    @Published private(set) var sleepBaselines: SleepBaselines?
+    @Published private(set) var baselineRefs: BaselineRefs?
 
     let symbolDiagnostics = CoreRuntimeBridge.symbolDiagnostics
     let dependencyDiagnostics = CoreRuntimeBridge.dependencyDiagnostics
@@ -1122,5 +1128,128 @@ private extension Date {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
         return formatter.string(from: Date())
+    }
+}
+
+// MARK: - Daily scores
+
+/// Provider the self-reported nights are stored under, kept apart from any
+/// wearable's values in the personal baselines.
+private let selfReportProvider = "self_report"
+
+extension AppModel {
+    /// Re-read both baseline objects from the runtime (C ABI 4.2). A
+    /// reference is null until enough nights hold one.
+    func refreshDailyBaselines() {
+        sleepBaselines = Synheart.dailySleepBaselines()
+        baselineRefs = Synheart.dailyBaselineRefs()
+    }
+
+    /// Score a night the person reports, the way a host runs its nightly loop
+    /// on runtime 0.45+:
+    ///
+    /// 1. read the Sleep baselines — the last refresh built them from the
+    ///    dates before today, so tonight is never in its own baseline;
+    /// 2. score the night with them and its midpoint;
+    /// 3. push the night's daily values, then refresh the reference so
+    ///    tomorrow's night is scored against them.
+    ///
+    /// A self-report has a start and an end, so it has a midpoint. It has no
+    /// stages and no heart rate, so nothing else is pushed: never padded. The
+    /// runtime refuses daily values while no session runs.
+    func logSelfReportedSleep(bedtime: Date, wakeTime: Date) {
+        let answers = SleepQuestionnaireAnswers(bedtime: bedtime, wakeTime: wakeTime)
+        let calendar = Calendar.current
+        let midpointH = Self.midpointHoursLocal(from: bedtime, to: wakeTime, calendar: calendar)
+        // Days since the epoch, the runtime's calendar-date key.
+        let wakeDay = calendar.dateComponents([.year, .month, .day], from: wakeTime)
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let epochDay = Int(utc.date(from: wakeDay)!.timeIntervalSince1970 / 86_400)
+
+        let baselines = Synheart.dailySleepBaselines()
+        let night = NightRaw(
+            wakeCalendarDate: epochDay,
+            detail: .aggregated(
+                sessionStartMs: Int64(bedtime.timeIntervalSince1970 * 1000),
+                sessionEndMs: Int64(wakeTime.timeIntervalSince1970 * 1000),
+                totals: AggregatedTotals(
+                    totalSleepMinutes: answers.totalSleepMinutes,
+                    awakeMinutes: answers.awakeMinutes,
+                    awakenings: answers.awakenings,
+                    timeInBedMinutes: answers.timeInBedMinutes
+                )
+            )
+        )
+        let result = Synheart.computeSleepScore(
+            SleepScoreInput(tonight: night, tonightMidpointH: midpointH, baselines: baselines)
+        )
+        lastSleepScore = result
+
+        var attempted = 0
+        var accepted = 0
+        func push(_ metric: String, _ value: Double) {
+            attempted += 1
+            if Synheart.srmPushWearableDaily(
+                provider: selfReportProvider, metric: metric, date: wakeTime, value: value
+            ) == 0 { accepted += 1 }
+        }
+        if answers.totalSleepMinutes > 0 { push(DailyMetric.sleepDurationS, answers.totalSleepMinutes * 60) }
+        // 0.0 is midnight, a value.
+        push(DailyMetric.sleepMidpointH, midpointH)
+        if accepted > 0 { _ = Synheart.srmRefreshWearableReference() }
+        lastNightPushes = "\(accepted)/\(attempted)"
+        refreshDailyBaselines()
+
+        print(
+            "[example] sleep score \(result?.score.map(String.init) ?? "nil") " +
+                "mode=\(result?.mode.rawValue ?? "nil") pipeline=\(result?.pipelineVersion ?? "nil") " +
+                "midpoint=\(String(format: "%.2f", midpointH)) pushed=\(lastNightPushes ?? "") " +
+                "baselines=\(sleepBaselines.map { String(describing: $0.toJson()) } ?? "nil")"
+        )
+    }
+
+    /// Compute today's Readiness from the last Sleep Score and a Recovery
+    /// Score. Recovery needs overnight HRV, which this example has no source
+    /// for, so the value is entered on screen: a check that the runtime takes
+    /// the input, not a reading. Nothing is attached or stored.
+    func computeReadiness(recoveryScore: Int) {
+        guard let sleep = lastSleepScore, let sleepScore = sleep.score else { return }
+        let refs = Synheart.dailyBaselineRefs()
+        let result = Synheart.computeReadinessScore(
+            ReadinessScoreInput(
+                recoveryScore: recoveryScore,
+                sleepScore: sleepScore,
+                // No overnight HR/HRV here, so no alignment: scores only.
+                alignment: nil,
+                sleepColdStart: sleep.mode == .coldStart,
+                baselineMaturity: refs?.maturity ?? 0
+            )
+        )
+        lastReadiness = result
+        print(
+            "[example] readiness \(result.map { String($0.score) } ?? "nil") " +
+                "band=\(result?.band.wire ?? "nil") model=\(result?.modelVersion ?? "nil") " +
+                "explanation=\(result?.explanation.map(\.rawValue) ?? [])"
+        )
+    }
+
+    /// One baseline as `value @ confidence`, or `—` while it is withheld.
+    static func describeRef(_ r: DailyRef?) -> String {
+        guard let r else { return "—" }
+        return String(format: "%.1f @ %.2f", r.value, r.confidence)
+    }
+
+    /// The Recovery and Readiness baselines in one line, or why they are absent.
+    var baselineRefsSummary: String {
+        guard let r = baselineRefs else { return "— (needs RMSSD + resting HR)" }
+        return String(format: "hrv %.1f, rhr %.1f, maturity %.2f", r.hrvRmssdMs, r.restingHrBpm, r.maturity)
+    }
+
+    /// Local-time midpoint of a night in hours since midnight, `[0, 24)`.
+    private static func midpointHoursLocal(from: Date, to: Date, calendar: Calendar) -> Double {
+        let mid = Date(timeIntervalSince1970: (from.timeIntervalSince1970 + to.timeIntervalSince1970) / 2)
+        let c = calendar.dateComponents([.hour, .minute, .second], from: mid)
+        return Double(c.hour ?? 0) + Double(c.minute ?? 0) / 60 + Double(c.second ?? 0) / 3600
     }
 }

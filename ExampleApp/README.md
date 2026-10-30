@@ -8,7 +8,8 @@ important runtime boundaries visible:
 - real behavior events, motion samples, HSI deliveries, and data-bearing HSI;
 - independent collector startup failures;
 - native upload queue state, device registration, attestation, and flush errors;
-- runtime ABI, storage, session catalog, and orphan-session diagnostics.
+- runtime ABI, storage, session catalog, and orphan-session diagnostics;
+- the daily scores against the personal baselines the runtime keeps.
 
 ## Requirements
 
@@ -29,11 +30,11 @@ before opening it in Xcode.
 ### Native-runtime mode (recommended)
 
 Use this mode to initialize the SDK, collect data, generate HSI, and exercise
-local storage or cloud ingestion. From the repository root:
+local storage or cloud ingestion. The SDK needs runtime 0.45.0 or newer:
 
 ```bash
-synheart runtime install --from /path/to/runtime-dist --project ExampleApp
 cd ExampleApp
+synheart install runtime --version 0.45.0
 pod install
 ```
 
@@ -119,6 +120,27 @@ signals such as HRV require a real supported sensor source.
 To test phone ingestion, enable **Phone context**, start a session on a physical
 iPhone, move the phone, and verify **Motion samples** increases. The production
 example never generates random phone events.
+
+## Daily scores test
+
+Needs runtime 0.45.0 and no cloud account. The **Daily scores** section at the
+top of **Data** scores a night the person reports, the way a host runs its
+nightly loop: it reads `Synheart.dailySleepBaselines()`, scores the night with
+them and its midpoint, then pushes the night's duration and midpoint with
+`srmPushWearableDaily` and refreshes the reference.
+
+1. Initialize the SDK, enable **Biosignals**, and start a session. The runtime
+   refuses daily values while no session runs.
+2. On **Data**, set bed and wake times and tap **Log last night**. The first
+   night scores in `cold_start` mode with `sleep_score/3.0.0`, and **Night
+   values stored** reads `2/2`.
+3. The baselines read `—` until a night from an earlier day is stored: the
+   reference is built from the dates before today, so a night is never in its
+   own baseline. Log again tomorrow to see the midpoint baseline.
+4. Enter a Recovery Score and tap **Compute readiness**. Recovery needs
+   overnight HRV, which this example has no source for, so the value is
+   entered by hand; the result is not stored. `Recovery refs` stays withheld
+   for the same reason.
 
 ## Cloud upload test
 

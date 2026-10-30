@@ -121,41 +121,85 @@ final class ScoringModelsTests: XCTestCase {
 
     // MARK: - ReadinessScore
 
-    func testReadinessBandFromWireFallsBackToRest() {
-        XCTAssertEqual(ReadinessBand.fromWire("push"), .push)
-        XCTAssertEqual(ReadinessBand.fromWire("garbage"), .rest)
+    func testReadinessBandReadsTheEngineNamesAndFallsBackToTheScore() {
+        XCTAssertEqual(ReadinessBand.fromWire("low", score: 90), .rest)
+        XCTAssertEqual(ReadinessBand.fromWire("reduced", score: 0), .light)
+        XCTAssertEqual(ReadinessBand.fromWire("high", score: 0), .push)
+        // Unknown or missing: the band the score falls in, never a default.
+        XCTAssertEqual(ReadinessBand.fromWire("garbage", score: 39), .rest)
+        XCTAssertEqual(ReadinessBand.fromWire(nil, score: 40), .light)
+        XCTAssertEqual(ReadinessBand.fromWire(nil, score: 79), .normal)
+        XCTAssertEqual(ReadinessBand.fromWire(nil, score: 80), .push)
         XCTAssertEqual(ReadinessBand.light.label, "Light")
+        XCTAssertEqual(ReadinessBand.push.wire, "high")
     }
 
-    func testReadinessScoreInputFromRecoveryBuildsMinimalInput() {
-        let input = ReadinessScoreInput.fromRecovery(72)
-        let json = input.toJson()
+    func testReadinessScoreInputEncodesTheEngineShape() {
+        let json = ReadinessScoreInput(recoveryScore: 72, sleepScore: 68).toJson()
+        XCTAssertEqual(Set(json.keys), [
+            "recovery_score", "sleep_score", "alignment",
+            "recovery_cold_start", "sleep_cold_start", "baseline_maturity",
+        ])
         XCTAssertEqual(json["recovery_score"] as? Int, 72)
-        XCTAssertTrue(json["acute_workload"] is NSNull)
-        XCTAssertTrue(json["fatigue"] is NSNull)
+        XCTAssertEqual(json["sleep_score"] as? Int, 68)
+        XCTAssertTrue(json["alignment"] is NSNull)
+        XCTAssertEqual(json["recovery_cold_start"] as? Bool, false)
+        XCTAssertEqual(json["baseline_maturity"] as? Double, 0)
+    }
+
+    func testReadinessScoreInputClampsScoresAndMaturity() {
+        let json = ReadinessScoreInput(
+            recoveryScore: 140, sleepScore: -5,
+            alignment: OvernightAlignment(hrSleepBpm: 58, hrBaseBpm: 55, rmssdSleepMs: 42, rmssdBaseMs: 45),
+            baselineMaturity: 1.7
+        ).toJson()
+        XCTAssertEqual(json["recovery_score"] as? Int, 100)
+        XCTAssertEqual(json["sleep_score"] as? Int, 0)
+        XCTAssertEqual(json["baseline_maturity"] as? Double, 1)
+        let alignment = json["alignment"] as? [String: Any]
+        XCTAssertEqual(alignment?["hr_sleep_bpm"] as? Double, 58)
+        XCTAssertEqual(alignment?["rmssd_base_ms"] as? Double, 45)
+        XCTAssertEqual(
+            ReadinessScoreInput(recoveryScore: 50, sleepScore: 50, baselineMaturity: .nan)
+                .toJson()["baseline_maturity"] as? Double,
+            0
+        )
     }
 
     func testReadinessScoreResultRoundTrips() throws {
         let s = """
         {
-          "score": 78, "band": "normal", "recovery_anchor": 70,
+          "score": 74, "band": "normal", "recovery_anchor": 72, "sleep_anchor": 68,
           "confidence": 0.85,
-          "components": {"recovery": 70.0, "acute_load": 1.0, "fatigue": -3.0},
-          "explanation": ["acute_load_optimal"],
-          "model_id": "readiness_v1",
-          "model_version": "1.0.0",
-          "pipeline_version": "p1"
+          "components": {"recovery": 72.0, "sleep": 68.0, "baseline_alignment": 82.67,
+                         "hr_alignment": 85.0, "hrv_alignment": null},
+          "explanation": ["strong_recovery", "hrv_below_baseline", "not_a_factor"],
+          "model_id": "readiness",
+          "model_version": "3.0.0",
+          "pipeline_version": "readiness_score/3.0.0"
         }
         """
         let r = try ReadinessScoreResult.fromJsonString(s)
-        XCTAssertEqual(r.score, 78)
+        XCTAssertEqual(r.score, 74)
         XCTAssertEqual(r.band, .normal)
-        XCTAssertEqual(r.recoveryAnchor, 70)
-        XCTAssertEqual(r.confidence, 0.85, accuracy: 0.0001)
-        XCTAssertEqual(r.components.recovery, 70, accuracy: 0.0001)
-        XCTAssertEqual(r.components.acuteLoad, 1.0)
-        XCTAssertNil(r.components.history)
-        XCTAssertEqual(r.explanation, [.acuteLoadOptimal])
-        XCTAssertEqual(r.modelId, "readiness_v1")
+        XCTAssertEqual(r.recoveryAnchor, 72)
+        XCTAssertEqual(r.sleepAnchor, 68)
+        XCTAssertEqual(r.components.sleep, 68, accuracy: 0.0001)
+        XCTAssertEqual(r.components.baselineAlignment ?? 0, 82.67, accuracy: 0.0001)
+        XCTAssertNil(r.components.hrvAlignment)
+        XCTAssertEqual(r.explanation, [.strongRecovery, .hrvBelowBaseline])
+        XCTAssertEqual(r.modelVersion, "3.0.0")
+
+        let again = ReadinessScoreResult.fromJson(r.toJson())
+        XCTAssertEqual(again.band, r.band)
+        XCTAssertEqual(again.sleepAnchor, 68)
+        XCTAssertEqual(again.components, r.components)
+        XCTAssertEqual(again.explanation, r.explanation)
+        XCTAssertEqual(again.pipelineVersion, "readiness_score/3.0.0")
+    }
+
+    func testReadinessScoreResultWithoutABandTakesTheScoresBand() {
+        let r = ReadinessScoreResult.fromJson(["score": 35])
+        XCTAssertEqual(r.band, .rest)
     }
 }

@@ -2310,6 +2310,31 @@ public class Synheart {
         return shared.coreRuntime?.bridge?.baselineRequirementsJson(nowMs: ts)
     }
 
+    /// The Recovery Score's personal baselines: overnight RMSSD and resting HR
+    /// with the runtime's confidence in each. Read it after
+    /// ``srmRefreshWearableReference(asOf:timeZone:)``. `nil` until both have a
+    /// reference; pass `nil` on ``RecoveryScoreInput/baselines`` then. Its
+    /// ``BaselineRefs/maturity`` is the Readiness input's `baselineMaturity`.
+    public static func dailyBaselineRefs() -> BaselineRefs? {
+        guard let json = shared.coreRuntime?.bridge?.dailyBaselineRefsJson(),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return BaselineRefs.fromJson(obj)
+    }
+
+    /// The Sleep Score's personal baselines (midpoint, overnight HR, deep and
+    /// REM minutes). Read it after
+    /// ``srmRefreshWearableReference(asOf:timeZone:)`` and pass it on
+    /// ``SleepScoreInput/baselines``; without it the score stays in cold start.
+    public static func dailySleepBaselines() -> SleepBaselines? {
+        guard let json = shared.coreRuntime?.bridge?.dailySleepBaselinesJson(),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return SleepBaselines.fromJson(obj)
+    }
+
     /// What the baselines know about the person, as JSON.
     public static func baselineProfileJson() -> String? {
         shared.coreRuntime?.bridge?.baselineProfileJson()

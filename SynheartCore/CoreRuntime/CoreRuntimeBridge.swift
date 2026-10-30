@@ -392,6 +392,9 @@ public final class CoreRuntimeBridge {
     private static let _baselineRhythm: GetWearRefFn?       = sym("synheart_core_baseline_rhythm_json")
     private static let _baselineRequirements: TsJsonFn?     = sym("synheart_core_baseline_requirements_json")
     private static let _getWearRef:    GetWearRefFn?        = sym("synheart_core_wearable_reference_json")
+    // C ABI 4.2: the daily scores' baselines, read after the reference refresh.
+    private static let _dailyBaselineRefs: GetWearRefFn?    = sym("synheart_core_daily_baseline_refs_json")
+    private static let _dailySleepBaselines: GetWearRefFn?  = sym("synheart_core_daily_sleep_baselines_json")
 
     // Priority + Resilience (handle-less, read by per-module utilities)
     internal static let _prioritySetProvider:       PrioritySetProviderFn?       = sym("synheart_core_priority_set_provider")
@@ -783,6 +786,8 @@ public final class CoreRuntimeBridge {
             "srmRefreshWearableReference": Self._refreshWearRef != nil,
             "srmSetDayType": Self._setDayType != nil,
             "exportBaselineSnapshot": Self._exportBaseline != nil,
+            "dailyBaselineRefsJson": Self._dailyBaselineRefs != nil,
+            "dailySleepBaselinesJson": Self._dailySleepBaselines != nil,
             "exportSessionState": Self._exportSessionState != nil,
             "loadSessionState": Self._loadSessionState != nil,
             "configId": Self._configId != nil,
@@ -1320,6 +1325,21 @@ public final class CoreRuntimeBridge {
     /// What the baselines know about the person, as JSON.
     public func baselineProfileJson() -> String? {
         consumeCString(Self._baselineProfile?(handle))
+    }
+
+    /// The Recovery Score's `baselines` object as JSON (`hrv_rmssd_ms`,
+    /// `hrv_confidence`, `resting_hr_bpm`, `rhr_confidence`), or `nil` until
+    /// overnight RMSSD and resting HR both have a reference, or when the
+    /// runtime predates C ABI 4.2.
+    public func dailyBaselineRefsJson() -> String? {
+        consumeCString(Self._dailyBaselineRefs?(handle))
+    }
+
+    /// The Sleep Score's `baselines` object as JSON (`midpoint_h`,
+    /// `overnight_hr_bpm`, `deep_min`, `rem_min`, each `{value, confidence}` or
+    /// null), or `nil` without a pipeline or before C ABI 4.2.
+    public func dailySleepBaselinesJson() -> String? {
+        consumeCString(Self._dailySleepBaselines?(handle))
     }
 
     /// The person's daily rhythm as the baselines learned it, as JSON.
