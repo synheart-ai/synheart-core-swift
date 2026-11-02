@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-02
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.0 does.
+
 ### Changed
 
 - **Install hints now recommend runtime 0.46.0.** It reports each output no
@@ -644,7 +648,8 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.4.1...v0.5.0
