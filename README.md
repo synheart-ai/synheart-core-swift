@@ -147,7 +147,8 @@ dependencies: [
 
 The SDK requires runtime ABI 4.2 or a newer 4.x, which is runtime 0.45.0 or
 newer (`RuntimeCompat.requiredAbi`); older runtimes are refused at
-initialization. Install it with `synheart install runtime --version 0.45.0`.
+initialization. Install the recommended release with
+`synheart install runtime --version 0.46.0`.
 
 The SDK validates the linked native runtime ABI during initialization. If a
 required symbol is missing, initialization throws
@@ -415,7 +416,7 @@ personalization, Syni, and independent instances—is documented in
 | `currentState` | `String?` | Latest HSI JSON frame |
 | `currentHSIState` | `HSIState?` | Latest typed HSI state |
 | `isHsiDeliveryBuffered` | `Bool` | HSI is polled from the runtime's ring (runtime ≥ 0.31.1) instead of pushed through a callback |
-| `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `requiredAbi` (4.2, within `RuntimeCompat.abiRange` 4.x) and its version against `writtenAgainst` (0.45.0) and `minimum` (0.45.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
+| `runtimeCompatibility` | `RuntimeCompatResult?` | Runtime gate result: the linked runtime's ABI against `requiredAbi` (4.2, within `RuntimeCompat.abiRange` 4.x) and its version against `writtenAgainst` (0.46.0) and `minimum` (0.45.0); `initialize` throws `SynheartRuntimeError` (kind `.incompatible`, with `installCommand`) when it is not acceptable |
 | `lastNativeError` | `SynheartNativeError?` | Structured error from the most recent runtime call (`code`, `message`, `retryable`, `ownerKind`, `recoveryKind`, `recoveryCall`, `reason`, `argument`, `hint`, `op`, `errorId`, `report`), or `nil` when it succeeded |
 | `droppedHsiFrames` | `UInt64` | Frames the ring evicted since buffered delivery started |
 | `currentConsent` | `ConsentSnapshot?` | Current consent state |

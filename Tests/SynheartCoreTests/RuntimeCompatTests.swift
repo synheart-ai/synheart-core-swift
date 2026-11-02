@@ -22,6 +22,12 @@ final class RuntimeCompatTests: XCTestCase {
         XCTAssertTrue(r.isAcceptable)
     }
 
+    func testCheckAcceptsMinimumAsOlder() {
+        let r = RuntimeCompat.check(buildInfo: ["core_runtime": RuntimeCompat.minimum])
+        XCTAssertEqual(r.status, .older)
+        XCTAssertTrue(r.isAcceptable)
+    }
+
     func testCheckRefusesTooOldBelowMinimum() {
         // 0.44.0 is the last ABI 4.1 release.
         for v in ["0.42.1", "0.43.0", "0.44.0"] {
@@ -66,7 +72,7 @@ final class RuntimeCompatTests: XCTestCase {
     }
 
     func testMalformedAbiFallsBackToVersionChecks() {
-        let r = RuntimeCompat.check(buildInfo: ["core_runtime": "0.45.0", "abi": "two"])
+        let r = RuntimeCompat.check(buildInfo: ["core_runtime": RuntimeCompat.writtenAgainst, "abi": "two"])
         XCTAssertEqual(r.status, .ok)
         XCTAssertNil(r.abi)
     }
