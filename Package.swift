@@ -26,7 +26,7 @@ let package = Package(
             targets: ["SynheartCore"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/synheart-ai/synheart-wear-swift", from: "0.4.1"),
+        .package(url: "https://github.com/synheart-ai/synheart-wear-swift", from: "0.4.3"),
         // synheart-emotion-swift and synheart-focus-swift removed —
         // emotion and focus are now computed by the native runtime
         // and accessed via RuntimeBridge.
