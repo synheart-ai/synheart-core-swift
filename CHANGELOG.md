@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Requires `synheart-wear-swift` 0.4.3 or newer.
+
+### Fixed
+- **HealthKit backfill no longer stores SDNN as an RMSSD baseline.** The
+  overnight HRV it read from HealthKit is SDNN but was pushed as
+  `cardiac.overnight_rmssd_ms`. It now goes to `cardiac.overnight_sdnn_ms`.
+
 ## [0.7.1] - 2026-11-02
 
 Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.0 does.
