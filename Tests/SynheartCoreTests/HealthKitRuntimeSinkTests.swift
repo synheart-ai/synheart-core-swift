@@ -202,6 +202,18 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         XCTAssertEqual(Set(recorder.pushes.map(\.dimension)), ["cardiac.overnight_rmssd_ms"])
     }
 
+    func testHealthKitSdnnFeedsTheSdnnBaselineNotRmssd() async throws {
+        let reader = FakeReader(
+            overnight: [day: OvernightPhysiologySummary(hrvRmssdMs: nil, restingHrBpm: nil, hrvSdnnMs: 48.0)]
+        )
+        let (sink, recorder) = makeSink(reader: reader)
+        let result = try await sink.backfill(daysBack: 30)
+
+        XCTAssertEqual(result.dimensionsPushed, 1)
+        XCTAssertEqual(result.daysIngested, 1)
+        XCTAssertEqual(Set(recorder.pushes.map(\.dimension)), ["cardiac.overnight_sdnn_ms"])
+    }
+
     func testMultipleDaysAreAggregatedIndependently() async throws {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = zone
         let d1 = cal.date(from: DateComponents(year: 2026, month: 1, day: 10))!

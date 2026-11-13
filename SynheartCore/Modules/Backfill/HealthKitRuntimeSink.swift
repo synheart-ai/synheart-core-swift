@@ -221,7 +221,12 @@ public final class HealthKitRuntimeSink: @unchecked Sendable {
             }
 
             if let o = overnight[day] {
+                // RMSSD and SDNN feed different baselines. HealthKit records
+                // SDNN only, so on iOS the RMSSD field is nil.
                 if let hrv = o.hrvRmssdMs, hrv > 0, push(DailyMetric.overnightRmssdMs, hrv) {
+                    dayDidPush = true
+                }
+                if let sdnn = o.hrvSdnnMs, sdnn > 0, push(DailyMetric.overnightSdnnMs, sdnn) {
                     dayDidPush = true
                 }
                 // The reader's heart rate is the mean while asleep, the
