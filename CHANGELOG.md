@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-13
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.1 does.
+
 ### Changed
 - Requires `synheart-wear-swift` 0.4.3 or newer.
 
@@ -656,7 +660,8 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.5.0...v0.6.0
