@@ -229,13 +229,18 @@ public final class HealthKitRuntimeSink: @unchecked Sendable {
                 if let sdnn = o.hrvSdnnMs, sdnn > 0, push(DailyMetric.overnightSdnnMs, sdnn) {
                     dayDidPush = true
                 }
-                // The reader's heart rate is the mean while asleep, the
-                // night's only HR figure: it is the Sleep Score's HR baseline
-                // and also stands in for resting HR, so Recovery and
-                // Readiness keep a resting-HR baseline.
-                if let hr = o.restingHrBpm, hr > 0 {
-                    if push(DailyMetric.overnightHrBpm, hr) { dayDidPush = true }
-                    if push(DailyMetric.restingHrBpm, hr) { dayDidPush = true }
+                // Mean HR asleep feeds the Sleep Score's overnight-HR baseline.
+                let asleepHr = o.overnightHrBpm.flatMap { $0 > 0 ? $0 : nil }
+                if let hr = asleepHr, push(DailyMetric.overnightHrBpm, hr) {
+                    dayDidPush = true
+                }
+                // Resting HR is HealthKit's resting-heart-rate sample. Without
+                // one, the asleep mean stands in so Recovery and Readiness
+                // keep a resting-HR baseline (the runtime's rule for a source
+                // with one overnight figure).
+                let restingHr = o.restingHrBpm.flatMap { $0 > 0 ? $0 : nil } ?? asleepHr
+                if let hr = restingHr, push(DailyMetric.restingHrBpm, hr) {
+                    dayDidPush = true
                 }
             }
 
