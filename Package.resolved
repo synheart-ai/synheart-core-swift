@@ -212,8 +212,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/synheart-ai/synheart-wear-swift",
       "state" : {
-        "revision" : "b62faddffb095b7ce74c8db84be6a263c3f1dbae",
-        "version" : "0.4.3"
+        "revision" : "e66fbe842875621009197668185dd98918559e4b",
+        "version" : "0.4.4"
       }
     }
   ],

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-17
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.2 does.
+
+### Fixed
+- **HealthKit backfill pushes the real resting heart rate.** It pushed the
+  mean heart rate asleep as both `cardiac.overnight_hr_bpm` and
+  `cardiac.resting_hr_bpm`. Resting HR now comes from HealthKit's
+  `.restingHeartRate`; the asleep mean is pushed as overnight HR, and stands
+  in for resting HR only on a day without a resting sample.
+
+### Changed
+- Requires `synheart-wear-swift` 0.4.4 or newer, which reads the resting-HR
+  sample. Request read access to `.restingHeartRate` before the backfill.
+
 ## [0.7.2] - 2026-11-13
 
 Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.1 does.
@@ -660,7 +675,8 @@ a Swift surface.
 ### Distribution
 - Swift Package Manager — products: `SynheartCore`.
 
-[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/synheart-ai/synheart-core-swift/compare/v0.6.0...v0.7.0

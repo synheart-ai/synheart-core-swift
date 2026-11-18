@@ -1,6 +1,6 @@
 # Synheart Core SDK — Swift
 
-[![Version](https://img.shields.io/badge/version-0.7.2-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
+[![Version](https://img.shields.io/badge/version-0.7.3-blue.svg)](https://github.com/synheart-ai/synheart-core-swift)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-FA7343.svg)](https://swift.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -76,7 +76,7 @@ These ship in the same target and are wired through the runtime, but only become
 | **Baselines** | Reactive snapshot of the user's wearable-baseline state — `AnyPublisher<BaselinesSnapshot, Never>` with `latestSleepScore` / `latestRecoveryScore` / `latestReadinessScore` / `reference` / 7-night recent-scores ring. | `Baselines.shared` |
 | **Breathing** | 4-pillar breathing-compliance detector. RR samples from `pushRr` feed it automatically; module configures target BPM / population / window. | `BreathingModule(bridge:)` |
 | **Syni** | Consent-gated facade around the [`SyniSwift`](https://github.com/synheart-ai/syni-swift) on-device agent SDK. Wraps `SyniAgent` install lifecycle + chat with a `consent.syni` check. | `SyniModule(consent:)` |
-| **HealthKit backfill** | Cold-start SRM seeding from HealthKit sleep + overnight HR/HRV history. Pushes `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` / `cardiac.overnight_rmssd_ms` / `cardiac.resting_hr_bpm` under each local wake date, provider `apple_health`. | `HealthKitRuntimeSink(reader:, bridge:)` |
+| **HealthKit backfill** | Cold-start SRM seeding from HealthKit sleep + overnight HR/HRV history. Pushes `sleep.duration_s` / `sleep.deep_min` / `sleep.rem_min` / `cardiac.overnight_sdnn_ms` / `cardiac.overnight_hr_bpm` / `cardiac.resting_hr_bpm` under each local wake date, provider `apple_health`. Resting HR is HealthKit's resting-heart-rate sample, or the mean HR asleep on a day without one. | `HealthKitRuntimeSink(reader:, bridge:)` |
 | **Scoring models** | Typed input + result types for the runtime's Sleep / Recovery / Readiness scorers, plus a self-report `SleepQuestionnaireAnswers`. | `Models/{SleepScore,RecoveryScore,ReadinessScore,SleepQuestionnaire}.swift` |
 | **Cloud upload models** | Typed `UploadRequest` / `UploadResponse` / `UploadErrorResponse` for the snapshot-upload protocol. Byte-equivalent JSON with the sibling platform SDKs. | `Modules/Cloud/UploadModels.swift` |
 
@@ -105,6 +105,7 @@ case let .insufficient(reason):
 }
 
 // HealthKit backfill — call on first launch after authorization
+// (read access to sleep, heart rate, resting heart rate and HRV)
 let reader = HealthKitHistoryReader() // from synheart-wear-swift
 let sink = HealthKitRuntimeSink(reader: reader, bridge: coreRuntime)
 let result = try await sink.backfill(daysBack: 365)
@@ -141,7 +142,7 @@ Add Synheart Core SDK to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.7.2")
+    .package(url: "https://github.com/synheart-ai/synheart-core-swift", from: "0.7.3")
 ]
 ```
 

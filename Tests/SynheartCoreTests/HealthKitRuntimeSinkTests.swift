@@ -132,7 +132,7 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
     func testFullSleepPlusOvernightDayPushesAll6Dimensions() async throws {
         let reader = FakeReader(
             sleep: [day: SleepNightSummary(totalAsleepMinutes: 420.0, deepMinutes: 90.0, remMinutes: 110.0)],
-            overnight: [day: OvernightPhysiologySummary(hrvRmssdMs: 55.0, restingHrBpm: 58.0)]
+            overnight: [day: OvernightPhysiologySummary(hrvRmssdMs: 55.0, restingHrBpm: 58.0, overnightHrBpm: 54.0)]
         )
         let (sink, recorder) = makeSink(reader: reader)
         let result = try await sink.backfill(daysBack: 30)
@@ -152,8 +152,8 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         XCTAssertEqual(dims["sleep.deep_min"]!.value, 90.0, accuracy: 0.0001)
         XCTAssertEqual(dims["sleep.rem_min"]!.value, 110.0, accuracy: 0.0001)
         XCTAssertEqual(dims["cardiac.overnight_rmssd_ms"]!.value, 55.0, accuracy: 0.0001)
-        // The asleep mean is the night's one HR figure: both baselines get it.
-        XCTAssertEqual(dims["cardiac.overnight_hr_bpm"]!.value, 58.0, accuracy: 0.0001)
+        // Mean HR asleep and the resting-HR sample go to separate baselines.
+        XCTAssertEqual(dims["cardiac.overnight_hr_bpm"]!.value, 54.0, accuracy: 0.0001)
         XCTAssertEqual(dims["cardiac.resting_hr_bpm"]!.value, 58.0, accuracy: 0.0001)
         XCTAssertNil(dims[DailyMetric.sleepMidpointH])
 
@@ -214,6 +214,30 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
         XCTAssertEqual(Set(recorder.pushes.map(\.dimension)), ["cardiac.overnight_sdnn_ms"])
     }
 
+    func testWithoutARestingSampleTheAsleepMeanStandsIn() async throws {
+        let reader = FakeReader(
+            overnight: [day: OvernightPhysiologySummary(hrvRmssdMs: nil, restingHrBpm: nil, overnightHrBpm: 55.0)]
+        )
+        let (sink, recorder) = makeSink(reader: reader)
+        _ = try await sink.backfill(daysBack: 30)
+
+        let dims = Dictionary(uniqueKeysWithValues: recorder.pushes.map { ($0.dimension, $0.value) })
+        XCTAssertEqual(dims["cardiac.overnight_hr_bpm"], 55.0)
+        XCTAssertEqual(dims["cardiac.resting_hr_bpm"], 55.0)
+    }
+
+    func testARestingSampleWithoutSleepPushesRestingHrOnly() async throws {
+        let reader = FakeReader(
+            overnight: [day: OvernightPhysiologySummary(hrvRmssdMs: nil, restingHrBpm: 61.0)]
+        )
+        let (sink, recorder) = makeSink(reader: reader)
+        let result = try await sink.backfill(daysBack: 30)
+
+        XCTAssertEqual(result.dimensionsPushed, 1)
+        XCTAssertEqual(recorder.pushes.map(\.dimension), ["cardiac.resting_hr_bpm"])
+        XCTAssertEqual(recorder.pushes.first?.value, 61.0)
+    }
+
     func testMultipleDaysAreAggregatedIndependently() async throws {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = zone
         let d1 = cal.date(from: DateComponents(year: 2026, month: 1, day: 10))!
@@ -225,7 +249,7 @@ final class HealthKitRuntimeSinkTests: XCTestCase {
                 d2: SleepNightSummary(totalAsleepMinutes: 360.0, deepMinutes: nil, remMinutes: nil),
             ],
             overnight: [
-                d1: OvernightPhysiologySummary(hrvRmssdMs: 52.0, restingHrBpm: 60.0),
+                d1: OvernightPhysiologySummary(hrvRmssdMs: 52.0, restingHrBpm: 60.0, overnightHrBpm: 56.0),
             ]
         )
         let (sink, recorder) = makeSink(reader: reader)
