@@ -17,6 +17,10 @@ env:
 # The package and the example app build in parallel jobs. Compiled
 # dependencies are cached, keyed on the toolchain and the resolved versions, so
 # a new Xcode or a dependency bump starts clean.
+# Read-only token: these jobs only check out, build and test.
+permissions:
+  contents: read
+
 jobs:
   build-test:
     name: SwiftPM build & test
