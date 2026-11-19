@@ -6,41 +6,56 @@ on:
   pull_request:
     branches: [main, dev]
 
+# A new push to a PR cancels the run it replaces.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+# The package and the example app build in parallel jobs. Compiled
+# dependencies are cached, keyed on the toolchain and the resolved versions, so
+# a new Xcode or a dependency bump starts clean.
 jobs:
   build-test:
-    name: SwiftPM & Source-only Example (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest]
+    name: SwiftPM build & test
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Show toolchain
+        id: toolchain
         run: |
           swift --version
           xcodebuild -version
-
-      - name: Resolve dependencies
-        run: swift package resolve
+          echo "xcode=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
 
       - name: Check source package artifacts
         run: bash scripts/check-source-package.sh
 
-      - name: Build
-        run: swift build -v
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('Package.resolved') }}
 
-      - name: Test
+      - name: Build and test
+        run: swift test
+
+  example:
+    name: Source-only iOS example
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        id: toolchain
         run: |
-          if [ -d "Tests" ]; then
-            swift test -v
-          else
-            echo "No Tests directory found, skipping"
-          fi
+          xcodebuild -version
+          echo "xcode=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
 
       - name: Prepare source-only iOS example app
         run: |
@@ -52,12 +67,19 @@ jobs:
           fi
           pod deintegrate ExampleApp/SynheartExample.xcodeproj
 
+      - name: Cache Xcode package builds
+        uses: actions/cache@v4
+        with:
+          path: .derived
+          key: xcode-${{ runner.os }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('Package.resolved', 'ExampleApp/**/Package.resolved') }}
+
       - name: Build source-only iOS example app
         run: |
           xcodebuild -quiet \
             -project ExampleApp/SynheartExample.xcodeproj \
             -scheme SynheartExample \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .derived \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=YES \
             IPHONEOS_DEPLOYMENT_TARGET=16.0 \

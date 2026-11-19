@@ -19,8 +19,10 @@ on:
 permissions:
   contents: write
 
+# The optimised build and the tests run in parallel, not one after the other.
 jobs:
-  validate:
+  build-release:
+    name: Release build
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,11 +30,29 @@ jobs:
         run: bash scripts/check-source-package.sh
       - name: Build
         run: swift build -c release
+
+  test:
+    name: Test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        id: toolchain
+        run: |
+          xcodebuild -version
+          echo "xcode=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+      - name: Restore SwiftPM build
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('Package.resolved') }}
       - name: Test
         run: swift test
 
   release:
-    needs: validate
+    needs: [build-release, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
