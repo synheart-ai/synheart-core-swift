@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-19
+
+Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.3 does.
+
+### Security
+- **Requires `synheart-wear-swift` 0.4.5**, which opens vendor sign-in pages
+  (Oura, Fitbit, WHOOP, Garmin) only over `https` and refuses any other
+  authorization URL the backend returns.
+
 ## [0.7.3] - 2026-11-17
 
 Requires runtime 0.45.0 or newer (C ABI 4.2), as 0.7.2 does.
