@@ -26,7 +26,7 @@ jobs:
     name: SwiftPM build & test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Show toolchain
         id: toolchain
@@ -39,7 +39,7 @@ jobs:
         run: bash scripts/check-source-package.sh
 
       - name: Cache SwiftPM build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             .build
@@ -53,7 +53,7 @@ jobs:
     name: Source-only iOS example
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Show toolchain
         id: toolchain
@@ -72,7 +72,7 @@ jobs:
           pod deintegrate ExampleApp/SynheartExample.xcodeproj
 
       - name: Cache Xcode package builds
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .derived
           key: xcode-${{ runner.os }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('Package.resolved', 'ExampleApp/**/Package.resolved') }}
@@ -94,7 +94,7 @@ jobs:
     name: Lint
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install SwiftLint
         run: brew install swiftlint
       - name: SwiftLint

@@ -185,8 +185,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/synheart-ai/synheart-auth-swift",
       "state" : {
-        "revision" : "bb840976d250d679d07fcc399474235380bcd9ba",
-        "version" : "0.1.0"
+        "revision" : "d20621b9bd78169bbd3af3e59d985fabca5fedef",
+        "version" : "0.1.3"
       }
     },
     {
@@ -194,8 +194,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/synheart-ai/synheart-behavior-swift",
       "state" : {
-        "revision" : "7440292e9278af74270c451e25045ed6ac719f1f",
-        "version" : "0.4.0"
+        "revision" : "fb451e44c0058bb84717f98c1c0cc90a40cad03e",
+        "version" : "0.5.0"
       }
     },
     {
@@ -203,8 +203,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/synheart-ai/synheart-session-swift",
       "state" : {
-        "revision" : "e4e8017444754ff72c432d213a33ba9772475120",
-        "version" : "0.2.1"
+        "revision" : "b67c72fecb337c98f602b8bbc3dc0e823a74e3a6",
+        "version" : "0.3.0"
       }
     },
     {
